@@ -12,8 +12,7 @@ El objetivo de este trabajo práctico es diseñar e implementar un **sistema dis
 
 El sistema trabaja sobre el dataset público de IBM de transacciones financieras para detección de lavado de activos anti-money laundering (AML), disponible en Kaggle. El dataset consta de dos archivos principales:
 
-### Transacciones (`LI-Small_Trans.csv`)
-
+### Transacciones
 Cada fila representa una transacción entre dos cuentas bancarias. Los campos relevantes son:
 
 | Campo | Descripción |
@@ -27,12 +26,10 @@ Cada fila representa una transacción entre dos cuentas bancarias. Los campos re
 | `Receiving Currency` | Moneda en que se recibe el monto |
 | `Amount Paid` | Monto pagado por la cuenta de origen |
 | `Payment Currency` | Moneda en que se realiza el pago |
-| `Payment Format` | Formato del pago: `Wire`, `ACH`, `Cheque`, `Cash`, `Bitcoin`, etc. |
+| `Payment Format` | Formato del pago: `Wire`, `ACH`, `Cheque`, `Bitcoin`, etc. |
 | `Is Laundering` | Indicador binario (0/1) de si la transacción es fraudulenta |
 
-El dataset abarca transacciones en el período **01/09/2022 – 17/09/2022** en múltiples monedas. Para las queries que requieren trabajar en dólares, se aplica una tabla de conversión fija por divisa.
-
-### Cuentas (`LI-Small_accounts.csv`)
+### Cuentas
 
 Contiene información sobre las entidades bancarias y sus cuentas. Los campos son:
 
@@ -42,7 +39,7 @@ Contiene información sobre las entidades bancarias y sus cuentas. Los campos so
 | `Bank ID` | Identificador numérico del banco |
 | `Account Number` | Número de cuenta |
 | `Entity ID` | Identificador de la entidad propietaria |
-| `Entity Name` | Nombre de la entidad (corporación, partnership, etc.) |
+| `Entity Name` | Nombre de la entidad |
 
 ## Queries a resolver
 
@@ -66,7 +63,7 @@ Para cada banco de origen, obtener el **nombre del banco, la cuenta de origen y 
 
 ### Query 3 — Transacciones anómalas por formato de pago
 
-Obtener la **cuenta de origen, formato de pago y monto** de las transacciones USD en el período **[2022-09-06, 2022-09-15]** cuyo monto sea menor al **1% del promedio** registrado para el mismo formato de pago en el período base **[2022-09-01, 2022-09-05]**.
+Obtener la **cuenta de origen y monto** de las transacciones USD en el período **[2022-09-06, 2022-09-15]** cuyo monto sea menor al **1% del promedio** registrado para el mismo formato de pago en el período **[2022-09-01, 2022-09-05]**.
 
 Las transacciones del período posterior se almacenan mientras se calcula el promedio del período base; una vez disponible, se aplica el filtro sobre las almacenadas.
 
@@ -80,7 +77,7 @@ El patrón **scatter-gather** consiste en que una cuenta de origen distribuye fo
 
 Esta query identifica los pares de cuentas **(origen, destino)** que cumplen dicho patrón con una sola cuenta de separación.
 
-El filtro se aplica sobre transacciones USD del período **[2022-09-01, 2022-09-05]**, considerando únicamente cuentas de origen que hayan transferido a **al menos 5 cuentas destino distintas** en dicho período.
+El filtro se aplica sobre transacciones USD del período **[2022-09-01, 2022-09-05]**, considerando únicamente cuentas de origen que hayan transferido a **al menos 5 cuentas intermedias distintas** en dicho período.
 
 **Campos involucrados**: `From Bank`, `Account`, `To Bank`, `Account.1`, `Payment Currency`, `Timestamp`
 
