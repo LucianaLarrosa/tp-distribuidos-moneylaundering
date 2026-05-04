@@ -97,7 +97,9 @@ Contar el total de transacciones del período **[2022-09-01, 2022-09-05]** con f
 
 #### DAG
 
-> _[Diagrama a completar]_
+A continuación se presenta el DAG del sistema, que representa el flujo general de procesamiento de los datos. Desde `Data source` las transacciones se distribuyen por dos ramas principales: la rama `usd`, que filtra por moneda de origen, y la rama `*`, que recibe todas las transacciones independientemente de su moneda. Los datos van pasando por distintos nodos de procesamiento, filtrado, agregación, mapeo, entre otros; cuyos colores en el diagrama indican el tipo de operación que realizan. Cabe destacar que algunos nodos son compartidos entre múltiples queries, como el `DateFilter`, utilizado por Q3, Q4 y Q5. Finalmente, los resultados de cada consulta llegan a su reducer correspondiente.
+
+![DAG](diagramas/DAG.png)
 
 ### Vista de Procesos
 
@@ -135,7 +137,13 @@ Contar el total de transacciones del período **[2022-09-01, 2022-09-05]** con f
 
 #### Diagrama de Robustez
 
-> _[Diagrama a completar]_
+El diagrama que se encuentra a continuación muestra los componentes principales del sistema y sus interacciones. El **Client** envía las transacciones al sistema y recibe los resultados al finalizar el procesamiento. Las transacciones ingresan a través del **Load Balancer**, que las redirige a uno de los nodos **Gateway** disponibles, siendo estos los encargados de distribuirlas hacia el procesamiento de cada query.
+
+Para balancear la carga entre múltiples instancias del **Gateway** se planea emplear **HAProxy** como implementación del **Load Balancer**. Este componente cuenta con un único nodo, lo que introduce un punto único de falla. Si bien esto representa una limitación en términos de disponibilidad, se optó por esta simplicidad dado el alcance del sistema. 
+
+Los nodos del sistema (filtros, aggregators, mappers, entre otros) se comunican entre sí a través de **topic exchanges y queues**, donde los exchanges permiten enrutar cada mensaje al nodo correspondiente según el tipo de dato. Un caso particular es el **AnomalyFilter**, que requiere almacenamiento temporario en disco para retener las transacciones del período posterior mientras se calcula el promedio del período base, necesario para la Query 3. Finalmente, los **reducers** consolidan los resultados de cada query y los publican en el topic exchange correspondiente para que lleguen a cada Gateway.
+
+![Diagrama de robustez](diagramas/diagrama_de_robustez.png)
 
 #### Diagrama de Despliegue
 
@@ -145,11 +153,11 @@ Contar el total de transacciones del período **[2022-09-01, 2022-09-05]** con f
 
 | Tarea | Integrante |
 |---|---|
-| Query 1 | Lu |
-| Query 2 | Bauti |
-| Query 3 | Bauti |
-| Query 4 | Caro |
-| Query 5 | Caro |
-| Middleware | Bauti |
-| Server | Lu |
-| Cliente | Lu |
+| Query 1 | Luciana |
+| Query 2 | Bautista |
+| Query 3 | Bautista |
+| Query 4 | Carolina |
+| Query 5 | Carolina |
+| Middleware | Bautista |
+| Server | Luciana |
+| Cliente | Luciana |
