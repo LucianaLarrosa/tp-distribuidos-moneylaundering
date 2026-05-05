@@ -93,6 +93,12 @@ Contar el total de transacciones del período **[2022-09-01, 2022-09-05]** con f
 
 ## Arquitectura
 
+### Vista de Casos de Uso
+
+El diagrama muestra el único actor del sistema, el **Cliente**, y su interacción principal: solicitar el análisis de transacciones. Esa acción incluye las cinco queries del sistema.
+
+![Diagrama de casos de uso](diagramas/diagrama_uso.drawio.png)
+
 ### Vista Lógica
 
 #### DAG
@@ -131,7 +137,12 @@ A continuación se presenta el DAG del sistema, que representa el flujo general 
 
 #### Diagrama de Paquetes
 
-> _[Diagrama a completar]_
+El diagrama de paquetes muestra la organización modular de los componentes del sistema. 
+
+El paquete **worker** representa de manera unificada a todos los nodos de procesamiento del pipeline (filtros, sharders, mappers, aggregators, joiners y reducers). Aunque cada uno tiene su lógica propia, comparten una misma estructura base —entrada desde el broker, procesamiento, salida al broker— por lo que se modelan como un único paquete para mantener el diagrama legible. El detalle funcional de cada tipo se documenta en el diagrama de robustez.
+
+![Diagrama de paquetes](diagramas/diagrama_paquetes.drawio.png)
+
 
 ### Vista Física
 
@@ -147,7 +158,14 @@ Los nodos del sistema (filtros, aggregators, mappers, entre otros) se comunican 
 
 #### Diagrama de Despliegue
 
-> _[Diagrama a completar]_
+El diagrama de despliegue muestra cómo los distintos procesos del sistema se distribuyen en nodos de ejecución. Las lineas represetan la comunicación entre nodos.
+
+El sistema se organiza alrededor del **Broker Node** (RabbitMQ), que actúa como hub central de mensajería: todos los nodos de procesamiento se comunican entre sí exclusivamente a través de él. Las únicas conexiones por fuera del broker son las TCP entre el **Client PC** y el **Load Balancer Node**, y entre este último y los **Gateway Nodes**.
+
+Los nodos de procesamiento se agrupan por rol funcional (**Filter Node**, **Sharder Node**, **Mapper Node**, **Aggregator Node**, **Joiner Node**, **Reducer Node**). Cada uno de estos agrupamientos contiene múltiples implementaciones concretas con lógicas distintas (por ejemplo, el Filter Node engloba tanto el filtro por monto como el de fecha y el detector de anomalías). Se eligió agruparlos así para mantener el diagrama mas simple y legible, evitando mostrar cada nodo individualmente.
+
+![Diagrama de despliegue](diagramas/diagrama_despliegue.drawio.png)
+
 
 ## División tentativa de tareas
 
