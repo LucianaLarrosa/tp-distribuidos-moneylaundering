@@ -87,7 +87,7 @@ Contar el total de transacciones del período **[2022-09-01, 2022-09-05]** con f
 
 El diagrama muestra el único actor del sistema, el **Cliente**, y su interacción principal: solicitar el análisis de transacciones. Esa acción incluye las cinco queries del sistema.
 
-![Diagrama de casos de uso](diagramas/diagrama_uso.drawio.png)
+![Diagrama de casos de uso](diagramas/diagrama_uso.png)
 
 ### Vista Lógica
 
@@ -95,7 +95,7 @@ El diagrama muestra el único actor del sistema, el **Cliente**, y su interacci�
 
 A continuación se presenta el DAG del sistema, que representa el flujo general de procesamiento de los datos. Desde `Data source` las transacciones se distribuyen por dos ramas principales: la rama `usd`, que filtra por moneda de origen, y la rama `*`, que recibe todas las transacciones independientemente de su moneda. Los datos van pasando por distintos nodos de procesamiento, filtrado, agregación, mapeo, entre otros; cuyos colores en el diagrama indican el tipo de operación que realizan. Cabe destacar que algunos nodos son compartidos entre múltiples queries, como el `DateFilter`, utilizado por Q3, Q4 y Q5. Finalmente, los resultados de cada consulta llegan a su reducer correspondiente.
 
-![DAG](diagramas/DAG.png)
+![DAG](diagramas/dag.png)
 
 ### Vista de Procesos
 
@@ -133,7 +133,7 @@ El diagrama de paquetes muestra la organización modular de los componentes del 
 
 El paquete **worker** representa de manera unificada a todos los nodos de procesamiento del pipeline (filtros, sharders, mappers, aggregators y reducers). Aunque cada uno tiene su lógica propia, comparten una misma estructura base (entrada desde el broker, procesamiento, salida al broker) por lo que se modelan como un único paquete para mantener el diagrama legible.
 
-![Diagrama de paquetes](diagramas/diagrama_paquetes.drawio.png)
+![Diagrama de paquetes](diagramas/diagrama_paquetes.png)
 
 ### Vista Física
 
@@ -145,7 +145,7 @@ Para balancear la carga entre múltiples instancias del **Gateway** se planea em
 
 Los nodos del sistema (filtros, aggregators, mappers, entre otros) se comunican entre sí a través de **exchanges y queues**, donde los exchanges permiten enrutar cada mensaje al nodo correspondiente según corresponda. Un caso particular es el **AnomalyFilter**, que requiere almacenamiento temporario en disco para retener las transacciones del período posterior mientras se calcula el promedio del período base, necesario para la Query 3. Finalmente, los **reducers** consolidan los resultados de cada query y los publican en el exchange para que lleguen al Gateway correspondiente.
 
-![Diagrama de robustez](diagramas/diagrama_de_robustez.png)
+![Diagrama de robustez](diagramas/diagrama_robustez.png)
 
 #### Diagrama de Despliegue
 
@@ -155,7 +155,7 @@ El sistema se organiza alrededor del **Broker Node** (RabbitMQ), que actúa como
 
 Los nodos de procesamiento se agrupan por rol funcional (**Filter Node**, **Sharder Node**, **Mapper Node**, **Aggregator Node**, **Reducer Node**). Cada uno de estos agrupamientos contiene múltiples implementaciones concretas con lógicas distintas (por ejemplo, el Filter Node engloba tanto el filtro por monto como el de fecha y el detector de anomalías). Se eligió agruparlos así para mantener el diagrama mas simple y legible, evitando mostrar cada nodo individualmente.
 
-![Diagrama de despliegue](diagramas/diagrama_despliegue.drawio.png)
+![Diagrama de despliegue](diagramas/diagrama_despliegue.png)
 
 ## División tentativa de tareas
 
