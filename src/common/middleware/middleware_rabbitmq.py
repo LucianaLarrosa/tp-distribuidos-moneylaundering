@@ -1,74 +1,214 @@
-from typing import Callable, List
-
-from common.middleware.middleware import (
+import pika
+from .middleware import (
     MessageMiddlewareQueue,
-    MessageMiddlewareExchange,
+    MessageMiddlewareExchangeDirect,
+    MessageMiddlewareExchangeFanout,
+    MessageMiddlewareDisconnectedError,
+    MessageMiddlewareMessageError,
+    MessageMiddlewareCloseError,
 )
 
 
-class RabbitMQQueue(MessageMiddlewareQueue):
-    def __init__(self, host: str, queue_name: str) -> None:
-        pass
+class MessageMiddlewareRabbitMQBase:
 
-    def start_consuming(self, on_message_callback: Callable[[bytes], None]) -> None:
-        pass
+    def start_consuming(self, on_message_callback):
+        """
+        Starts consuming messages from the queue or exchange and invokes the callback for each message received.
+        The callback receives the message body, an ack function, and a nack function as parameters.
+        If the connection to the middleware is lost, it raises MessageMiddlewareDisconnectedError.
+        If an internal error occurs that cannot be resolved, it raises MessageMiddlewareMessageError.
+        """
 
-    def stop_consuming(self) -> None:
-        pass
+        def ack_nack_callback_adapter(ch, method, properties, body):
+            on_message_callback(
+                body,
+                lambda: ch.basic_ack(delivery_tag=method.delivery_tag),
+                lambda: ch.basic_nack(delivery_tag=method.delivery_tag),
+            )
 
-    def send(self, message: bytes) -> None:
-        pass
+        try:
+            self.channel.basic_qos(prefetch_count=1)
+            self.channel.basic_consume(
+                queue=self.queue_name, on_message_callback=ack_nack_callback_adapter
+            )
+            self.channel.start_consuming()
+        except pika.exceptions.AMQPConnectionError as e:
+            raise MessageMiddlewareDisconnectedError(
+                f"The connection to the middleware was lost: {e}"
+            )
+        except Exception as e:
+            self.close()
+            raise MessageMiddlewareMessageError(
+                f"An internal error occurred while consuming: {e}"
+            )
 
-    def close(self) -> None:
-        pass
+    def stop_consuming(self):
+        """
+        Stops consuming messages from the queue or exchange.
+        If the connection to the middleware is lost, it raises MessageMiddlewareDisconnectedError.
+        """
+        try:
+            self.channel.stop_consuming()
+        except pika.exceptions.AMQPConnectionError as e:
+            raise MessageMiddlewareDisconnectedError(
+                f"The connection to the middleware was lost: {e}"
+            )
+
+    def close(self):
+        """
+        Closes the connection to the RabbitMQ server.
+        If an internal error occurs that cannot be resolved, it raises MessageMiddlewareCloseError.
+        """
+        try:
+            self.connection.close()
+        except Exception as e:
+            raise MessageMiddlewareCloseError(
+                f"An error occurred while closing the connection: {e}"
+            )
 
 
-class RabbitMQDirectExchange(MessageMiddlewareExchange):
-    def __init__(self, host: str, exchange_name: str, route_keys: List[str]) -> None:
-        pass
+class MessageMiddlewareQueueRabbitMQ(
+    MessageMiddlewareRabbitMQBase, MessageMiddlewareQueue
+):
 
-    def start_consuming(self, on_message_callback: Callable[[bytes], None]) -> None:
-        pass
+    def __init__(self, host, queue_name):
+        """
+        Initializes the connection to the RabbitMQ server and declares the queue.
+        """
+        self.queue_name = queue_name
 
-    def stop_consuming(self) -> None:
-        pass
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=host))
+        try:
+            self.channel = self.connection.channel()
+            self.channel.confirm_delivery()
+            self.channel.queue_declare(queue=self.queue_name, durable=True)
+        except Exception:
+            self.close()
 
-    def send(self, message: bytes) -> None:
-        pass
+    def send(self, message):
+        """
+        Sends a message to the queue.
+        If the connection to the middleware is lost, it raises MessageMiddlewareDisconnectedError.
+        If an internal error occurs that cannot be resolved, it raises MessageMiddlewareMessageError.
+        """
+        try:
+            self.channel.basic_publish(
+                exchange="",
+                routing_key=self.queue_name,
+                body=message,
+                properties=pika.BasicProperties(
+                    delivery_mode=pika.DeliveryMode.Persistent
+                ),
+            )
+        except pika.exceptions.AMQPConnectionError as e:
+            raise MessageMiddlewareDisconnectedError(
+                f"The connection to the middleware was lost: {e}"
+            )
+        except Exception as e:
+            self.close()
+            raise MessageMiddlewareMessageError(
+                f"An internal error occurred while sending: {e}"
+            )
 
-    def close(self) -> None:
-        pass
+
+class MessageMiddlewareExchangeDirectRabbitMQ(
+    MessageMiddlewareRabbitMQBase, MessageMiddlewareExchangeDirect
+):
+
+    def __init__(self, host, exchange_name, routing_keys):
+        """
+        Initializes the connection to the RabbitMQ server, declares the exchange and binds a temporary queue to the exchange with the specified routing keys.
+        """
+        self.exchange_name = exchange_name
+        self.routing_keys = routing_keys
+
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=host))
+        try:
+            self.channel = self.connection.channel()
+            self.channel.confirm_delivery()
+            self.channel.exchange_declare(
+                exchange=self.exchange_name, exchange_type="direct", durable=True
+            )
+
+            result = self.channel.queue_declare(queue="", exclusive=True)
+            self.queue_name = result.method.queue
+            for routing_key in self.routing_keys:
+                self.channel.queue_bind(
+                    exchange=self.exchange_name,
+                    queue=self.queue_name,
+                    routing_key=routing_key,
+                )
+        except Exception:
+            self.close()
+
+    def send(self, message, routing_key=None):
+        """
+        Sends a message to the exchange.
+        If routing_key is provided, publishes only to that key (topic/sharder mode).
+        Otherwise publishes to all routing_keys declared at init time.
+        """
+        keys = [routing_key] if routing_key is not None else self.routing_keys
+        try:
+            for key in keys:
+                self.channel.basic_publish(
+                    exchange=self.exchange_name,
+                    routing_key=key,
+                    body=message,
+                    properties=pika.BasicProperties(
+                        delivery_mode=pika.DeliveryMode.Persistent
+                    ),
+                )
+        except pika.exceptions.AMQPConnectionError as e:
+            raise MessageMiddlewareDisconnectedError(
+                f"The connection to the middleware was lost: {e}"
+            )
+        except Exception as e:
+            self.close()
+            raise MessageMiddlewareMessageError(
+                f"An internal error occurred while sending: {e}"
+            )
 
 
-class RabbitMQFanoutExchange(MessageMiddlewareExchange):
-    def __init__(self, host: str, exchange_name: str) -> None:
-        pass
+class MessageMiddlewareExchangeFanoutRabbitMQ(
+    MessageMiddlewareRabbitMQBase, MessageMiddlewareExchangeFanout
+):
 
-    def start_consuming(self, on_message_callback: Callable[[bytes], None]) -> None:
-        pass
+    def __init__(self, host, exchange_name):
+        self.exchange_name = exchange_name
 
-    def stop_consuming(self) -> None:
-        pass
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=host))
+        try:
+            self.channel = self.connection.channel()
+            self.channel.confirm_delivery()
+            self.channel.exchange_declare(
+                exchange=self.exchange_name, exchange_type="fanout", durable=True
+            )
 
-    def send(self, message: bytes) -> None:
-        pass
+            result = self.channel.queue_declare(queue="", exclusive=True)
+            self.queue_name = result.method.queue
+            self.channel.queue_bind(
+                exchange=self.exchange_name,
+                queue=self.queue_name,
+            )
+        except Exception:
+            self.close()
 
-    def close(self) -> None:
-        pass
-
-
-class RabbitMQTopicExchange(MessageMiddlewareExchange):
-    def __init__(self, host: str, exchange_name: str, route_keys: List[str]) -> None:
-        pass
-
-    def start_consuming(self, on_message_callback: Callable[[bytes], None]) -> None:
-        pass
-
-    def stop_consuming(self) -> None:
-        pass
-
-    def send(self, message: bytes) -> None:
-        pass
-
-    def close(self) -> None:
-        pass
+    def send(self, message):
+        try:
+            self.channel.basic_publish(
+                exchange=self.exchange_name,
+                routing_key="",
+                body=message,
+                properties=pika.BasicProperties(
+                    delivery_mode=pika.DeliveryMode.Persistent
+                ),
+            )
+        except pika.exceptions.AMQPConnectionError as e:
+            raise MessageMiddlewareDisconnectedError(
+                f"The connection to the middleware was lost: {e}"
+            )
+        except Exception as e:
+            self.close()
+            raise MessageMiddlewareMessageError(
+                f"An internal error occurred while sending: {e}"
+            )

@@ -1,11 +1,11 @@
-from common.middleware.middleware import (
+from .middleware import (
     MessageMiddleware,
     MessageMiddlewareQueue,
-    MessageMiddlewareExchange,
+    MessageMiddlewareExchangeDirect,
+    MessageMiddlewareExchangeFanout,
 )
-from common.middleware.middleware_rabbitmq import (
-    RabbitMQQueue,
-    RabbitMQDirectExchange,
-    RabbitMQFanoutExchange,
-    RabbitMQTopicExchange,
+from .middleware_rabbitmq import (
+    MessageMiddlewareQueueRabbitMQ,
+    MessageMiddlewareExchangeDirectRabbitMQ,
+    MessageMiddlewareExchangeFanoutRabbitMQ,
 )
