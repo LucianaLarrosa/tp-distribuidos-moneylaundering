@@ -1,26 +1,35 @@
 import socket
-from typing import Optional
+
+
+class IncompleteReadError(Exception):
+    def __init__(self, partial: bytes, expected: int):
+        self.partial = partial
+        self.expected = expected
+        super().__init__(f"Expected {expected} bytes, got {len(partial)}")
 
 
 class SafeSocket:
-    def __init__(self, sock: socket.socket) -> None:
-        pass
+    def __init__(self, sock):
+        self._sock = sock
 
     @classmethod
-    def connect(cls, host: str, port: int) -> SafeSocket:
-        pass
+    def connect(cls, host, port):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.connect((host, port))
+        return cls(sock)
 
-    def send(self, data: bytes) -> None:
-        pass
+    def close(self):
+        self._sock.close()
 
-    def recv(self) -> bytes:
-        pass
+    def send_all(self, data):
+        self._sock.sendall(data)
 
-    def close(self) -> None:
-        pass
-
-    def _send_all(self, data: bytes) -> None:
-        pass
-
-    def _recv_exact(self, n: int) -> Optional[bytes]:
-        pass
+    def recv_exact(self, size):
+        buf = bytearray(size)
+        pos = 0
+        while pos < size:
+            n = self._sock.recv_into(memoryview(buf)[pos:])
+            if n == 0:
+                raise IncompleteReadError(bytes(buf[:pos]), size)
+            pos += n
+        return bytes(buf)
