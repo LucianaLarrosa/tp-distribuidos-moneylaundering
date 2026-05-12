@@ -1,6 +1,4 @@
-from datetime import datetime
-
-from common.models.transaction import Transaction
+from common.models.raw_transaction import RawTransaction
 from common.models.query_results import (
     Q1Result,
     Q2Result,
@@ -25,9 +23,7 @@ class MsgType:
 # QUERY 4: result_record = [4B from_bank][4B from_account_len][N][4B to_bank][4B to_account_len][N]
 # QUERY 5: result_record = [8B count]
 #
-# TRANSACTION = [8B timestamp_ms][4B from_bank][4B+N from_account][4B to_bank][4B+N to_account]
-#               [8B amount_received][4B+N receiving_currency][8B amount_paid][4B+N payment_currency]
-#               [4B+N payment_format][1B is_laundering]
+# TRANSACTION = [4B + N raw_line]
 
 
 def _serialize_lp_string(s):
@@ -37,22 +33,7 @@ def _serialize_lp_string(s):
 
 
 def _serialize_transaction(tx):
-    timestamp_ms = int(tx.timestamp.timestamp() * 1000)
-    return b"".join(
-        [
-            external_serializer.serialize_uint64(timestamp_ms),
-            external_serializer.serialize_uint32(tx.from_bank),
-            _serialize_lp_string(tx.from_account),
-            external_serializer.serialize_uint32(tx.to_bank),
-            _serialize_lp_string(tx.to_account),
-            external_serializer.serialize_float64(tx.amount_received),
-            _serialize_lp_string(tx.receiving_currency),
-            external_serializer.serialize_float64(tx.amount_paid),
-            _serialize_lp_string(tx.payment_currency),
-            _serialize_lp_string(tx.payment_format),
-            external_serializer.serialize_uint8(int(tx.is_laundering)),
-        ]
-    )
+    return _serialize_lp_string(tx.raw)
 
 
 def _deserialize_lp_string(buf, offset):
@@ -67,62 +48,9 @@ def _deserialize_lp_string(buf, offset):
 
 
 def _deserialize_transaction(buf, offset):
-    """Devuelve (Transaction, nuevo_offset)."""
-    timestamp_ms = external_serializer.deserialize_uint64(
-        buf[offset : offset + external_serializer.UINT64_SIZE]
-    )
-    offset += external_serializer.UINT64_SIZE
-
-    from_bank = external_serializer.deserialize_uint32(
-        buf[offset : offset + external_serializer.UINT32_SIZE]
-    )
-    offset += external_serializer.UINT32_SIZE
-
-    from_account, offset = _deserialize_lp_string(buf, offset)
-
-    to_bank = external_serializer.deserialize_uint32(
-        buf[offset : offset + external_serializer.UINT32_SIZE]
-    )
-    offset += external_serializer.UINT32_SIZE
-
-    to_account, offset = _deserialize_lp_string(buf, offset)
-
-    amount_received = external_serializer.deserialize_float64(
-        buf[offset : offset + external_serializer.FLOAT64_SIZE]
-    )
-    offset += external_serializer.FLOAT64_SIZE
-
-    receiving_currency, offset = _deserialize_lp_string(buf, offset)
-
-    amount_paid = external_serializer.deserialize_float64(
-        buf[offset : offset + external_serializer.FLOAT64_SIZE]
-    )
-    offset += external_serializer.FLOAT64_SIZE
-
-    payment_currency, offset = _deserialize_lp_string(buf, offset)
-    payment_format, offset = _deserialize_lp_string(buf, offset)
-
-    is_laundering = bool(
-        external_serializer.deserialize_uint8(
-            buf[offset : offset + external_serializer.UINT8_SIZE]
-        )
-    )
-    offset += external_serializer.UINT8_SIZE
-
-    tx = Transaction(
-        timestamp=datetime.fromtimestamp(timestamp_ms / 1000),
-        from_bank=from_bank,
-        from_account=from_account,
-        to_bank=to_bank,
-        to_account=to_account,
-        amount_received=amount_received,
-        receiving_currency=receiving_currency,
-        amount_paid=amount_paid,
-        payment_currency=payment_currency,
-        payment_format=payment_format,
-        is_laundering=is_laundering,
-    )
-    return tx, offset
+    """Devuelve (RawTransaction, nuevo_offset)."""
+    raw, offset = _deserialize_lp_string(buf, offset)
+    return RawTransaction(raw=raw), offset
 
 
 # ---------- result_record por query ----------

@@ -1,13 +1,17 @@
+import os
 from dataclasses import dataclass
 
 
 @dataclass
 class Config:
+    listen_host: str
     listen_port: int
-    rabbitmq_host: str
-    ingress_exchange: str
-    results_queue: str
+    debug_output_file: str
 
     @classmethod
     def from_env(cls) -> "Config":
-        pass
+        return cls(
+            listen_host=os.environ.get("GATEWAY_HOST", ""),
+            listen_port=int(os.environ.get("GATEWAY_PORT", 5000)),
+            debug_output_file=os.environ.get("DEBUG_OUTPUT_FILE", ""),
+        )
