@@ -7,13 +7,16 @@ SERVER_PORT  ?= 5000
 INPUT_CSV    ?= ../dataset/HI-Small_Trans2.csv
 BATCH_SIZE   ?= 1000
 
-DEBUG_OUTPUT_FILE ?= ../tmp/gateway_received.csv
+DEBUG_OUTPUT_DIR ?= ../tmp
+POOL_SIZE        ?=
 
-.PHONY: compose build up down logs clean gateway client verify
+N_CLIENTS ?= 2
+
+.PHONY: compose build up down logs clean gateway client clients verify clean-tmp
 
 gateway:
 	cd src && GATEWAY_HOST="$(GATEWAY_HOST)" GATEWAY_PORT=$(GATEWAY_PORT) \
-	DEBUG_OUTPUT_FILE="$(DEBUG_OUTPUT_FILE)" \
+	DEBUG_OUTPUT_DIR="$(DEBUG_OUTPUT_DIR)" $(if $(POOL_SIZE),POOL_SIZE=$(POOL_SIZE),) \
 	python3 -m gateway.main
 
 client:
@@ -21,10 +24,23 @@ client:
 	INPUT_CSV=$(INPUT_CSV) BATCH_SIZE=$(BATCH_SIZE) \
 	python3 -m client.main
 
+clients: clean-tmp
+	@for i in $$(seq 1 $(N_CLIENTS)); do \
+		$(MAKE) client & \
+	done; wait
+
+clean-tmp:
+	rm -f tmp/gateway_received_*.csv
+
 verify:
-	@diff <(tail -n +2 dataset/HI-Small_Trans2.csv) tmp/gateway_received.csv \
-		&& echo "✓ Protocol verified: all transactions match" \
-		|| echo "✗ Mismatch found"
+	@expected=$$(tail -n +2 dataset/HI-Small_Trans2.csv | wc -l | tr -d ' '); \
+	for f in tmp/gateway_received_*.csv; do \
+		if diff -q <(tail -n +2 dataset/HI-Small_Trans2.csv) $$f >/dev/null; then \
+			echo "✓ $$f matches dataset ($$expected lines)"; \
+		else \
+			echo "✗ $$f differs from dataset"; \
+		fi; \
+	done
 
 compose:
 	python compose_generator.py > docker-compose.yaml

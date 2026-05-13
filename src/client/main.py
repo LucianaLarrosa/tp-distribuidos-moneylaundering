@@ -65,9 +65,9 @@ class Client:
         self._closed = True
 
     def shutdown(self, signum=None, frame=None):
+        logging.info("Shutdown requested")
         if self._closed:
             return
-        logging.info("Shutdown requested")
         self._disconnect()
 
 
