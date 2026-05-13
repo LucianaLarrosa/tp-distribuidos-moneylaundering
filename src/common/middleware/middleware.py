@@ -65,3 +65,12 @@ class MessageMiddlewareExchangeFanout(MessageMiddleware):
 	@abstractmethod
 	def __init__(self, host, exchange_name):
 		pass
+
+class MessageMiddlewareExchangeTopic(MessageMiddleware):
+	@abstractmethod
+	def __init__(self, host, exchange_name, binding_patterns):
+		pass
+
+	@abstractmethod
+	def send(self, message, routing_key):
+		pass

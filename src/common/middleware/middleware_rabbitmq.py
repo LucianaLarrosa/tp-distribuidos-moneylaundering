@@ -3,6 +3,7 @@ from .middleware import (
     MessageMiddlewareQueue,
     MessageMiddlewareExchangeDirect,
     MessageMiddlewareExchangeFanout,
+    MessageMiddlewareExchangeTopic,
     MessageMiddlewareDisconnectedError,
     MessageMiddlewareMessageError,
     MessageMiddlewareCloseError,
@@ -174,6 +175,8 @@ class MessageMiddlewareExchangeFanoutRabbitMQ(
 ):
 
     def __init__(self, host, exchange_name):
+        """Initializes the connection to the RabbitMQ server, declares the fanout exchange
+        and binds a temporary queue to the exchange."""
         self.exchange_name = exchange_name
 
         self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=host))
@@ -194,10 +197,72 @@ class MessageMiddlewareExchangeFanoutRabbitMQ(
             self.close()
 
     def send(self, message):
+        """Sends a message to the fanout exchange, which will be delivered to all bound queues.
+        If the connection to the middleware is lost, it raises MessageMiddlewareDisconnectedError.
+        If an internal error occurs that cannot be resolved, it raises MessageMiddlewareMessageError.
+        """
         try:
             self.channel.basic_publish(
                 exchange=self.exchange_name,
                 routing_key="",
+                body=message,
+                properties=pika.BasicProperties(
+                    delivery_mode=pika.DeliveryMode.Persistent
+                ),
+            )
+        except pika.exceptions.AMQPConnectionError as e:
+            raise MessageMiddlewareDisconnectedError(
+                f"The connection to the middleware was lost: {e}"
+            )
+        except Exception as e:
+            self.close()
+            raise MessageMiddlewareMessageError(
+                f"An internal error occurred while sending: {e}"
+            )
+
+
+class MessageMiddlewareExchangeTopicRabbitMQ(
+    MessageMiddlewareRabbitMQBase, MessageMiddlewareExchangeTopic
+):
+
+    def __init__(self, host, exchange_name, binding_patterns):
+        """
+        binding_patterns: list of routing key patterns with wildcard support.
+          '*' matches exactly one word, '#' matches zero or more words.
+          e.g. ["stock.#", "*.usd.*"]
+        """
+        self.exchange_name = exchange_name
+        self.binding_patterns = binding_patterns
+
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=host))
+        try:
+            self.channel = self.connection.channel()
+            self.channel.confirm_delivery()
+            self.channel.exchange_declare(
+                exchange=self.exchange_name, exchange_type="topic", durable=True
+            )
+
+            result = self.channel.queue_declare(queue="", exclusive=True)
+            self.queue_name = result.method.queue
+            for pattern in self.binding_patterns:
+                self.channel.queue_bind(
+                    exchange=self.exchange_name,
+                    queue=self.queue_name,
+                    routing_key=pattern,
+                )
+        except Exception:
+            self.close()
+
+    def send(self, message, routing_key):
+        """
+        Sends a message to the topic exchange with the given routing key.
+        If the connection to the middleware is lost, it raises MessageMiddlewareDisconnectedError.
+        If an internal error occurs that cannot be resolved, it raises MessageMiddlewareMessageError.
+        """
+        try:
+            self.channel.basic_publish(
+                exchange=self.exchange_name,
+                routing_key=routing_key,
                 body=message,
                 properties=pika.BasicProperties(
                     delivery_mode=pika.DeliveryMode.Persistent
