@@ -28,7 +28,6 @@ class MessageMiddlewareRabbitMQBase:
             )
 
         try:
-            self.channel.basic_qos(prefetch_count=1)
             self.channel.basic_consume(
                 queue=self.queue_name, on_message_callback=ack_nack_callback_adapter
             )
@@ -225,11 +224,14 @@ class MessageMiddlewareExchangeTopicRabbitMQ(
     MessageMiddlewareRabbitMQBase, MessageMiddlewareExchangeTopic
 ):
 
-    def __init__(self, host, exchange_name, binding_patterns):
+    def __init__(self, host, exchange_name, binding_patterns, queue_name=None):
         """
         binding_patterns: list of routing key patterns with wildcard support.
           '*' matches exactly one word, '#' matches zero or more words.
           e.g. ["stock.#", "*.usd.*"]
+        queue_name: if provided, consumers share a named durable queue and the
+          broker round-robins messages between them (work distribution). If
+          None, each consumer gets its own exclusive queue (broadcast).
         """
         self.exchange_name = exchange_name
         self.binding_patterns = binding_patterns
@@ -242,8 +244,13 @@ class MessageMiddlewareExchangeTopicRabbitMQ(
                 exchange=self.exchange_name, exchange_type="topic", durable=True
             )
 
-            result = self.channel.queue_declare(queue="", exclusive=True)
-            self.queue_name = result.method.queue
+            if queue_name is None:
+                result = self.channel.queue_declare(queue="", exclusive=True)
+                self.queue_name = result.method.queue
+            else:
+                self.channel.queue_declare(queue=queue_name, durable=True)
+                self.queue_name = queue_name
+
             for pattern in self.binding_patterns:
                 self.channel.queue_bind(
                     exchange=self.exchange_name,
