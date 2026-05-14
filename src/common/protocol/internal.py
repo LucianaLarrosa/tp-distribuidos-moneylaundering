@@ -5,7 +5,7 @@ from common.models.raw_transaction import RawTransaction
 
 
 class MsgType:
-    TRANSACTION = "transaction"
+    TRANSACTION_BATCH = "transaction_batch"
     EOF = "eof"
 
 
@@ -36,16 +36,22 @@ def deserialize_msg(data):
 # ---------- handlers serialize / deserialize por tipo de mensaje ----------
 
 
-def _serialize_transaction(transaction):
-    return asdict(transaction)
+def _serialize_transaction_batch(transactions):
+    tx_serialized = []
+    for tx in transactions:
+        tx_serialized.append(asdict(tx))
+    return tx_serialized
 
 
 def _serialize_eof():
     return None
 
 
-def _deserialize_transaction(payload):
-    return RawTransaction(**payload)
+def _deserialize_transaction_batch(payload):
+    transactions = []
+    for tx in payload:
+        transactions.append(RawTransaction(**tx))
+    return transactions
 
 
 def _deserialize_eof(_):
@@ -53,11 +59,11 @@ def _deserialize_eof(_):
 
 
 SERIALIZERS = {
-    MsgType.TRANSACTION: _serialize_transaction,
+    MsgType.TRANSACTION_BATCH: _serialize_transaction_batch,
     MsgType.EOF: _serialize_eof,
 }
 
 DESERIALIZERS = {
-    MsgType.TRANSACTION: _deserialize_transaction,
+    MsgType.TRANSACTION_BATCH: _deserialize_transaction_batch,
     MsgType.EOF: _deserialize_eof,
 }
