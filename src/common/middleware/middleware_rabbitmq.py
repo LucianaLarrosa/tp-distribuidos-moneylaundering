@@ -54,6 +54,18 @@ class MessageMiddlewareRabbitMQBase:
                 f"The connection to the middleware was lost: {e}"
             )
 
+    def stop_consuming_threadsafe(self):
+        """
+        Stops consuming messages from the queue or exchange in a thread-safe manner.
+        If the connection to the middleware is lost, it raises MessageMiddlewareDisconnectedError.
+        """
+        try:
+            self.connection.add_callback_threadsafe(self.channel.stop_consuming)
+        except pika.exceptions.AMQPConnectionError as e:
+            raise MessageMiddlewareDisconnectedError(
+                f"The connection to the middleware was lost: {e}"
+            )
+
     def close(self):
         """
         Closes the connection to the RabbitMQ server.
