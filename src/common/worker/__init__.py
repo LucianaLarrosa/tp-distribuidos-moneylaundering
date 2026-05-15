@@ -4,4 +4,4 @@ from common.worker.mapper import Mapper
 from common.worker.aggregator import Aggregator
 from common.worker.sharder import Sharder
 from common.worker.reducer import Reducer
-from common.worker.joiner import Joiner
+from common.worker.stateless_worker import StatelessWorker
