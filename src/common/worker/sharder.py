@@ -1,9 +1,9 @@
 import threading
 
-from common.worker.stateful_worker import StatefulWorker
+from common.worker.ring_coordinated_worker import RingCoordinatedWorker
 
 
-class Sharder(StatefulWorker):
+class Sharder(RingCoordinatedWorker):
     def __init__(self) -> None:
         super().__init__()
         self._sent_counts = {}  # (client_id, gateway_id) -> sent_count

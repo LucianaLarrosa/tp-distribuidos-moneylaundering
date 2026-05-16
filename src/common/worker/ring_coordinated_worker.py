@@ -6,10 +6,10 @@ from common.protocol import internal
 from common.models.eof import EOF, RingEOF
 
 
-class StatefulWorker(Worker):
+class RingCoordinatedWorker(Worker):
     def __init__(self) -> None:
         """
-        Initialize the stateful worker with a dictionary to track processed counts and a lock to synchronize access to this dictionary. Also initialize a control thread to listen for RING_EOF messages.
+        Initialize the ring-coordinated worker with a dictionary to track processed counts and a lock to synchronize access to this dictionary. Also initialize a control thread to listen for RING_EOF messages.
         """
         super().__init__()
         self._processed_counts = {}  # (client_id, gateway_id) -> processed_count
@@ -34,9 +34,17 @@ class StatefulWorker(Worker):
 
     @property
     @abstractmethod
-    def _control_exchange(self):
+    def _input_control_middleware(self):
         """
-        Return the control exchange to send and receive control messages (RING_EOF).
+        Return the input middleware to consume control messages.
+        """
+        pass
+
+    @property
+    @abstractmethod
+    def _output_control_middleware(self):
+        """
+        Return the output middleware to send control messages to the next node in the ring.
         """
         pass
 
@@ -54,9 +62,18 @@ class StatefulWorker(Worker):
         """
         pass
 
+    def _increment_processed_count(self, client_id, gateway_id):
+        """
+        Increment the processed count for the given client_id and gateway_id.
+        """
+        with self._processed_counts_lock:
+            self._processed_counts[(client_id, gateway_id)] = (
+                self._processed_counts.get((client_id, gateway_id), 0) + 1
+            )
+
     def _update_ring_eof(self, client_id, gateway_id, ring_eof):
         """
-        Resolve the RingEOF by updating the processed count and determining the coordinator id.
+        Update the RING_EOF message with the processed count and determine if this node should be the coordinator.
         """
         with self._processed_counts_lock:
             processed_count = self._processed_counts.get((client_id, gateway_id), 0)
@@ -64,31 +81,27 @@ class StatefulWorker(Worker):
         coordinator_id = (
             self._node_id if total_processed_count >= ring_eof.expected_count else None
         )
-        return RingEOF(
-            ring_eof.expected_count,
-            total_processed_count,
-            coordinator_id,
-        )
+        return RingEOF(ring_eof.expected_count, total_processed_count, coordinator_id)
 
     def _handle_control_eof_message(self, client_id, gateway_id, ring_eof):
         """
-        Handle a RING_EOF message by either forwarding it to the next node in the ring or sending an EOF to the output middleware if this node is the coordinator.
+        Handle a RING_EOF message by either forwarding it to the next node in the ring, flushing data and sending an EOF to the output middleware if this node is the coordinator.
         """
         if ring_eof.coordinator_id is None:
             ring_eof = self._update_ring_eof(client_id, gateway_id, ring_eof)
-        elif ring_eof.coordinator_id == self._node_id:
-            self._output_middleware.send(
-                internal.serialize_msg(
-                    internal.MsgType.EOF,
-                    client_id,
-                    gateway_id,
-                    EOF(message_count=ring_eof.expected_count),
-                )
-            )
-            return
         else:
             self._flush_data(client_id, gateway_id)
-        self._control_exchange.send(
+            if ring_eof.coordinator_id == self._node_id:
+                self._output_middleware.send(
+                    internal.serialize_msg(
+                        internal.MsgType.EOF,
+                        client_id,
+                        gateway_id,
+                        EOF(message_count=self._ring_size),
+                    )
+                )
+                return
+        self._output_control_middleware.send(
             internal.serialize_msg(
                 internal.MsgType.RING_EOF, client_id, gateway_id, ring_eof
             ),
@@ -113,31 +126,37 @@ class StatefulWorker(Worker):
         """
         return (self._node_id + 1) % self._ring_size
 
-    def _handle_eof_message(self, client_id, gateway_id, message_count):
+    def _handle_eof_message(self, client_id, gateway_id, eof):
         """
         Handle an EOF message by sending a RING_EOF to the next node in the ring.
         """
         with self._processed_counts_lock:
             processed_count = self._processed_counts.get((client_id, gateway_id), 0)
-        self._control_exchange.send(
+        self._output_control_middleware.send(
             internal.serialize_msg(
                 internal.MsgType.RING_EOF,
                 client_id,
                 gateway_id,
                 RingEOF(
-                    expected_count=message_count,
+                    expected_count=eof.message_count,
                     total_processed_count=processed_count,
                 ),
             ),
             routing_key=self._ring_routing_key(self._get_next_node_id()),
         )
 
+    def _handle_data_message(self, msg_type, client_id, gateway_id, payload):
+        """
+        Handle a data message by processing it and incrementing the processed count for the given client_id and gateway_id.
+        """
+        self._increment_processed_count(client_id, gateway_id)
+
     def start(self):
         """
         Start the worker and the control thread to listen for RING_EOF messages.
         """
         self._control_thread = threading.Thread(
-            target=self._control_exchange.start_consuming,
+            target=self._input_control_middleware.start_consuming,
             args=(self._handle_control_message,),
             daemon=True,
         )
@@ -149,6 +168,6 @@ class StatefulWorker(Worker):
         Shutdown the worker and stop the control exchange and the control thread.
         """
         super().shutdown()
-        self._control_exchange.stop_consuming_threadsafe()
+        self._input_control_middleware.stop_consuming_threadsafe()
         if self._control_thread and self._control_thread.is_alive():
             self._control_thread.join()
