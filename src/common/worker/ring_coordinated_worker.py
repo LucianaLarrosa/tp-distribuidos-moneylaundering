@@ -12,9 +12,15 @@ class RingCoordinatedWorker(Worker):
         Initialize the ring-coordinated worker with a dictionary to track processed counts and a lock to synchronize access to this dictionary. Also initialize a control thread to listen for RING_EOF messages.
         """
         super().__init__()
-        self._processed_counts = {}  # (client_id, gateway_id) -> processed_count
+        self._processed_counts = (
+            {}
+        )  # (client_id, gateway_id) -> processed_count | actual total processed count
+        self._partial_processed_count = (
+            {}
+        )  # (client_id, gateway_id) -> partial_processed_count | previous process count sent to ring
         self._processed_counts_lock = threading.Lock()
         self._control_thread = None
+        self._stateless_flag = False
 
     @property
     @abstractmethod
@@ -77,6 +83,14 @@ class RingCoordinatedWorker(Worker):
         """
         with self._processed_counts_lock:
             processed_count = self._processed_counts.get((client_id, gateway_id), 0)
+            partial_count = self._partial_processed_count.get(
+                (client_id, gateway_id), 0
+            )
+
+            total_processed_count = (
+                ring_eof.total_processed_count + processed_count - partial_count
+            )
+            self._partial_processed_count[(client_id, gateway_id)] = processed_count
         total_processed_count = ring_eof.total_processed_count + processed_count
         coordinator_id = (
             self._node_id if total_processed_count >= ring_eof.expected_count else None
@@ -89,6 +103,12 @@ class RingCoordinatedWorker(Worker):
         """
         if ring_eof.coordinator_id is None:
             ring_eof = self._update_ring_eof(client_id, gateway_id, ring_eof)
+            self._output_control_middleware.send(
+                internal.serialize_msg(
+                    internal.MsgType.RING_EOF, client_id, gateway_id, ring_eof
+                ),
+                routing_key=self._ring_routing_key(self._get_next_node_id()),
+            )
         else:
             self._flush_data(client_id, gateway_id)
             if ring_eof.coordinator_id == self._node_id:
@@ -97,16 +117,15 @@ class RingCoordinatedWorker(Worker):
                         internal.MsgType.EOF,
                         client_id,
                         gateway_id,
-                        EOF(message_count=self._ring_size),
+                        EOF(
+                            message_count=(
+                                self._ring_size
+                                if not self._stateless_flag
+                                else ring_eof.total_processed_count
+                            )
+                        ),
                     )
                 )
-                return
-        self._output_control_middleware.send(
-            internal.serialize_msg(
-                internal.MsgType.RING_EOF, client_id, gateway_id, ring_eof
-            ),
-            routing_key=self._ring_routing_key(self._get_next_node_id()),
-        )
 
     def _handle_control_message(self, message, ack, nack):
         """
