@@ -3,7 +3,7 @@ import threading
 from common.worker.stateful_worker import StatefulWorker
 
 
-class SharderWorker(StatefulWorker):
+class Sharder(StatefulWorker):
     def __init__(self) -> None:
         super().__init__()
         self._sent_counts = {}  # (client_id, gateway_id) -> sent_count

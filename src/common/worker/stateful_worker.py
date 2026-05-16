@@ -22,7 +22,7 @@ class StatefulWorker(Worker):
         """
         Return the ID of this node in the ring.
         """
-        ...
+        pass
 
     @property
     @abstractmethod
@@ -30,7 +30,7 @@ class StatefulWorker(Worker):
         """
         Return the size of the ring (number of nodes).
         """
-        ...
+        pass
 
     @property
     @abstractmethod
@@ -38,29 +38,21 @@ class StatefulWorker(Worker):
         """
         Return the control exchange to send and receive control messages (RING_EOF).
         """
-        ...
+        pass
 
     @abstractmethod
     def _ring_routing_key(self, node_id):
         """
         Return the routing key to send a message to the given node_id in the ring.
         """
-        ...
-
-    @property
-    @abstractmethod
-    def _output_middleware(self):
-        """
-        Return the output middleware to forward the EOF to the next stage.
-        """
-        ...
+        pass
 
     @abstractmethod
     def _flush_data(self, client_id, gateway_id):
         """
         Flush any buffered data.
         """
-        ...
+        pass
 
     def _update_ring_eof(self, client_id, gateway_id, ring_eof):
         """
@@ -150,11 +142,13 @@ class StatefulWorker(Worker):
             daemon=True,
         )
         self._control_thread.start()
+        super().start()
 
     def shutdown(self):
         """
-        Shutdown the worker and the control thread.
+        Shutdown the worker and stop the control exchange and the control thread.
         """
+        super().shutdown()
         self._control_exchange.stop_consuming_threadsafe()
         if self._control_thread and self._control_thread.is_alive():
             self._control_thread.join()
