@@ -4,11 +4,14 @@ from common.worker.ring_coordinated_worker import RingCoordinatedWorker
 from common.protocol import internal
 from common.models.eof import EOF, RingEOF
 
+
 class SentCoordinatedWorker(RingCoordinatedWorker):
     def __init__(self) -> None:
         super().__init__()
         self._message_sent_count = {}  # (client_id, gateway_id) -> sent_count
-        self._partial_sent_to_ring = {}  # (client_id, gateway_id) -> sent_count_sent_to_ring
+        self._partial_sent_to_ring = (
+            {}
+        )  # (client_id, gateway_id) -> sent_count_sent_to_ring
         self._message_sent_count_lock = threading.Lock()
 
     def _increment_sent_count(self, client_id, gateway_id):
@@ -45,9 +48,7 @@ class SentCoordinatedWorker(RingCoordinatedWorker):
                         internal.MsgType.EOF,
                         client_id,
                         gateway_id,
-                        EOF(
-                            ring_eof.total_sent_count
-                        ),
+                        EOF(ring_eof.total_sent_count),
                     )
                 )
                 return
@@ -76,11 +77,15 @@ class SentCoordinatedWorker(RingCoordinatedWorker):
             ),
             routing_key=self._ring_routing_key(self._get_next_node_id()),
         )
+        self._partial_processed_count[(client_id, gateway_id)] = processed_count
+        self._partial_sent_to_ring[(client_id, gateway_id)] = sent_count
 
     def _update_sent_ring_eof(self, client_id, gateway_id, ring_eof):
         with self._message_sent_count_lock:
             sent_count = self._message_sent_count.get((client_id, gateway_id), 0)
-            partial_sent_count_to_ring = self._partial_sent_to_ring.get((client_id, gateway_id), 0)
+            partial_sent_count_to_ring = self._partial_sent_to_ring.get(
+                (client_id, gateway_id), 0
+            )
 
             total_sent_count = (
                 ring_eof.total_sent_count + sent_count - partial_sent_count_to_ring

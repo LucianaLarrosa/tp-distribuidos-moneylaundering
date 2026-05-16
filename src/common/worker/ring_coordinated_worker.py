@@ -91,11 +91,15 @@ class RingCoordinatedWorker(Worker):
                 ring_eof.total_processed_count + processed_count - partial_count
             )
             self._partial_processed_count[(client_id, gateway_id)] = processed_count
-        total_processed_count = ring_eof.total_processed_count + processed_count
         coordinator_id = (
             self._node_id if total_processed_count >= ring_eof.expected_count else None
         )
-        return RingEOF(ring_eof.expected_count, total_processed_count, coordinator_id)
+        return RingEOF(
+            expected_count=ring_eof.expected_count,
+            total_processed_count=total_processed_count,
+            coordinator_id=coordinator_id,
+            total_sent_count=ring_eof.total_sent_count,
+        )
 
     def _handle_control_eof_message(self, client_id, gateway_id, ring_eof):
         """
@@ -169,6 +173,7 @@ class RingCoordinatedWorker(Worker):
             ),
             routing_key=self._ring_routing_key(self._get_next_node_id()),
         )
+        self._partial_processed_count[(client_id, gateway_id)] = processed_count
 
     def _handle_data_message(self, msg_type, client_id, gateway_id, payload):
         """
