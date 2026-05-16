@@ -110,7 +110,8 @@ class RingCoordinatedWorker(Worker):
                 routing_key=self._ring_routing_key(self._get_next_node_id()),
             )
         else:
-            self._flush_data(client_id, gateway_id)
+            if not self._stateless_flag:
+                self._flush_data(client_id, gateway_id)
             if ring_eof.coordinator_id == self._node_id:
                 self._output_middleware.send(
                     internal.serialize_msg(
@@ -118,14 +119,19 @@ class RingCoordinatedWorker(Worker):
                         client_id,
                         gateway_id,
                         EOF(
-                            message_count=(
-                                self._ring_size
-                                if not self._stateless_flag
-                                else ring_eof.total_processed_count
-                            )
+                            self._ring_size
+                            if not self._stateless_flag
+                            else ring_eof.total_processed_count
                         ),
                     )
                 )
+                return
+        self._output_control_middleware.send(
+            internal.serialize_msg(
+                internal.MsgType.RING_EOF, client_id, gateway_id, ring_eof
+            ),
+            routing_key=self._ring_routing_key(self._get_next_node_id()),
+        )
 
     def _handle_control_message(self, message, ack, nack):
         """
