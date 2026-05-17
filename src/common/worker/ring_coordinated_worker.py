@@ -140,13 +140,8 @@ class RingCoordinatedWorker(Worker):
         else:
             self._flush_data(client_id, gateway_id)
             if ring_eof.coordinator_id == self._node_id:
-                self._output_middleware.send(
-                    internal.serialize_msg(
-                        internal.MsgType.EOF,
-                        client_id,
-                        gateway_id,
-                        EOF(self._get_final_eof_count(ring_eof)),
-                    )
+                self._send_final_eof(
+                    client_id, gateway_id, EOF(self._get_final_eof_count(ring_eof))
                 )
                 return
         self._control_output_control_middleware.send(
