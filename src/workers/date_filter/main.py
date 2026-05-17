@@ -63,7 +63,10 @@ class DateFilter(StatelessWorker):
         )
         if self.config.date_from_1 <= transaction_timestamp <= self.config.date_to_1:
             return f"{currency_key}.{self.config.output_routing_key_period_1}"
-        if self.config.date_from_2 <= transaction_timestamp <= self.config.date_to_2:
+        if (
+            self.config.date_from_2 <= transaction_timestamp <= self.config.date_to_2
+            and currency_key == self.config.output_routing_key_usd
+        ):
             return f"{currency_key}.{self.config.output_routing_key_period_2}"
         return None
 
