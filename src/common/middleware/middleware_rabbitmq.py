@@ -72,6 +72,9 @@ class MessageMiddlewareRabbitMQBase:
         If an internal error occurs that cannot be resolved, it raises MessageMiddlewareCloseError.
         """
         try:
+            if not self.connection.is_open:
+                return
+
             self.connection.close()
         except Exception as e:
             raise MessageMiddlewareCloseError(
