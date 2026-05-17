@@ -11,6 +11,7 @@ class Config:
             routing_key.strip()
             for routing_key in os.environ["INPUT_ROUTING_KEY"].split(ENV_SEPARATOR)
         ]
+        self.input_queue_name = os.environ.get("INPUT_QUEUE_NAME")
         self.output_queue = os.environ["OUTPUT_QUEUE"]
         self.valid_payment_formats = {
             payment_format.strip().lower()

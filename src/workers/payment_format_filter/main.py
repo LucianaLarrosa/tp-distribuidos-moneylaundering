@@ -24,6 +24,7 @@ class PaymentFormatFilter(StatelessWorker):
             host=config.rabbitmq_host,
             exchange_name=config.input_exchange,
             binding_patterns=config.input_routing_keys,
+            queue_name=config.input_queue_name,
         )
         self._output_queue = MessageMiddlewareQueueRabbitMQ(
             host=config.rabbitmq_host,

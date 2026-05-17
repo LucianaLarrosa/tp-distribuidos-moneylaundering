@@ -7,6 +7,7 @@ class Config:
         self.rabbitmq_host = os.environ["RABBITMQ_HOST"]
         self.input_exchange = os.environ["INPUT_EXCHANGE"]
         self.input_routing_key = os.environ["INPUT_ROUTING_KEY"]
+        self.input_queue_name = os.environ.get("INPUT_QUEUE_NAME")
         self.output_exchange = os.environ["OUTPUT_EXCHANGE"]
         self.date_format = os.environ["DATE_FORMAT"]
         self.date_from_1 = datetime.strptime(
