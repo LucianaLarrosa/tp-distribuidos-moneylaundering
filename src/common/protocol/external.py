@@ -1,4 +1,5 @@
 from common.models.raw_transaction import RawTransaction
+from common.models.raw_account import RawAccount
 from common.models.query_results import (
     Q1Result,
     Q2Result,
@@ -15,25 +16,20 @@ class MsgType:
     ACK = 3  # [1byte type] (gateway -> client)
     QUERY_RESULT = 4  # [1byte type] [4 bytes payload_size] [1byte query_id] [4 bytes count] [result_record * count] (gateway -> client) result_record cambia según query_id porque cada query devuelve algo distinto
     QUERY_END = 5  # [1byte type] [1byte query_id] (gateway -> client)
+    ACCOUNT_BATCH = 6  # [1byte type] [4 bytes payload_size] [4 bytes count] [account * count] (client -> gateway)
 
 
-# QUERY 1: result_record = [4B from_bank][4B from_account_len][N][4B to_bank][4B to_account_len][N][8B amount_paid]
-# QUERY 2: result_record = [4B bank_name_len][N][4B from_account_len][N][8B amount_paid]
-# QUERY 3: result_record = [4B from_bank][4B from_account_len][N][8B amount_paid]
-# QUERY 4: result_record = [4B from_bank][4B from_account_len][N][4B to_bank][4B to_account_len][N]
-# QUERY 5: result_record = [8B count]
-#
 # TRANSACTION = [4B + N raw_line]
+# ACCOUNT = [4B + N raw_line]
+
+
+# ---------- serializer / deserializer para transactions y accounts ----------
 
 
 def _serialize_lp_string(s):
     """Serializa un string agregandole su longitud"""
     encoded = external_serializer.serialize_string(s)
     return external_serializer.serialize_uint32(len(encoded)) + encoded
-
-
-def _serialize_transaction(tx):
-    return _serialize_lp_string(tx.raw)
 
 
 def _deserialize_lp_string(buf, offset):
@@ -47,16 +43,31 @@ def _deserialize_lp_string(buf, offset):
     return s, offset
 
 
+def _serialize_transaction(tx):
+    return _serialize_lp_string(tx.raw)
+
+
 def _deserialize_transaction(buf, offset):
     """Devuelve (RawTransaction, nuevo_offset)."""
     raw, offset = _deserialize_lp_string(buf, offset)
     return RawTransaction(raw=raw), offset
 
 
+def _serialize_account(account):
+    return _serialize_lp_string(account.raw)
+
+
+def _deserialize_account(buf, offset):
+    """Devuelve (RawAccount, nuevo_offset)."""
+    raw, offset = _deserialize_lp_string(buf, offset)
+    return RawAccount(raw=raw), offset
+
+
 # ---------- result_record por query ----------
 
 
 def _serialize_result_record_q1(record):
+    """result_record = [4B from_bank][4B from_account_len][N][4B to_bank][4B to_account_len][N][8B amount_paid]"""
     return b"".join(
         [
             external_serializer.serialize_uint32(record.from_bank),
@@ -87,6 +98,7 @@ def _deserialize_result_record_q1(buf, offset):
 
 
 def _serialize_result_record_q2(record):
+    """result_record = [4B bank_name_len][N][4B from_account_len][N][8B amount_paid]"""
     return b"".join(
         [
             _serialize_lp_string(record.bank_name),
@@ -107,6 +119,7 @@ def _deserialize_result_record_q2(buf, offset):
 
 
 def _serialize_result_record_q3(record):
+    """ "result_record = [4B from_bank][4B from_account_len][N][8B amount_paid]"""
     return b"".join(
         [
             external_serializer.serialize_uint32(record.from_bank),
@@ -130,6 +143,7 @@ def _deserialize_result_record_q3(buf, offset):
 
 
 def _serialize_result_record_q4(record):
+    """result_record = [4B from_bank][4B from_account_len][N][4B to_bank][4B to_account_len][N]"""
     return b"".join(
         [
             external_serializer.serialize_uint32(record.from_bank),
@@ -155,6 +169,7 @@ def _deserialize_result_record_q4(buf, offset):
 
 
 def _serialize_result_record_q5(record):
+    """result_record = [8B count]"""
     return external_serializer.serialize_uint64(record.count)
 
 
@@ -186,20 +201,20 @@ RESULT_RECORD_DESERIALIZERS = {
 # ---------- handlers send / recv por tipo de mensaje ----------
 
 
-def _send_transaction_batch(sock, transactions):
-    payload = external_serializer.serialize_uint32(len(transactions))
-    for tx in transactions:
-        payload += _serialize_transaction(tx)
+def _send_batch(sock, msg_type, records, serializer):
+    payload = external_serializer.serialize_uint32(len(records))
+    for record in records:
+        payload += serializer(record)
 
     frame = (
-        external_serializer.serialize_uint8(MsgType.TRANSACTION_BATCH)
+        external_serializer.serialize_uint8(msg_type)
         + external_serializer.serialize_uint32(len(payload))
         + payload
     )
     sock.send_all(frame)
 
 
-def _recv_transaction_batch(sock):
+def _recv_batch(sock, deserializer):
     size = external_serializer.deserialize_uint32(
         sock.recv_exact(external_serializer.UINT32_SIZE)
     )
@@ -211,11 +226,27 @@ def _recv_transaction_batch(sock):
     )
     offset += external_serializer.UINT32_SIZE
 
-    transactions = []
+    items = []
     for _ in range(count):
-        tx, offset = _deserialize_transaction(payload, offset)
-        transactions.append(tx)
-    return transactions
+        item, offset = deserializer(payload, offset)
+        items.append(item)
+    return items
+
+
+def _send_transaction_batch(sock, transactions):
+    _send_batch(sock, MsgType.TRANSACTION_BATCH, transactions, _serialize_transaction)
+
+
+def _recv_transaction_batch(sock):
+    return _recv_batch(sock, _deserialize_transaction)
+
+
+def _send_account_batch(sock, accounts):
+    _send_batch(sock, MsgType.ACCOUNT_BATCH, accounts, _serialize_account)
+
+
+def _recv_account_batch(sock):
+    return _recv_batch(sock, _deserialize_account)
 
 
 def _send_eof(sock):
@@ -294,6 +325,7 @@ SEND_MSG_HANDLERS = {
     MsgType.ACK: _send_ack,
     MsgType.QUERY_RESULT: _send_query_result,
     MsgType.QUERY_END: _send_query_end,
+    MsgType.ACCOUNT_BATCH: _send_account_batch,
 }
 
 RECV_MSG_HANDLERS = {
@@ -302,6 +334,7 @@ RECV_MSG_HANDLERS = {
     MsgType.ACK: _recv_ack,
     MsgType.QUERY_RESULT: _recv_query_result,
     MsgType.QUERY_END: _recv_query_end,
+    MsgType.ACCOUNT_BATCH: _recv_account_batch,
 }
 
 
@@ -314,7 +347,6 @@ def send_msg(sock, msg_type, *args):
 
 
 def recv_msg(sock):
-    """Devuelve (msg_type, payload)."""
     msg_type = external_serializer.deserialize_uint8(
         sock.recv_exact(external_serializer.UINT8_SIZE)
     )

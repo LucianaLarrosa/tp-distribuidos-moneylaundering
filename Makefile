@@ -4,8 +4,9 @@ GATEWAY_HOST ?=
 GATEWAY_PORT ?= 5000
 SERVER_HOST  ?= localhost
 SERVER_PORT  ?= 5000
-INPUT_CSV    ?= ../dataset/HI-Small_Trans2.csv
-BATCH_SIZE   ?= 1000
+INPUT_CSV_TRANSACTIONS ?= ../dataset/HI-Small_Trans2.csv
+INPUT_CSV_ACCOUNTS     ?= ../dataset/HI-Small_accounts.csv
+BATCH_SIZE             ?= 1000
 
 DEBUG_OUTPUT_DIR ?= ../tmp
 POOL_SIZE        ?=
@@ -21,7 +22,8 @@ gateway:
 
 client:
 	cd src && SERVER_HOST=$(SERVER_HOST) SERVER_PORT=$(SERVER_PORT) \
-	INPUT_CSV=$(INPUT_CSV) BATCH_SIZE=$(BATCH_SIZE) \
+	INPUT_CSV_TRANSACTIONS=$(INPUT_CSV_TRANSACTIONS) INPUT_CSV_ACCOUNTS=$(INPUT_CSV_ACCOUNTS) \
+	BATCH_SIZE=$(BATCH_SIZE) \
 	python3 -m client.main
 
 clients: clean-tmp
@@ -33,14 +35,21 @@ clean-tmp:
 	rm -f tmp/gateway_received_*.csv
 
 verify:
-	@expected=$$(tail -n +2 dataset/HI-Small_Trans2.csv | wc -l | tr -d ' '); \
-	for f in tmp/gateway_received_*.csv; do \
+	@for f in tmp/gateway_received_transactions_*.csv; do \
 		if diff -q <(tail -n +2 dataset/HI-Small_Trans2.csv) $$f >/dev/null; then \
-			echo "✓ $$f matches dataset ($$expected lines)"; \
+			echo "✓ $$f matches transactions dataset"; \
 		else \
-			echo "✗ $$f differs from dataset"; \
+			echo "✗ $$f differs from transactions dataset"; \
+		fi; \
+	done; \
+	for f in tmp/gateway_received_accounts_*.csv; do \
+		if diff -q <(tail -n +2 dataset/HI-Small_accounts.csv) $$f >/dev/null; then \
+			echo "✓ $$f matches accounts dataset"; \
+		else \
+			echo "✗ $$f differs from accounts dataset"; \
 		fi; \
 	done
+	@$(MAKE) clean-tmp
 
 compose:
 	python compose_generator.py > docker-compose.yaml
