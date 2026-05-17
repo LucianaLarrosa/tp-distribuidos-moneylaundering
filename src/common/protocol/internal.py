@@ -6,6 +6,7 @@ from common.models.transaction import Transaction
 from common.models.transaction_for_currency_conversion import (
     TransactionForCurrencyConversion,
 )
+from common.models.transaction_amount import TransactionAmount
 from common.models.eof import EOF, RingEOF
 
 
@@ -13,6 +14,7 @@ class MsgType:
     RAW_TRANSACTION_BATCH = "raw_transaction_batch"
     TRANSACTION_BATCH = "transaction_batch"
     CURRENCY_CONVERSION_BATCH = "currency_conversion_batch"
+    AMOUNT_TRANSACTION_BATCH = "amount_transaction_batch"
     EOF = "eof"
     RING_EOF = "ring_eof"
 
@@ -66,6 +68,10 @@ def _serialize_currency_conversion_batch(transactions):
     return [asdict(tx) for tx in transactions]
 
 
+def _serialize_amount_transaction_batch(transactions):
+    return [asdict(tx) for tx in transactions]
+
+
 def _deserialize_raw_transaction_batch(payload):
     return [RawTransaction(**tx) for tx in payload]
 
@@ -76,6 +82,10 @@ def _deserialize_transaction_batch(payload):
 
 def _deserialize_currency_conversion_batch(payload):
     return [TransactionForCurrencyConversion(**tx) for tx in payload]
+
+
+def _deserialize_amount_transaction_batch(payload):
+    return [TransactionAmount(**tx) for tx in payload]
 
 
 def _deserialize_eof(payload):
@@ -90,6 +100,7 @@ SERIALIZERS = {
     MsgType.RAW_TRANSACTION_BATCH: _serialize_raw_transaction_batch,
     MsgType.TRANSACTION_BATCH: _serialize_transaction_batch,
     MsgType.CURRENCY_CONVERSION_BATCH: _serialize_currency_conversion_batch,
+    MsgType.AMOUNT_TRANSACTION_BATCH: _serialize_amount_transaction_batch,
     MsgType.EOF: _serialize_eof,
     MsgType.RING_EOF: _serialize_ring_eof,
 }
@@ -98,6 +109,7 @@ DESERIALIZERS = {
     MsgType.RAW_TRANSACTION_BATCH: _deserialize_raw_transaction_batch,
     MsgType.TRANSACTION_BATCH: _deserialize_transaction_batch,
     MsgType.CURRENCY_CONVERSION_BATCH: _deserialize_currency_conversion_batch,
+    MsgType.AMOUNT_TRANSACTION_BATCH: _deserialize_amount_transaction_batch,
     MsgType.EOF: _deserialize_eof,
     MsgType.RING_EOF: _deserialize_ring_eof,
 }
