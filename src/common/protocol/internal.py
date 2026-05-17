@@ -6,6 +6,7 @@ from common.models.raw_transaction import RawTransaction
 from common.models.raw_account import RawAccount
 from common.models.transaction import Transaction
 from common.models.bank import Bank
+from common.models.bank_max_partial import BankMaxPartial
 from common.models.eof import EOF, RingEOF
 
 
@@ -14,6 +15,7 @@ class MsgType:
     RAW_ACCOUNT_BATCH = "raw_account_batch"
     TRANSACTION_BATCH = "transaction_batch"
     BANK_BATCH = "bank_batch"
+    BANK_MAX_PARTIAL_BATCH = "bank_max_partial_batch"
     EOF = "eof"
     RING_EOF = "ring_eof"
 
@@ -81,6 +83,10 @@ def _deserialize_bank_batch(payload):
     return _deserialize_batch(Bank, payload)
 
 
+def _deserialize_bank_max_partial_batch(payload):
+    return _deserialize_batch(BankMaxPartial, payload)
+
+
 def _deserialize_transaction_batch(payload):
     return [
         Transaction(**{**tx, "timestamp": datetime.fromisoformat(tx["timestamp"])})
@@ -101,6 +107,7 @@ SERIALIZERS = {
     MsgType.RAW_ACCOUNT_BATCH: _serialize_batch,
     MsgType.TRANSACTION_BATCH: _serialize_transaction_batch,
     MsgType.BANK_BATCH: _serialize_batch,
+    MsgType.BANK_MAX_PARTIAL_BATCH: _serialize_batch,
     MsgType.EOF: _serialize_eof,
     MsgType.RING_EOF: _serialize_ring_eof,
 }
@@ -110,6 +117,7 @@ DESERIALIZERS = {
     MsgType.RAW_ACCOUNT_BATCH: _deserialize_raw_account_batch,
     MsgType.TRANSACTION_BATCH: _deserialize_transaction_batch,
     MsgType.BANK_BATCH: _deserialize_bank_batch,
+    MsgType.BANK_MAX_PARTIAL_BATCH: _deserialize_bank_max_partial_batch,
     MsgType.EOF: _deserialize_eof,
     MsgType.RING_EOF: _deserialize_ring_eof,
 }
