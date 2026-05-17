@@ -3,12 +3,16 @@ from dataclasses import asdict
 
 from common.models.raw_transaction import RawTransaction
 from common.models.transaction import Transaction
+from common.models.transaction_for_currency_conversion import (
+    TransactionForCurrencyConversion,
+)
 from common.models.eof import EOF, RingEOF
 
 
 class MsgType:
     RAW_TRANSACTION_BATCH = "raw_transaction_batch"
     TRANSACTION_BATCH = "transaction_batch"
+    CURRENCY_CONVERSION_BATCH = "currency_conversion_batch"
     EOF = "eof"
     RING_EOF = "ring_eof"
 
@@ -58,12 +62,20 @@ def _serialize_ring_eof(ring_eof):
     return asdict(ring_eof)
 
 
+def _serialize_currency_conversion_batch(transactions):
+    return [asdict(tx) for tx in transactions]
+
+
 def _deserialize_raw_transaction_batch(payload):
     return [RawTransaction(**tx) for tx in payload]
 
 
 def _deserialize_transaction_batch(payload):
     return [Transaction(**tx) for tx in payload]
+
+
+def _deserialize_currency_conversion_batch(payload):
+    return [TransactionForCurrencyConversion(**tx) for tx in payload]
 
 
 def _deserialize_eof(payload):
@@ -77,6 +89,7 @@ def _deserialize_ring_eof(payload):
 SERIALIZERS = {
     MsgType.RAW_TRANSACTION_BATCH: _serialize_raw_transaction_batch,
     MsgType.TRANSACTION_BATCH: _serialize_transaction_batch,
+    MsgType.CURRENCY_CONVERSION_BATCH: _serialize_currency_conversion_batch,
     MsgType.EOF: _serialize_eof,
     MsgType.RING_EOF: _serialize_ring_eof,
 }
@@ -84,6 +97,7 @@ SERIALIZERS = {
 DESERIALIZERS = {
     MsgType.RAW_TRANSACTION_BATCH: _deserialize_raw_transaction_batch,
     MsgType.TRANSACTION_BATCH: _deserialize_transaction_batch,
+    MsgType.CURRENCY_CONVERSION_BATCH: _deserialize_currency_conversion_batch,
     MsgType.EOF: _deserialize_eof,
     MsgType.RING_EOF: _deserialize_ring_eof,
 }
