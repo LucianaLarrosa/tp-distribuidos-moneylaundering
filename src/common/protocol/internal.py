@@ -41,10 +41,7 @@ def deserialize_msg(data):
 
 
 def _serialize_transaction_batch(transactions):
-    tx_serialized = []
-    for tx in transactions:
-        tx_serialized.append(asdict(tx))
-    return tx_serialized
+    return [asdict(tx) for tx in transactions]
 
 
 def _serialize_eof(eof):
