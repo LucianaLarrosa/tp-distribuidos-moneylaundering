@@ -1,12 +1,19 @@
 import json
 from dataclasses import asdict
+from datetime import datetime
 
 from common.models.raw_transaction import RawTransaction
+from common.models.raw_account import RawAccount
+from common.models.transaction import Transaction
+from common.models.bank import Bank
 from common.models.eof import EOF, RingEOF
 
 
 class MsgType:
+    RAW_TRANSACTION_BATCH = "raw_transaction_batch"
+    RAW_ACCOUNT_BATCH = "raw_account_batch"
     TRANSACTION_BATCH = "transaction_batch"
+    BANK_BATCH = "bank_batch"
     EOF = "eof"
     RING_EOF = "ring_eof"
 
@@ -40,8 +47,14 @@ def deserialize_msg(data):
 # ---------- handlers serialize / deserialize por tipo de mensaje ----------
 
 
+def _serialize_batch(items):
+    return [asdict(item) for item in items]
+
+
 def _serialize_transaction_batch(transactions):
-    return [asdict(tx) for tx in transactions]
+    return [
+        {**asdict(tx), "timestamp": tx.timestamp.isoformat()} for tx in transactions
+    ]
 
 
 def _serialize_eof(eof):
@@ -52,8 +65,27 @@ def _serialize_ring_eof(ring_eof):
     return asdict(ring_eof)
 
 
+def _deserialize_batch(cls, payload):
+    return [cls(**item) for item in payload]
+
+
+def _deserialize_raw_transaction_batch(payload):
+    return _deserialize_batch(RawTransaction, payload)
+
+
+def _deserialize_raw_account_batch(payload):
+    return _deserialize_batch(RawAccount, payload)
+
+
+def _deserialize_bank_batch(payload):
+    return _deserialize_batch(Bank, payload)
+
+
 def _deserialize_transaction_batch(payload):
-    return [RawTransaction(**tx) for tx in payload]
+    return [
+        Transaction(**{**tx, "timestamp": datetime.fromisoformat(tx["timestamp"])})
+        for tx in payload
+    ]
 
 
 def _deserialize_eof(payload):
@@ -65,13 +97,19 @@ def _deserialize_ring_eof(payload):
 
 
 SERIALIZERS = {
+    MsgType.RAW_TRANSACTION_BATCH: _serialize_batch,
+    MsgType.RAW_ACCOUNT_BATCH: _serialize_batch,
     MsgType.TRANSACTION_BATCH: _serialize_transaction_batch,
+    MsgType.BANK_BATCH: _serialize_batch,
     MsgType.EOF: _serialize_eof,
     MsgType.RING_EOF: _serialize_ring_eof,
 }
 
 DESERIALIZERS = {
+    MsgType.RAW_TRANSACTION_BATCH: _deserialize_raw_transaction_batch,
+    MsgType.RAW_ACCOUNT_BATCH: _deserialize_raw_account_batch,
     MsgType.TRANSACTION_BATCH: _deserialize_transaction_batch,
+    MsgType.BANK_BATCH: _deserialize_bank_batch,
     MsgType.EOF: _deserialize_eof,
     MsgType.RING_EOF: _deserialize_ring_eof,
 }
