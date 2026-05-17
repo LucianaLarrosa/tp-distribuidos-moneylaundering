@@ -49,7 +49,15 @@ class RingCoordinatedWorker(Worker):
     @abstractmethod
     def _output_control_middleware(self):
         """
-        Return the output middleware to send control messages to the next node in the ring.
+        Return the output middleware to send control messages from the main thread.
+        """
+        pass
+
+    @property
+    @abstractmethod
+    def _control_output_control_middleware(self):
+        """
+        Return the output middleware to send control messages from the control thread.
         """
         pass
 
@@ -141,7 +149,7 @@ class RingCoordinatedWorker(Worker):
                     )
                 )
                 return
-        self._output_control_middleware.send(
+        self._control_output_control_middleware.send(
             internal.serialize_msg(
                 internal.MsgType.RING_EOF, client_id, gateway_id, ring_eof
             ),
