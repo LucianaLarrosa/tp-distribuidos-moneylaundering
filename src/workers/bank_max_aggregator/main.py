@@ -3,7 +3,7 @@ import logging
 
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
-    MessageMiddlewareQueueRabbitMQ,
+    MessageMiddlewareExchangeTopicRabbitMQ,
 )
 from common.models.bank_max_partial import BankMaxPartial
 from common.protocol import internal
@@ -15,10 +15,14 @@ class BankMaxAggregator(SentCoordinatedWorker):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self._local_max = {}  # (client_id, gateway_id) -> {from_bank: tx_with_max_amount}
+        self._local_max = (
+            {}
+        )  # (client_id, gateway_id) -> {from_bank: tx_with_max_amount}
 
-        self._input_queue = MessageMiddlewareQueueRabbitMQ(
+        self._input_queue = MessageMiddlewareExchangeTopicRabbitMQ(
             host=config.rabbitmq_host,
+            exchange_name=config.input_exchange,
+            binding_patterns=config.input_binding_patterns,
             queue_name=config.input_queue,
         )
         self._output_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
@@ -113,6 +117,12 @@ class BankMaxAggregator(SentCoordinatedWorker):
             routing_key=self._shard_routing_key(shard_id),
         )
         self._increment_sent_count(client_id, gateway_id)
+
+    def _send_final_eof(self, client_id, gateway_id, eof):
+        self._output_exchange.send(
+            internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof),
+            routing_key=self._shard_routing_key(0),
+        )
 
 
 def main():
