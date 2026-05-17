@@ -42,6 +42,14 @@ class Worker(ABC):
         """
         pass
 
+    def _send_final_eof(self, client_id, gateway_id, eof):
+        """
+        Send the final EOF to the next stage.
+        """
+        self._output_middleware.send(
+            internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof)
+        )
+
     def _handle_message(self, message, ack, nack):
         """
         Handle incoming messages from the input middleware accordingly.
