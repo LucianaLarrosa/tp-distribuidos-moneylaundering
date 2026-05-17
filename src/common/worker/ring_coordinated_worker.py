@@ -139,6 +139,9 @@ class RingCoordinatedWorker(Worker):
             ring_eof = self._update_ring_eof(client_id, gateway_id, ring_eof)
         else:
             self._flush_data(client_id, gateway_id)
+            ring_eof.total_sent_count = self._get_total_sent_count(
+                client_id, gateway_id, ring_eof.total_sent_count or 0
+            )
             if ring_eof.coordinator_id == self._node_id:
                 self._send_final_eof(
                     client_id, gateway_id, EOF(self._get_final_eof_count(ring_eof))
