@@ -1,7 +1,12 @@
 import json
 from dataclasses import asdict
+from datetime import datetime
 
 from common.models.raw_transaction import RawTransaction
+from common.models.raw_account import RawAccount
+from common.models.transaction import Transaction
+from common.models.bank import Bank
+from common.models.query_results import Q2Result
 from common.models.transaction import Transaction
 from common.models.transaction_for_currency_conversion import (
     TransactionForCurrencyConversion,
@@ -12,13 +17,21 @@ from common.models.eof import EOF, RingEOF
 
 
 class MsgType:
-    RAW_TRANSACTION_BATCH = "raw_transaction_batch"
-    TRANSACTION_BATCH = "transaction_batch"
-    CURRENCY_CONVERSION_BATCH = "currency_conversion_batch"
-    AMOUNT_TRANSACTION_BATCH = "amount_transaction_batch"
-    COUNT = "count"
-    EOF = "eof"
-    RING_EOF = "ring_eof"
+    Q1_RESULT_BATCH = 1
+    Q2_RESULT_BATCH = 2
+    Q3_RESULT_BATCH = 3
+    Q4_RESULT_BATCH = 4
+    Q5_RESULT_BATCH = 5
+    RAW_TRANSACTION_BATCH = 6
+    RAW_ACCOUNT_BATCH = 7
+    TRANSACTION_BATCH = 8
+    BANK_BATCH = 9
+    QUERY_END = 10
+    CURRENCY_CONVERSION_BATCH = 11
+    AMOUNT_TRANSACTION_BATCH = 12
+    COUNT = 13
+    EOF = 14
+    RING_EOF = 15
 
 
 # ---------- API ----------
@@ -50,12 +63,14 @@ def deserialize_msg(data):
 # ---------- handlers serialize / deserialize por tipo de mensaje ----------
 
 
-def _serialize_raw_transaction_batch(transactions):
-    return [asdict(tx) for tx in transactions]
+def _serialize_batch(items):
+    return [asdict(item) for item in items]
 
 
 def _serialize_transaction_batch(transactions):
-    return [asdict(tx) for tx in transactions]
+    return [
+        {**asdict(tx), "timestamp": tx.timestamp.isoformat()} for tx in transactions
+    ]
 
 
 def _serialize_eof(eof):
@@ -64,6 +79,26 @@ def _serialize_eof(eof):
 
 def _serialize_ring_eof(ring_eof):
     return asdict(ring_eof)
+
+
+def _deserialize_batch(cls, payload):
+    return [cls(**item) for item in payload]
+
+
+def _deserialize_raw_transaction_batch(payload):
+    return _deserialize_batch(RawTransaction, payload)
+
+
+def _deserialize_raw_account_batch(payload):
+    return _deserialize_batch(RawAccount, payload)
+
+
+def _deserialize_bank_batch(payload):
+    return _deserialize_batch(Bank, payload)
+
+
+def _deserialize_q2_result_batch(payload):
+    return _deserialize_batch(Q2Result, payload)
 
 
 def _serialize_currency_conversion_batch(transactions):
@@ -79,7 +114,18 @@ def _serialize_count(count):
 
 
 def _deserialize_raw_transaction_batch(payload):
-    return [RawTransaction(**tx) for tx in payload]
+    return [
+        Transaction(**{**tx, "timestamp": datetime.fromisoformat(tx["timestamp"])})
+        for tx in payload
+    ]
+
+
+def _serialize_query_end(query_id, message_count):
+    return {"query_id": query_id, "message_count": message_count}
+
+
+def _deserialize_query_end(payload):
+    return payload["query_id"], payload["message_count"]
 
 
 def _deserialize_transaction_batch(payload):
@@ -107,8 +153,12 @@ def _deserialize_ring_eof(payload):
 
 
 SERIALIZERS = {
-    MsgType.RAW_TRANSACTION_BATCH: _serialize_raw_transaction_batch,
+    MsgType.RAW_TRANSACTION_BATCH: _serialize_batch,
+    MsgType.RAW_ACCOUNT_BATCH: _serialize_batch,
     MsgType.TRANSACTION_BATCH: _serialize_transaction_batch,
+    MsgType.BANK_BATCH: _serialize_batch,
+    MsgType.Q2_RESULT_BATCH: _serialize_batch,
+    MsgType.QUERY_END: _serialize_query_end,
     MsgType.CURRENCY_CONVERSION_BATCH: _serialize_currency_conversion_batch,
     MsgType.AMOUNT_TRANSACTION_BATCH: _serialize_amount_transaction_batch,
     MsgType.COUNT: _serialize_count,
@@ -118,7 +168,11 @@ SERIALIZERS = {
 
 DESERIALIZERS = {
     MsgType.RAW_TRANSACTION_BATCH: _deserialize_raw_transaction_batch,
+    MsgType.RAW_ACCOUNT_BATCH: _deserialize_raw_account_batch,
     MsgType.TRANSACTION_BATCH: _deserialize_transaction_batch,
+    MsgType.BANK_BATCH: _deserialize_bank_batch,
+    MsgType.Q2_RESULT_BATCH: _deserialize_q2_result_batch,
+    MsgType.QUERY_END: _deserialize_query_end,
     MsgType.CURRENCY_CONVERSION_BATCH: _deserialize_currency_conversion_batch,
     MsgType.AMOUNT_TRANSACTION_BATCH: _deserialize_amount_transaction_batch,
     MsgType.COUNT: _deserialize_count,
