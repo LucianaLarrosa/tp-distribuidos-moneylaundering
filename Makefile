@@ -13,6 +13,36 @@ POOL_SIZE        ?=
 
 N_CLIENTS ?= 2
 
+# Replica count for every scalable worker.
+# gateway and low_amount_reducer stay fixed at one instance.
+REPLICAS ?= 3
+TRANSACTIONS_FIELD_MAPPERS ?= $(REPLICAS)
+ACCOUNTS_FIELD_MAPPERS     ?= $(REPLICAS)
+DATE_FILTERS               ?= $(REPLICAS)
+PAYMENT_FORMAT_FILTERS     ?= $(REPLICAS)
+CURRENCY_MAPPERS           ?= $(REPLICAS)
+LOW_AMOUNT_AGGREGATORS     ?= $(REPLICAS)
+LOW_AMOUNT_REDUCERS        ?= 1
+BANK_MAX_AGGREGATORS       ?= $(REPLICAS)
+BANK_MAX_REDUCERS          ?= $(REPLICAS)
+BANK_MAPPERS               ?= $(REPLICAS)
+
+COMPOSE_FILE ?= docker-compose.yaml
+
+COMPOSE_ARGS = \
+	--replicas                    $(REPLICAS) \
+	--transactions-field-mappers  $(TRANSACTIONS_FIELD_MAPPERS) \
+	--accounts-field-mappers      $(ACCOUNTS_FIELD_MAPPERS) \
+	--date-filters                $(DATE_FILTERS) \
+	--payment-format-filters      $(PAYMENT_FORMAT_FILTERS) \
+	--currency-mappers            $(CURRENCY_MAPPERS) \
+	--low-amount-aggregators      $(LOW_AMOUNT_AGGREGATORS) \
+	--low-amount-reducers         $(LOW_AMOUNT_REDUCERS) \
+	--bank-max-aggregators        $(BANK_MAX_AGGREGATORS) \
+	--bank-max-reducers           $(BANK_MAX_REDUCERS) \
+	--bank-mappers                $(BANK_MAPPERS) \
+	--output                      $(COMPOSE_FILE)
+
 .PHONY: compose build up down logs clean gateway client clients verify clean-tmp
 
 gateway:
@@ -52,20 +82,20 @@ verify:
 	@$(MAKE) clean-tmp
 
 compose:
-	python compose_generator.py > docker-compose.yaml
+	python3 compose_generator.py $(COMPOSE_ARGS)
 
 build: compose
-	docker compose build
+	docker compose -f $(COMPOSE_FILE) build
 
 up: compose
-	docker compose up -d
+	docker compose -f $(COMPOSE_FILE) up -d
 
 down:
-	docker compose down -v
+	docker compose -f $(COMPOSE_FILE) down -v
 
 logs:
-	docker compose logs -f
+	docker compose -f $(COMPOSE_FILE) logs -f
 
 clean:
-	docker compose down -v --rmi local
-	rm -f docker-compose.yaml
+	docker compose -f $(COMPOSE_FILE) down -v --rmi local
+	rm -f $(COMPOSE_FILE)
