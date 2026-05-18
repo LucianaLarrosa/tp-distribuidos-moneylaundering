@@ -84,10 +84,11 @@ class BankMaxAggregator(SentCoordinatedWorker):
         super()._handle_data_message(_, client_id, gateway_id, transaction_batch)
         flow_max = self._local_max.setdefault((client_id, gateway_id), {})
         for transaction in transaction_batch:
-            current = flow_max.get(transaction.from_bank)
+            from_bank = str(int(transaction.from_bank))
+            current = flow_max.get(from_bank)
             if current is None or transaction.amount > current.amount:
-                flow_max[transaction.from_bank] = BankMaxPartial(
-                    from_bank=transaction.from_bank,
+                flow_max[from_bank] = BankMaxPartial(
+                    from_bank=from_bank,
                     from_account=transaction.from_account,
                     amount=transaction.amount,
                 )

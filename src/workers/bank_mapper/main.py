@@ -142,7 +142,7 @@ class BankMapper(StatelessCoordinatedWorker):
         key = self._flow_key(client_id, gateway_id)
         mapped_batch = []
         for bank_max in bank_max_batch:
-            bank_id = bank_max.from_bank
+            bank_id = str(int(bank_max.from_bank))
             with self._bank_names_lock:
                 bank_name = self._bank_names[key][bank_id]
             mapped_batch.append(
