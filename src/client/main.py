@@ -26,8 +26,9 @@ class Client:
 
         try:
             self._send_accounts()
+            self._send_eof_and_wait_ack(MsgType.EOF_ACCOUNTS)
             self._send_transactions()
-            self._send_eof_and_wait_ack()
+            self._send_eof_and_wait_ack(MsgType.EOF_TRANSACTIONS)
         finally:
             self._disconnect()
 
@@ -66,9 +67,9 @@ class Client:
             total += len(batch)
         return total
 
-    def _send_eof_and_wait_ack(self):
-        logging.info("Sending EOF")
-        external.send_msg(self._sock, MsgType.EOF)
+    def _send_eof_and_wait_ack(self, eof_msg_type):
+        logging.info(f"Sending EOF (type={eof_msg_type})")
+        external.send_msg(self._sock, eof_msg_type)
 
         msg_type, _ = external.recv_msg(self._sock)
         if msg_type != MsgType.ACK:
