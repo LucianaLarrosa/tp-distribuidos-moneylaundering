@@ -130,9 +130,11 @@ class MessageMiddlewareExchangeDirectRabbitMQ(
     MessageMiddlewareRabbitMQBase, MessageMiddlewareExchangeDirect
 ):
 
-    def __init__(self, host, exchange_name, routing_keys):
+    def __init__(self, host, exchange_name, routing_keys, queue_name=None):
         """
-        Initializes the connection to the RabbitMQ server, declares the exchange and binds a temporary queue to the exchange with the specified routing keys.
+        Initializes the connection to the RabbitMQ server, declares the exchange and binds a queue to it.
+        If queue_name is provided, consumers share a named durable queue (broker round-robins messages → work distribution).
+        Otherwise each consumer gets its own exclusive queue (broadcast).
         """
         self.exchange_name = exchange_name
         self.routing_keys = routing_keys
@@ -145,8 +147,12 @@ class MessageMiddlewareExchangeDirectRabbitMQ(
                 exchange=self.exchange_name, exchange_type="direct", durable=True
             )
 
-            result = self.channel.queue_declare(queue="", exclusive=True)
-            self.queue_name = result.method.queue
+            if queue_name is None:
+                result = self.channel.queue_declare(queue="", exclusive=True)
+                self.queue_name = result.method.queue
+            else:
+                self.channel.queue_declare(queue=queue_name, durable=True)
+                self.queue_name = queue_name
             for routing_key in self.routing_keys:
                 self.channel.queue_bind(
                     exchange=self.exchange_name,

@@ -23,6 +23,7 @@ class TransactionsFieldMapper(StatelessWorker):
             host=config.rabbitmq_host,
             exchange_name=config.raw_data_exchange,
             routing_keys=[config.input_routing_key],
+            queue_name=config.input_queue_name,
         )
         self._output_exchange = MessageMiddlewareExchangeTopicRabbitMQ(
             host=config.rabbitmq_host,

@@ -7,6 +7,7 @@ class Config:
     rabbitmq_host: str
     raw_data_exchange: str
     input_routing_key: str
+    input_queue_name: str
     output_exchange: str
     output_routing_key_usd: str
     output_routing_key_nousd: str
@@ -19,6 +20,7 @@ class Config:
             rabbitmq_host=os.environ.get("RABBITMQ_HOST", "rabbitmq"),
             raw_data_exchange=os.environ.get("RAW_DATA_EXCHANGE", "raw_data"),
             input_routing_key=os.environ.get("INPUT_ROUTING_KEY", "transaction"),
+            input_queue_name=os.environ.get("INPUT_QUEUE_NAME"),
             output_exchange=os.environ.get("OUTPUT_EXCHANGE", "filtered_transactions"),
             output_routing_key_usd=os.environ.get("OUTPUT_ROUTING_KEY_USD", "usd"),
             output_routing_key_nousd=os.environ.get(
