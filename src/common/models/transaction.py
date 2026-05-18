@@ -5,9 +5,9 @@ from datetime import datetime
 @dataclass
 class Transaction:
     timestamp: datetime
-    from_bank: int
+    from_bank: str
     from_account: str
-    to_bank: int
+    to_bank: str
     to_account: str
     amount: float
     currency: str

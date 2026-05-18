@@ -2,5 +2,5 @@ from dataclasses import dataclass
 
 @dataclass
 class Bank:
-    bank_id: int
+    bank_id: str
     name: str
