@@ -6,15 +6,13 @@ from common.models.raw_transaction import RawTransaction
 from common.models.raw_account import RawAccount
 from common.models.transaction import Transaction
 from common.models.bank import Bank
-from common.models.query_results import Q2Result
-from common.models.transaction import Transaction
+from common.models.query_results import Q2Result, Q5Result
 from common.models.transaction_for_currency_conversion import (
     TransactionForCurrencyConversion,
 )
 from common.models.transaction_amount import TransactionAmount
 from common.models.count import Count
 from common.models.bank_max_partial import BankMaxPartial
-from common.models.query_results import Q2Result
 from common.models.eof import EOF, RingEOF
 
 
@@ -35,7 +33,6 @@ class MsgType:
     EOF = 14
     RING_EOF = 15
     BANK_MAX_PARTIAL_BATCH = 16
-    Q2_RESULT_BATCH = 17
 
 
 # ---------- API ----------
@@ -85,6 +82,22 @@ def _serialize_ring_eof(ring_eof):
     return asdict(ring_eof)
 
 
+def _serialize_currency_conversion_batch(transactions):
+    return [asdict(tx) for tx in transactions]
+
+
+def _serialize_amount_transaction_batch(transactions):
+    return [asdict(tx) for tx in transactions]
+
+
+def _serialize_count(count):
+    return asdict(count)
+
+
+def _serialize_query_end(query_id, message_count):
+    return {"query_id": query_id, "message_count": message_count}
+
+
 def _deserialize_batch(cls, payload):
     return [cls(**item) for item in payload]
 
@@ -109,39 +122,15 @@ def _deserialize_q2_result_batch(payload):
     return _deserialize_batch(Q2Result, payload)
 
 
-def _deserialize_q2_result_batch(payload):
-    return _deserialize_batch(Q2Result, payload)
+def _deserialize_q5_result_batch(payload):
+    return _deserialize_batch(Q5Result, payload)
 
 
-def _serialize_currency_conversion_batch(transactions):
-    return [asdict(tx) for tx in transactions]
-
-
-def _serialize_amount_transaction_batch(transactions):
-    return [asdict(tx) for tx in transactions]
-
-
-def _serialize_count(count):
-    return asdict(count)
-
-
-def _deserialize_raw_transaction_batch(payload):
+def _deserialize_transaction_batch(payload):
     return [
         Transaction(**{**tx, "timestamp": datetime.fromisoformat(tx["timestamp"])})
         for tx in payload
     ]
-
-
-def _serialize_query_end(query_id, message_count):
-    return {"query_id": query_id, "message_count": message_count}
-
-
-def _deserialize_query_end(payload):
-    return payload["query_id"], payload["message_count"]
-
-
-def _deserialize_transaction_batch(payload):
-    return [Transaction(**tx) for tx in payload]
 
 
 def _deserialize_currency_conversion_batch(payload):
@@ -154,6 +143,10 @@ def _deserialize_amount_transaction_batch(payload):
 
 def _deserialize_count(payload):
     return Count(**payload)
+
+
+def _deserialize_query_end(payload):
+    return payload["query_id"], payload["message_count"]
 
 
 def _deserialize_eof(payload):
@@ -170,12 +163,12 @@ SERIALIZERS = {
     MsgType.TRANSACTION_BATCH: _serialize_transaction_batch,
     MsgType.BANK_BATCH: _serialize_batch,
     MsgType.Q2_RESULT_BATCH: _serialize_batch,
+    MsgType.Q5_RESULT_BATCH: _serialize_batch,
     MsgType.QUERY_END: _serialize_query_end,
     MsgType.CURRENCY_CONVERSION_BATCH: _serialize_currency_conversion_batch,
     MsgType.AMOUNT_TRANSACTION_BATCH: _serialize_amount_transaction_batch,
     MsgType.COUNT: _serialize_count,
     MsgType.BANK_MAX_PARTIAL_BATCH: _serialize_batch,
-    MsgType.Q2_RESULT_BATCH: _serialize_batch,
     MsgType.EOF: _serialize_eof,
     MsgType.RING_EOF: _serialize_ring_eof,
 }
@@ -186,12 +179,12 @@ DESERIALIZERS = {
     MsgType.TRANSACTION_BATCH: _deserialize_transaction_batch,
     MsgType.BANK_BATCH: _deserialize_bank_batch,
     MsgType.Q2_RESULT_BATCH: _deserialize_q2_result_batch,
+    MsgType.Q5_RESULT_BATCH: _deserialize_q5_result_batch,
     MsgType.QUERY_END: _deserialize_query_end,
     MsgType.CURRENCY_CONVERSION_BATCH: _deserialize_currency_conversion_batch,
     MsgType.AMOUNT_TRANSACTION_BATCH: _deserialize_amount_transaction_batch,
     MsgType.COUNT: _deserialize_count,
     MsgType.BANK_MAX_PARTIAL_BATCH: _deserialize_bank_max_partial_batch,
-    MsgType.Q2_RESULT_BATCH: _deserialize_q2_result_batch,
     MsgType.EOF: _deserialize_eof,
     MsgType.RING_EOF: _deserialize_ring_eof,
 }

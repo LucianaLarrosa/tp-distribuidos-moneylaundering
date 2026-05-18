@@ -11,6 +11,8 @@ from common.protocol import internal
 from common.worker.stateless_coordinated_worker import StatelessCoordinatedWorker
 from config import Config
 
+QUERY_ID = 2
+
 
 class BankMapper(StatelessCoordinatedWorker):
     def __init__(self, config):
@@ -168,7 +170,13 @@ class BankMapper(StatelessCoordinatedWorker):
 
     def _send_final_eof(self, client_id, gateway_id, eof):
         self._output_exchange.send(
-            internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof),
+            internal.serialize_msg(
+                internal.MsgType.QUERY_END,
+                client_id,
+                gateway_id,
+                QUERY_ID,
+                eof.message_count,
+            ),
             routing_key=gateway_id,
         )
 

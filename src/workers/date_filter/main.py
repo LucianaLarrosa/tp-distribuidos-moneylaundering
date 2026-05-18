@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime
 
 from common.middleware.middleware_rabbitmq import MessageMiddlewareExchangeTopicRabbitMQ
 from common.protocol import internal
@@ -54,9 +53,7 @@ class DateFilter(StatelessWorker):
         """
         Classify a transaction based on its timestamp and currency, returning the appropriate routing key for the output exchange.
         """
-        transaction_timestamp = datetime.strptime(
-            transaction.timestamp, self.config.date_format
-        )
+        transaction_timestamp = transaction.timestamp
         currency_key = (
             self.config.output_routing_key_usd
             if transaction.currency.lower() == self.config.usd_currency

@@ -5,7 +5,7 @@ from common.protocol import external
 from common.protocol import internal
 from common.protocol.external import MsgType
 
-EXPECTED_QUERY_IDS = [2]
+EXPECTED_QUERY_IDS = (2, 5)
 _SENDER_STOP = "__sender_stop__"
 
 
@@ -28,9 +28,12 @@ class ClientHandler:
 
         try:
             self._receive_loop()
-        finally:
+            sender.join()
+        except Exception:
             self._results_queue.put(_SENDER_STOP)
             sender.join()
+            raise
+        finally:
             self._sock.close()
             logging.info("[%s] handler finished.", self._client_id)
 

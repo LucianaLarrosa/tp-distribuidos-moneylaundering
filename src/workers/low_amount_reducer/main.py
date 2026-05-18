@@ -4,11 +4,12 @@ from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
     MessageMiddlewareQueueRabbitMQ,
 )
-from common.models.count import Count
-from common.models.eof import EOF
+from common.models.query_results import Q5Result
 from common.protocol import internal
 from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
 from config import Config
+
+QUERY_ID = 5
 
 
 class LowAmountReducer(StatefulCoordinatedWorker):
@@ -93,22 +94,31 @@ class LowAmountReducer(StatefulCoordinatedWorker):
 
     def _flush_data(self, client_id, gateway_id):
         """
-        Flush any buffered data by sending the count of low amount transactions for the given client_id and gateway_id to the output exchange.
+        Flush any buffered data by sending a Q5 result batch with the accumulated count.
         """
         count = self._counts.pop((client_id, gateway_id), 0)
         self._output_exchange.send(
             internal.serialize_msg(
-                internal.MsgType.COUNT, client_id, gateway_id, Count(count=count)
+                internal.MsgType.Q5_RESULT_BATCH,
+                client_id,
+                gateway_id,
+                [Q5Result(count=count)],
             ),
             routing_key=gateway_id,
         )
 
     def _send_final_eof(self, client_id, gateway_id, eof):
         """
-        Send the final EOF message to the next stage's output exchange with the appropriate routing key.
+        Signal end of Q5 to the gateway with the count of result batches that were emitted.
         """
         self._output_exchange.send(
-            internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof),
+            internal.serialize_msg(
+                internal.MsgType.QUERY_END,
+                client_id,
+                gateway_id,
+                QUERY_ID,
+                eof.message_count,
+            ),
             routing_key=gateway_id,
         )
 

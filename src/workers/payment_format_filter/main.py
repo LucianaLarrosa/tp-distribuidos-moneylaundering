@@ -51,7 +51,7 @@ class PaymentFormatFilter(StatelessWorker):
         """
         filtered = [
             TransactionForCurrencyConversion(
-                timestamp=transaction.timestamp,
+                timestamp=transaction.timestamp.strftime("%Y/%m/%d %H:%M"),
                 amount=transaction.amount,
                 currency=transaction.currency,
             )

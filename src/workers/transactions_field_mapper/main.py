@@ -48,20 +48,23 @@ class TransactionsFieldMapper(StatelessWorker):
         """
         Send the EOF to both output routing keys so all downstream consumers see it.
         """
-        msg = internal.serialize_msg(
-            internal.MsgType.EOF, client_id, gateway_id, eof
-        )
-        self._output_exchange.send(msg, routing_key=self.config.output_routing_key_usd)
-        self._output_exchange.send(msg, routing_key=self.config.output_routing_key_all)
+        msg = internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof)
+        self._output_exchange.send(msg, routing_key=self.config.output_routing_key_eof)
 
     def _handle_data_message(self, _, client_id, gateway_id, payload):
         """
         Parse the raw batch into Transactions and publish to both routing keys.
         """
         transactions = [self._parse(raw_tx.raw) for raw_tx in payload]
-        usd_transactions = [
-            tx for tx in transactions if tx.currency.lower() == self.config.usd_currency
-        ]
+
+        usd_transactions = []
+        nousd_transactions = []
+        for tx in transactions:
+            if tx.currency.lower() == self.config.usd_currency.lower():
+                usd_transactions.append(tx)
+            else:
+                nousd_transactions.append(tx)
+
         self._output_exchange.send(
             internal.serialize_msg(
                 internal.MsgType.TRANSACTION_BATCH,
@@ -76,9 +79,9 @@ class TransactionsFieldMapper(StatelessWorker):
                 internal.MsgType.TRANSACTION_BATCH,
                 client_id,
                 gateway_id,
-                transactions,
+                nousd_transactions,
             ),
-            routing_key=self.config.output_routing_key_all,
+            routing_key=self.config.output_routing_key_nousd,
         )
 
     def _parse(self, raw):
