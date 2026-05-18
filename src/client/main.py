@@ -1,5 +1,8 @@
+import csv
 import logging
+import os
 import signal
+from dataclasses import asdict
 
 from client.config import Config
 from common.socket.safe_socket import SafeSocket
@@ -17,7 +20,9 @@ class Client:
 
     def run(self):
         logging.info(
-            f"Connecting to {self._config.server_host}:{self._config.server_port}"
+            "Connecting to %s:%s",
+            self._config.server_host,
+            self._config.server_port,
         )
         self._sock = SafeSocket.connect(
             self._config.server_host, self._config.server_port
@@ -29,6 +34,7 @@ class Client:
             self._send_eof_and_wait_ack(MsgType.EOF_ACCOUNTS)
             self._send_transactions()
             self._send_eof_and_wait_ack(MsgType.EOF_TRANSACTIONS)
+            self._wait_for_query_results()
         finally:
             self._disconnect()
 
@@ -36,7 +42,7 @@ class Client:
         total = self._send_batches(
             self._config.input_csv_accounts, MsgType.ACCOUNT_BATCH, RawAccount
         )
-        logging.info(f"Sent {total} accounts")
+        logging.info("Sent %s accounts", total)
 
     def _send_transactions(self):
         total = self._send_batches(
@@ -44,7 +50,7 @@ class Client:
             MsgType.TRANSACTION_BATCH,
             RawTransaction,
         )
-        logging.info(f"Sent {total} transactions")
+        logging.info("Sent %s transactions", total)
 
     def _send_batches(self, csv_path, msg_type, data_class_type):
         batch = []
@@ -68,13 +74,58 @@ class Client:
         return total
 
     def _send_eof_and_wait_ack(self, eof_msg_type):
-        logging.info(f"Sending EOF (type={eof_msg_type})")
+        logging.info("Sending EOF (type=%s)", eof_msg_type)
         external.send_msg(self._sock, eof_msg_type)
 
         msg_type, _ = external.recv_msg(self._sock)
         if msg_type != MsgType.ACK:
             raise RuntimeError(f"Expected ACK, got msg_type={msg_type}")
         logging.info("ACK received")
+
+    def _wait_for_query_results(self):
+        pending = set(self._config.expected_query_ids)
+        if not pending:
+            return
+        os.makedirs(self._config.output_dir, exist_ok=True)
+        files = {
+            qid: open(
+                os.path.join(self._config.output_dir, f"q{qid}.csv"), "w", newline=""
+            )
+            for qid in pending
+        }
+        writers = {qid: csv.writer(f) for qid, f in files.items()}
+        totals = {qid: 0 for qid in pending}
+        try:
+            while pending:
+                msg_type, payload = external.recv_msg(self._sock)
+                if msg_type == MsgType.QUERY_RESULT:
+                    query_id, records = payload
+                    for record in records:
+                        writers[query_id].writerow(asdict(record).values())
+                    totals[query_id] += len(records)
+                    logging.info(
+                        "Q%s: received %s record(s) (total so far: %s)",
+                        query_id,
+                        len(records),
+                        totals[query_id],
+                    )
+                elif msg_type == MsgType.QUERY_END:
+                    query_id = payload
+                    pending.discard(query_id)
+                    logging.info(
+                        "Q%s ended (%s records total)",
+                        query_id,
+                        totals[query_id],
+                    )
+                else:
+                    logging.warning(
+                        "Unexpected msg_type=%s while waiting for results",
+                        msg_type,
+                    )
+        finally:
+            for f in files.values():
+                f.close()
+        logging.info("All expected query results received")
 
     def _disconnect(self):
         if self._sock is not None:
