@@ -11,6 +11,7 @@ class Config:
     raw_data_exchange: str
     transaction_routing_key: str
     account_routing_key: str
+    query_results_exchange: str
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -24,4 +25,7 @@ class Config:
                 "TRANSACTION_ROUTING_KEY", "transaction"
             ),
             account_routing_key=os.environ.get("ACCOUNT_ROUTING_KEY", "account"),
+            query_results_exchange=os.environ.get(
+                "QUERY_RESULTS_EXCHANGE", "query_results"
+            ),
         )

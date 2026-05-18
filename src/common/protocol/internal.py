@@ -6,16 +6,23 @@ from common.models.raw_transaction import RawTransaction
 from common.models.raw_account import RawAccount
 from common.models.transaction import Transaction
 from common.models.bank import Bank
+from common.models.query_results import Q2Result
 from common.models.eof import EOF, RingEOF
 
 
 class MsgType:
-    RAW_TRANSACTION_BATCH = "raw_transaction_batch"
-    RAW_ACCOUNT_BATCH = "raw_account_batch"
-    TRANSACTION_BATCH = "transaction_batch"
-    BANK_BATCH = "bank_batch"
-    EOF = "eof"
-    RING_EOF = "ring_eof"
+    Q1_RESULT_BATCH = 1
+    Q2_RESULT_BATCH = 2
+    Q3_RESULT_BATCH = 3
+    Q4_RESULT_BATCH = 4
+    Q5_RESULT_BATCH = 5
+    RAW_TRANSACTION_BATCH = 6
+    RAW_ACCOUNT_BATCH = 7
+    TRANSACTION_BATCH = 8
+    BANK_BATCH = 9
+    QUERY_END = 10
+    EOF = 11
+    RING_EOF = 12
 
 
 # ---------- API ----------
@@ -81,11 +88,23 @@ def _deserialize_bank_batch(payload):
     return _deserialize_batch(Bank, payload)
 
 
+def _deserialize_q2_result_batch(payload):
+    return _deserialize_batch(Q2Result, payload)
+
+
 def _deserialize_transaction_batch(payload):
     return [
         Transaction(**{**tx, "timestamp": datetime.fromisoformat(tx["timestamp"])})
         for tx in payload
     ]
+
+
+def _serialize_query_end(query_id, message_count):
+    return {"query_id": query_id, "message_count": message_count}
+
+
+def _deserialize_query_end(payload):
+    return payload["query_id"], payload["message_count"]
 
 
 def _deserialize_eof(payload):
@@ -101,6 +120,8 @@ SERIALIZERS = {
     MsgType.RAW_ACCOUNT_BATCH: _serialize_batch,
     MsgType.TRANSACTION_BATCH: _serialize_transaction_batch,
     MsgType.BANK_BATCH: _serialize_batch,
+    MsgType.Q2_RESULT_BATCH: _serialize_batch,
+    MsgType.QUERY_END: _serialize_query_end,
     MsgType.EOF: _serialize_eof,
     MsgType.RING_EOF: _serialize_ring_eof,
 }
@@ -110,6 +131,8 @@ DESERIALIZERS = {
     MsgType.RAW_ACCOUNT_BATCH: _deserialize_raw_account_batch,
     MsgType.TRANSACTION_BATCH: _deserialize_transaction_batch,
     MsgType.BANK_BATCH: _deserialize_bank_batch,
+    MsgType.Q2_RESULT_BATCH: _deserialize_q2_result_batch,
+    MsgType.QUERY_END: _deserialize_query_end,
     MsgType.EOF: _deserialize_eof,
     MsgType.RING_EOF: _deserialize_ring_eof,
 }

@@ -1,67 +1,130 @@
 import logging
-import uuid
+import threading
 
 from common.protocol import external
+from common.protocol import internal
 from common.protocol.external import MsgType
+
+EXPECTED_QUERY_IDS = [2]
+_SENDER_STOP = "__sender_stop__"
 
 
 class ClientHandler:
-    def __init__(self, sock, gateway_id, router):
+    def __init__(self, sock, client_id, gateway_id, router, results_queue):
         self._sock = sock
-        self._client_id = str(uuid.uuid4())
+        self._client_id = client_id
         self._gateway_id = gateway_id
         self._router = router
+        self._results_queue = results_queue
+        self._sock_lock = threading.Lock()
         self._tx_batch_count = 0
         self._acc_batch_count = 0
 
     def run(self):
-        logging.info(f"[{self._client_id}] handler started")
+        logging.info("[%s] handler started", self._client_id)
 
+        sender = threading.Thread(target=self._sender_loop, daemon=True)
+        sender.start()
+
+        try:
+            self._receive_loop()
+        finally:
+            self._results_queue.put(_SENDER_STOP)
+            sender.join()
+            self._sock.close()
+            logging.info("[%s] handler finished.", self._client_id)
+
+    def _receive_loop(self):
         got_eof_tx = False
         got_eof_acc = False
-        try:
-            while not (got_eof_tx and got_eof_acc):
-                msg_type, payload = external.recv_msg(self._sock)
+        while not (got_eof_tx and got_eof_acc):
+            msg_type, payload = external.recv_msg(self._sock)
 
-                if msg_type == MsgType.TRANSACTION_BATCH:
-                    self._router.forward_raw_transactions(
-                        self._client_id, self._gateway_id, payload
-                    )
-                    self._tx_batch_count += 1
-                    logging.info(
-                        f"[{self._client_id}] tx batch #{self._tx_batch_count} ({len(payload)} items) forwarded"
-                    )
-                elif msg_type == MsgType.ACCOUNT_BATCH:
-                    self._router.forward_raw_accounts(
-                        self._client_id, self._gateway_id, payload
-                    )
-                    self._acc_batch_count += 1
-                    logging.info(
-                        f"[{self._client_id}] acc batch #{self._acc_batch_count} ({len(payload)} items) forwarded"
-                    )
-                elif msg_type == MsgType.EOF_TRANSACTIONS:
-                    logging.info(f"[{self._client_id}] EOF_TRANSACTIONS received")
-                    self._router.forward_eof_transactions(
-                        self._client_id, self._gateway_id, self._tx_batch_count
-                    )
-                    external.send_msg(self._sock, MsgType.ACK)
-                    got_eof_tx = True
-                elif msg_type == MsgType.EOF_ACCOUNTS:
-                    logging.info(f"[{self._client_id}] EOF_ACCOUNTS received")
-                    self._router.forward_eof_accounts(
-                        self._client_id, self._gateway_id, self._acc_batch_count
-                    )
-                    external.send_msg(self._sock, MsgType.ACK)
-                    got_eof_acc = True
+            if msg_type == MsgType.TRANSACTION_BATCH:
+                self._router.forward_raw_transactions(
+                    self._client_id, self._gateway_id, payload
+                )
+                self._tx_batch_count += 1
+                logging.info(
+                    "[%s] tx batch #%s (%s items) forwarded",
+                    self._client_id,
+                    self._tx_batch_count,
+                    len(payload),
+                )
+            elif msg_type == MsgType.ACCOUNT_BATCH:
+                self._router.forward_raw_accounts(
+                    self._client_id, self._gateway_id, payload
+                )
+                self._acc_batch_count += 1
+                logging.info(
+                    "[%s] acc batch #%s (%s items) forwarded",
+                    self._client_id,
+                    self._acc_batch_count,
+                    len(payload),
+                )
+            elif msg_type == MsgType.EOF_TRANSACTIONS:
+                logging.info("[%s] EOF_TRANSACTIONS received", self._client_id)
+                self._router.forward_eof_transactions(
+                    self._client_id, self._gateway_id, self._tx_batch_count
+                )
+                self._send_to_client(MsgType.ACK)
+                got_eof_tx = True
+            elif msg_type == MsgType.EOF_ACCOUNTS:
+                logging.info("[%s] EOF_ACCOUNTS received", self._client_id)
+                self._router.forward_eof_accounts(
+                    self._client_id, self._gateway_id, self._acc_batch_count
+                )
+                self._send_to_client(MsgType.ACK)
+                got_eof_acc = True
+            else:
+                logging.warning(
+                    "[%s] unexpected message type: %s", self._client_id, msg_type
+                )
+        logging.info(
+            "[%s] all EOFs received. tx_batches=%s acc_batches=%s",
+            self._client_id,
+            self._tx_batch_count,
+            self._acc_batch_count,
+        )
+
+    def _sender_loop(self):
+        received_batches = {}
+        pending_ends = {}
+        finished_queries = 0
+        while finished_queries < len(EXPECTED_QUERY_IDS):
+            item = self._results_queue.get()
+            if item == _SENDER_STOP:
+                return
+            msg_type, payload = item
+
+            if msg_type in EXPECTED_QUERY_IDS:
+                query_id = msg_type
+                self._send_to_client(MsgType.QUERY_RESULT, query_id, payload)
+                received_batches[query_id] = received_batches.get(query_id, 0) + 1
+                if received_batches[query_id] >= pending_ends.get(
+                    query_id, float("inf")
+                ):
+                    self._finalize_query(query_id)
+                    pending_ends.pop(query_id)
+                    finished_queries += 1
+            elif msg_type == internal.MsgType.QUERY_END:
+                query_id, message_count = payload
+                if received_batches.get(query_id, 0) >= message_count:
+                    self._finalize_query(query_id)
+                    finished_queries += 1
                 else:
-                    logging.warning(
-                        f"[{self._client_id}] unexpected message type: {msg_type}"
-                    )
-            logging.info(
-                f"[{self._client_id}] all EOFs received. "
-                f"tx_batches={self._tx_batch_count} acc_batches={self._acc_batch_count}"
-            )
-        finally:
-            self._sock.close()
-            logging.info(f"[{self._client_id}] handler finished.")
+                    pending_ends[query_id] = message_count
+            else:
+                logging.warning(
+                    "[%s] unexpected internal msg in results queue: %s",
+                    self._client_id,
+                    msg_type,
+                )
 
+    def _finalize_query(self, query_id):
+        self._send_to_client(MsgType.QUERY_END, query_id)
+        logging.info("[%s] query %s ended", self._client_id, query_id)
+
+    def _send_to_client(self, msg_type, *args):
+        with self._sock_lock:
+            external.send_msg(self._sock, msg_type, *args)
