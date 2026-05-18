@@ -1,5 +1,4 @@
 import logging
-import os
 import uuid
 
 from common.protocol import external
@@ -7,72 +6,62 @@ from common.protocol.external import MsgType
 
 
 class ClientHandler:
-    def __init__(self, sock, debug_output_dir=""):
+    def __init__(self, sock, gateway_id, router):
         self._sock = sock
         self._client_id = str(uuid.uuid4())
-        self._debug_output_dir = debug_output_dir
-        self._msg_count = 0
+        self._gateway_id = gateway_id
+        self._router = router
+        self._tx_batch_count = 0
+        self._acc_batch_count = 0
 
     def run(self):
         logging.info(f"[{self._client_id}] handler started")
 
-        debug_file_tx = None
-        debug_file_acc = None
-        if self._debug_output_dir:
-            path_tx = os.path.join(
-                self._debug_output_dir,
-                f"gateway_received_transactions_{self._client_id}.csv",
-            )
-            debug_file_tx = open(path_tx, "w")
-
-            path_acc = os.path.join(
-                self._debug_output_dir,
-                f"gateway_received_accounts_{self._client_id}.csv",
-            )
-            debug_file_acc = open(path_acc, "w")
-
+        got_eof_tx = False
+        got_eof_acc = False
         try:
-            while True:
+            while not (got_eof_tx and got_eof_acc):
                 msg_type, payload = external.recv_msg(self._sock)
 
                 if msg_type == MsgType.TRANSACTION_BATCH:
-                    if debug_file_tx:
-                        for tx in payload:
-                            debug_file_tx.write(tx.raw + "\n")
-                    self._msg_count += len(payload)
+                    self._router.forward_raw_transactions(
+                        self._client_id, self._gateway_id, payload
+                    )
+                    self._tx_batch_count += 1
                     logging.info(
-                        f"[{self._client_id}] batch of {len(payload)} transactions (total: {self._msg_count})"
+                        f"[{self._client_id}] tx batch #{self._tx_batch_count} ({len(payload)} items) forwarded"
                     )
                 elif msg_type == MsgType.ACCOUNT_BATCH:
-                    if debug_file_acc:
-                        for acc in payload:
-                            debug_file_acc.write(acc.raw + "\n")
-                    self._msg_count += len(payload)
-                    logging.info(
-                        f"[{self._client_id}] batch of {len(payload)} accounts (total: {self._msg_count})"
+                    self._router.forward_raw_accounts(
+                        self._client_id, self._gateway_id, payload
                     )
-                elif msg_type == MsgType.EOF:
+                    self._acc_batch_count += 1
                     logging.info(
-                        f"[{self._client_id}] EOF received. Total: {self._msg_count}"
+                        f"[{self._client_id}] acc batch #{self._acc_batch_count} ({len(payload)} items) forwarded"
+                    )
+                elif msg_type == MsgType.EOF_TRANSACTIONS:
+                    logging.info(f"[{self._client_id}] EOF_TRANSACTIONS received")
+                    self._router.forward_eof_transactions(
+                        self._client_id, self._gateway_id, self._tx_batch_count
                     )
                     external.send_msg(self._sock, MsgType.ACK)
-                    break
+                    got_eof_tx = True
+                elif msg_type == MsgType.EOF_ACCOUNTS:
+                    logging.info(f"[{self._client_id}] EOF_ACCOUNTS received")
+                    self._router.forward_eof_accounts(
+                        self._client_id, self._gateway_id, self._acc_batch_count
+                    )
+                    external.send_msg(self._sock, MsgType.ACK)
+                    got_eof_acc = True
                 else:
                     logging.warning(
                         f"[{self._client_id}] unexpected message type: {msg_type}"
                     )
+            logging.info(
+                f"[{self._client_id}] all EOFs received. "
+                f"tx_batches={self._tx_batch_count} acc_batches={self._acc_batch_count}"
+            )
         finally:
-            if debug_file_tx:
-                debug_file_tx.close()
-            if debug_file_acc:
-                debug_file_acc.close()
             self._sock.close()
             logging.info(f"[{self._client_id}] handler finished.")
 
-    def shutdown(self):
-        self._sock.close()
-
-
-def handle_client(sock, debug_output_dir):
-    handler = ClientHandler(sock, debug_output_dir)
-    handler.run()
