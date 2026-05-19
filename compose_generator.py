@@ -63,7 +63,7 @@ def _client():
         "container_name": "client_1",
         "depends_on": {"gateway_1": {"condition": "service_started"}},
         "volumes": [
-            "${DATASET_PATH:-./entornito/data}:/data:ro",
+            "${DATASET_PATH:-./data}:/data:ro",
             "./output:/output",
         ],
         "environment": {
@@ -173,7 +173,10 @@ def _currency_mapper(i, low_amount_aggregators):
         for j in range(low_amount_aggregators)
     }
     return {
-        "build": {"context": ".", "dockerfile": "src/workers/currency_mapper/Dockerfile"},
+        "build": {
+            "context": ".",
+            "dockerfile": "src/workers/currency_mapper/Dockerfile",
+        },
         "container_name": f"currency_mapper_{i}",
         "depends_on": {"rabbitmq": {"condition": "service_healthy"}, **laa_deps},
         "environment": {
@@ -427,13 +430,9 @@ def main():
     )
     accounts_field_mappers = _resolve_count(args.accounts_field_mappers, args.replicas)
     date_filters = _resolve_count(args.date_filters, args.replicas)
-    payment_format_filters = _resolve_count(
-        args.payment_format_filters, args.replicas
-    )
+    payment_format_filters = _resolve_count(args.payment_format_filters, args.replicas)
     currency_mappers = _resolve_count(args.currency_mappers, args.replicas)
-    low_amount_aggregators = _resolve_count(
-        args.low_amount_aggregators, args.replicas
-    )
+    low_amount_aggregators = _resolve_count(args.low_amount_aggregators, args.replicas)
     bank_max_aggregators = _resolve_count(args.bank_max_aggregators, args.replicas)
     bank_max_reducers = _resolve_count(args.bank_max_reducers, args.replicas)
     low_amount_reducers = args.low_amount_reducers
