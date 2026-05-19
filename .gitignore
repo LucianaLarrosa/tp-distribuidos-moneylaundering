@@ -6,3 +6,4 @@ dataset/*.csv
 
 tmp/
 __pycache__
+output/
