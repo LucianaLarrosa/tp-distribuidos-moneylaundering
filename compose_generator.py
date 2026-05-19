@@ -72,7 +72,7 @@ def _client():
             "INPUT_CSV_TRANSACTIONS": "/data/HI-Small_Trans.csv",
             "INPUT_CSV_ACCOUNTS": "/data/HI-Small_accounts.csv",
             "BATCH_SIZE": "1000",
-            "EXPECTED_QUERY_IDS": "2,5",
+            "EXPECTED_QUERY_IDS": "1,2,5",
             "OUTPUT_DIR": "/output",
         },
     }
@@ -324,6 +324,30 @@ def _bank_max_reducer(i, bank_max_reducers, bank_mappers):
     }
 
 
+def _amount_filter(i, amount_filters):
+    return {
+        "build": {
+            "context": ".",
+            "dockerfile": "src/workers/amount_filter/Dockerfile",
+        },
+        "container_name": f"amount_filter_{i}",
+        "depends_on": {"rabbitmq": {"condition": "service_healthy"}},
+        "environment": {
+            "RABBITMQ_HOST": "rabbitmq",
+            "INPUT_EXCHANGE": "filtered_transactions",
+            "INPUT_ROUTING_KEY": "usd",
+            "INPUT_EOF_ROUTING_KEY": "eof",
+            "INPUT_QUEUE_NAME": "amount_filter_input",
+            "OUTPUT_EXCHANGE": "query_results",
+            "CONTROL_EXCHANGE": "amount_filter_control",
+            "NODE_PREFIX": NODE_PREFIX,
+            "NODE_ID": str(i),
+            "RING_SIZE": str(amount_filters),
+            "AMOUNT_THRESHOLD": "50.0",
+        },
+    }
+
+
 def _bank_mapper(i, bank_mappers):
     return {
         "build": {"context": ".", "dockerfile": "src/workers/bank_mapper/Dockerfile"},
@@ -353,6 +377,7 @@ def build_compose(
     bank_max_reducers,
     low_amount_reducers,
     bank_mappers,
+    amount_filters,
 ):
     services = {}
     services["rabbitmq"] = _rabbitmq()
@@ -390,6 +415,8 @@ def build_compose(
         )
     for i in range(bank_mappers):
         services[f"bank_mapper_{i}"] = _bank_mapper(i, bank_mappers)
+    for i in range(amount_filters):
+        services[f"amount_filter_{i}"] = _amount_filter(i, amount_filters)
     return {"name": "moneylaundering-client", "services": services}
 
 
@@ -419,6 +446,7 @@ def main():
     parser.add_argument("--bank-max-reducers", type=int, default=None)
     parser.add_argument("--low-amount-reducers", type=int, default=LOW_AMOUNT_REDUCERS)
     parser.add_argument("--bank-mappers", type=int, default=None)
+    parser.add_argument("--amount-filters", type=int, default=None)
     parser.add_argument("--output", default=None, help="Output file (default: stdout).")
     args = parser.parse_args()
 
@@ -437,6 +465,7 @@ def main():
     bank_max_reducers = _resolve_count(args.bank_max_reducers, args.replicas)
     low_amount_reducers = args.low_amount_reducers
     bank_mappers = _resolve_count(args.bank_mappers, args.replicas)
+    amount_filters = _resolve_count(args.amount_filters, args.replicas)
 
     counts = [
         ("--transactions-field-mappers", transactions_field_mappers),
@@ -449,6 +478,7 @@ def main():
         ("--bank-max-reducers", bank_max_reducers),
         ("--low-amount-reducers", low_amount_reducers),
         ("--bank-mappers", bank_mappers),
+        ("--amount-filters", amount_filters),
     ]
     for flag, value in counts:
         if value < 1:
@@ -465,6 +495,7 @@ def main():
         bank_max_reducers=bank_max_reducers,
         low_amount_reducers=low_amount_reducers,
         bank_mappers=bank_mappers,
+        amount_filters=amount_filters,
     )
 
     output = yaml.safe_dump(compose, sort_keys=False, default_flow_style=False)

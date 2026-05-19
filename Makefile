@@ -26,6 +26,7 @@ LOW_AMOUNT_REDUCERS        ?= 1
 BANK_MAX_AGGREGATORS       ?= $(REPLICAS)
 BANK_MAX_REDUCERS          ?= $(REPLICAS)
 BANK_MAPPERS               ?= $(REPLICAS)
+AMOUNT_FILTERS             ?= $(REPLICAS)
 
 COMPOSE_FILE ?= docker-compose.yaml
 
@@ -41,6 +42,7 @@ COMPOSE_ARGS = \
 	--bank-max-aggregators        $(BANK_MAX_AGGREGATORS) \
 	--bank-max-reducers           $(BANK_MAX_REDUCERS) \
 	--bank-mappers                $(BANK_MAPPERS) \
+	--amount-filters              $(AMOUNT_FILTERS) \
 	--output                      $(COMPOSE_FILE)
 
 .PHONY: compose build up down logs clean gateway client clients verify clean-tmp
