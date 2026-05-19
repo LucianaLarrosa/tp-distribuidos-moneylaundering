@@ -14,6 +14,7 @@ from common.models.transaction_amount import TransactionAmount
 from common.models.count import Count
 from common.models.bank_max_partial import BankMaxPartial
 from common.models.payment_format_partial import PaymentFormatPartial
+from common.models.payment_format_average import PaymentFormatAverage
 from common.models.eof import EOF, RingEOF
 
 
@@ -35,6 +36,7 @@ class MsgType:
     RING_EOF = 15
     BANK_MAX_PARTIAL_BATCH = 16
     PAYMENT_FORMAT_PARTIAL_BATCH = 17
+    PAYMENT_FORMAT_AVERAGE_BATCH = 18
 
 
 # ---------- API ----------
@@ -124,6 +126,10 @@ def _deserialize_payment_format_partial_batch(payload):
     return _deserialize_batch(PaymentFormatPartial, payload)
 
 
+def _deserialize_payment_format_average_batch(payload):
+    return _deserialize_batch(PaymentFormatAverage, payload)
+
+
 def _deserialize_q2_result_batch(payload):
     return _deserialize_batch(Q2Result, payload)
 
@@ -176,6 +182,7 @@ SERIALIZERS = {
     MsgType.COUNT: _serialize_count,
     MsgType.BANK_MAX_PARTIAL_BATCH: _serialize_batch,
     MsgType.PAYMENT_FORMAT_PARTIAL_BATCH: _serialize_batch,
+    MsgType.PAYMENT_FORMAT_AVERAGE_BATCH: _serialize_batch,
     MsgType.EOF: _serialize_eof,
     MsgType.RING_EOF: _serialize_ring_eof,
 }
@@ -193,6 +200,7 @@ DESERIALIZERS = {
     MsgType.COUNT: _deserialize_count,
     MsgType.BANK_MAX_PARTIAL_BATCH: _deserialize_bank_max_partial_batch,
     MsgType.PAYMENT_FORMAT_PARTIAL_BATCH: _deserialize_payment_format_partial_batch,
+    MsgType.PAYMENT_FORMAT_AVERAGE_BATCH: _deserialize_payment_format_average_batch,
     MsgType.EOF: _deserialize_eof,
     MsgType.RING_EOF: _deserialize_ring_eof,
 }
