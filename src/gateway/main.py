@@ -57,11 +57,6 @@ def _run_results_consumer(rabbitmq_host, exchange_name, gateway_id, client_queue
         handler_queue.put((msg_type, payload))
         ack()
 
-    logging.info(
-        "[results_consumer] consuming from %s with routing_key=%s",
-        exchange_name,
-        gateway_id,
-    )
     try:
         middleware.start_consuming(on_message)
     finally:

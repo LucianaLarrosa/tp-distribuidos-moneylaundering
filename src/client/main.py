@@ -27,7 +27,6 @@ class Client:
         self._sock = SafeSocket.connect(
             self._config.server_host, self._config.server_port
         )
-        logging.info("Connected")
 
         try:
             self._send_accounts()
@@ -74,7 +73,6 @@ class Client:
         return total
 
     def _send_eof_and_wait_ack(self, eof_msg_type):
-        logging.info("Sending EOF (type=%s)", eof_msg_type)
         external.send_msg(self._sock, eof_msg_type)
 
         msg_type, _ = external.recv_msg(self._sock)

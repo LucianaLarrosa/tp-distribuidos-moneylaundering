@@ -5,7 +5,7 @@ from common.protocol import external
 from common.protocol import internal
 from common.protocol.external import MsgType
 
-EXPECTED_QUERY_IDS = (2, 5)
+EXPECTED_QUERY_IDS = (1, 2, 5)
 _SENDER_STOP = "__sender_stop__"
 
 
@@ -35,7 +35,6 @@ class ClientHandler:
             raise
         finally:
             self._sock.close()
-            logging.info("[%s] handler finished.", self._client_id)
 
     def _receive_loop(self):
         got_eof_tx = False
@@ -83,12 +82,6 @@ class ClientHandler:
                 logging.warning(
                     "[%s] unexpected message type: %s", self._client_id, msg_type
                 )
-        logging.info(
-            "[%s] all EOFs received. tx_batches=%s acc_batches=%s",
-            self._client_id,
-            self._tx_batch_count,
-            self._acc_batch_count,
-        )
 
     def _sender_loop(self):
         received_batches = {}
@@ -126,7 +119,6 @@ class ClientHandler:
 
     def _finalize_query(self, query_id):
         self._send_to_client(MsgType.QUERY_END, query_id)
-        logging.info("[%s] query %s ended", self._client_id, query_id)
 
     def _send_to_client(self, msg_type, *args):
         with self._sock_lock:
