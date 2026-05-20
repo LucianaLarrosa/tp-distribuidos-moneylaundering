@@ -47,23 +47,11 @@ class ClientHandler:
                     self._client_id, self._gateway_id, payload
                 )
                 self._tx_batch_count += 1
-                logging.info(
-                    "[%s] tx batch #%s (%s items) forwarded",
-                    self._client_id,
-                    self._tx_batch_count,
-                    len(payload),
-                )
             elif msg_type == MsgType.ACCOUNT_BATCH:
                 self._router.forward_raw_accounts(
                     self._client_id, self._gateway_id, payload
                 )
                 self._acc_batch_count += 1
-                logging.info(
-                    "[%s] acc batch #%s (%s items) forwarded",
-                    self._client_id,
-                    self._acc_batch_count,
-                    len(payload),
-                )
             elif msg_type == MsgType.EOF_TRANSACTIONS:
                 logging.info("[%s] EOF_TRANSACTIONS received", self._client_id)
                 self._router.forward_eof_transactions(

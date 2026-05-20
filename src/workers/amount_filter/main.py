@@ -1,4 +1,5 @@
 import logging
+import threading
 
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
@@ -83,9 +84,9 @@ class AmountFilter(StatelessCoordinatedWorker):
 
         filtered = [
             Q1Result(
-                from_bank=int(tx.from_bank),
+                from_bank=tx.from_bank,
                 from_account=tx.from_account,
-                to_bank=int(tx.to_bank),
+                to_bank=tx.to_bank,
                 to_account=tx.to_account,
                 amount_paid=tx.amount,
             )

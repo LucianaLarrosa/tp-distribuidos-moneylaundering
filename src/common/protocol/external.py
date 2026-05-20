@@ -68,12 +68,12 @@ def _deserialize_account(buf, offset):
 
 
 def _serialize_result_record_q1(record):
-    """result_record = [4B from_bank][4B from_account_len][N][4B to_bank][4B to_account_len][N][8B amount_paid]"""
+    """result_record = [4B from_bank_len][N][4B from_account_len][N][4B to_bank_len][N][4B to_account_len][N][8B amount_paid]"""
     return b"".join(
         [
-            external_serializer.serialize_uint32(record.from_bank),
+            _serialize_lp_string(record.from_bank),
             _serialize_lp_string(record.from_account),
-            external_serializer.serialize_uint32(record.to_bank),
+            _serialize_lp_string(record.to_bank),
             _serialize_lp_string(record.to_account),
             external_serializer.serialize_float64(record.amount_paid),
         ]
@@ -81,15 +81,9 @@ def _serialize_result_record_q1(record):
 
 
 def _deserialize_result_record_q1(buf, offset):
-    from_bank = external_serializer.deserialize_uint32(
-        buf[offset : offset + external_serializer.UINT32_SIZE]
-    )
-    offset += external_serializer.UINT32_SIZE
+    from_bank, offset = _deserialize_lp_string(buf, offset)
     from_account, offset = _deserialize_lp_string(buf, offset)
-    to_bank = external_serializer.deserialize_uint32(
-        buf[offset : offset + external_serializer.UINT32_SIZE]
-    )
-    offset += external_serializer.UINT32_SIZE
+    to_bank, offset = _deserialize_lp_string(buf, offset)
     to_account, offset = _deserialize_lp_string(buf, offset)
     amount_paid = external_serializer.deserialize_float64(
         buf[offset : offset + external_serializer.FLOAT64_SIZE]
@@ -120,10 +114,10 @@ def _deserialize_result_record_q2(buf, offset):
 
 
 def _serialize_result_record_q3(record):
-    """ "result_record = [4B from_bank][4B from_account_len][N][8B amount_paid]"""
+    """result_record = [4B from_bank_len][N][4B from_account_len][N][8B amount_paid]"""
     return b"".join(
         [
-            external_serializer.serialize_uint32(record.from_bank),
+            _serialize_lp_string(record.from_bank),
             _serialize_lp_string(record.from_account),
             external_serializer.serialize_float64(record.amount_paid),
         ]
@@ -131,10 +125,7 @@ def _serialize_result_record_q3(record):
 
 
 def _deserialize_result_record_q3(buf, offset):
-    from_bank = external_serializer.deserialize_uint32(
-        buf[offset : offset + external_serializer.UINT32_SIZE]
-    )
-    offset += external_serializer.UINT32_SIZE
+    from_bank, offset = _deserialize_lp_string(buf, offset)
     from_account, offset = _deserialize_lp_string(buf, offset)
     amount_paid = external_serializer.deserialize_float64(
         buf[offset : offset + external_serializer.FLOAT64_SIZE]
@@ -144,29 +135,19 @@ def _deserialize_result_record_q3(buf, offset):
 
 
 def _serialize_result_record_q4(record):
-    """result_record = [4B from_bank][4B from_account_len][N][4B to_bank][4B to_account_len][N]"""
+    """result_record = [4B from_bank_len][N][4B from_account_len][N]"""
     return b"".join(
         [
-            external_serializer.serialize_uint32(record.from_bank),
+            _serialize_lp_string(record.from_bank),
             _serialize_lp_string(record.from_account),
-            external_serializer.serialize_uint32(record.to_bank),
-            _serialize_lp_string(record.to_account),
         ]
     )
 
 
 def _deserialize_result_record_q4(buf, offset):
-    from_bank = external_serializer.deserialize_uint32(
-        buf[offset : offset + external_serializer.UINT32_SIZE]
-    )
-    offset += external_serializer.UINT32_SIZE
+    from_bank, offset = _deserialize_lp_string(buf, offset)
     from_account, offset = _deserialize_lp_string(buf, offset)
-    to_bank = external_serializer.deserialize_uint32(
-        buf[offset : offset + external_serializer.UINT32_SIZE]
-    )
-    offset += external_serializer.UINT32_SIZE
-    to_account, offset = _deserialize_lp_string(buf, offset)
-    return Q4Result(from_bank, from_account, to_bank, to_account), offset
+    return Q4Result(from_bank, from_account), offset
 
 
 def _serialize_result_record_q5(record):
