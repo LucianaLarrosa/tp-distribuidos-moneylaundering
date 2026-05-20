@@ -5,7 +5,7 @@ from common.protocol import external
 from common.protocol import internal
 from common.protocol.external import MsgType
 
-EXPECTED_QUERY_IDS = (2, 5)
+EXPECTED_QUERY_IDS = (2, 3, 5)
 _SENDER_STOP = "__sender_stop__"
 
 
