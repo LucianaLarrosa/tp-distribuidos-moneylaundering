@@ -54,17 +54,15 @@ class TransactionsFieldMapper(StatelessWorker):
 
     def _handle_data_message(self, _, client_id, gateway_id, payload):
         """
-        Parse the raw batch into Transactions and publish to both routing keys.
+        Parse the raw batch into Transactions and publish it to the USD-only
+        route and the all-transactions route.
         """
         transactions = [self._parse(raw_tx.raw) for raw_tx in payload]
 
         usd_transactions = []
-        nousd_transactions = []
         for tx in transactions:
             if tx.currency.lower() == self.config.usd_currency.lower():
                 usd_transactions.append(tx)
-            else:
-                nousd_transactions.append(tx)
 
         self._output_exchange.send(
             internal.serialize_msg(
@@ -80,9 +78,9 @@ class TransactionsFieldMapper(StatelessWorker):
                 internal.MsgType.TRANSACTION_BATCH,
                 client_id,
                 gateway_id,
-                nousd_transactions,
+                transactions,
             ),
-            routing_key=self.config.output_routing_key_nousd,
+            routing_key=self.config.output_routing_key_all,
         )
 
     def _parse(self, raw):
