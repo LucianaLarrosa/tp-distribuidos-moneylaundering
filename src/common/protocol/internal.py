@@ -15,6 +15,7 @@ from common.models.count import Count
 from common.models.bank_max_partial import BankMaxPartial
 from common.models.eof import EOF, RingEOF
 from common.models.account_edge import AccountEdge
+from common.models.path import Path
 
 
 class MsgType:
@@ -35,6 +36,7 @@ class MsgType:
     RING_EOF = 15
     BANK_MAX_PARTIAL_BATCH = 16
     ACCOUNT_EDGE_BATCH = 17
+    PATH_BATCH = 19
 
 
 # ---------- API ----------
@@ -104,6 +106,10 @@ def _serialize_account_edge_batch(batch):
     return [asdict(x) for x in batch]
 
 
+def _serialize_path_batch(batch):
+    return [asdict(x) for x in batch]
+
+
 def _deserialize_batch(cls, payload):
     return [cls(**item) for item in payload]
 
@@ -167,6 +173,10 @@ def _deserialize_account_edge_batch(payload):
     return [AccountEdge(**x) for x in payload]
 
 
+def _deserialize_path_batch(payload):
+    return [Path(**x) for x in payload]
+
+
 SERIALIZERS = {
     MsgType.RAW_TRANSACTION_BATCH: _serialize_batch,
     MsgType.RAW_ACCOUNT_BATCH: _serialize_batch,
@@ -182,6 +192,7 @@ SERIALIZERS = {
     MsgType.EOF: _serialize_eof,
     MsgType.RING_EOF: _serialize_ring_eof,
     MsgType.ACCOUNT_EDGE_BATCH: _serialize_account_edge_batch,
+    MsgType.PATH_BATCH: _serialize_path_batch,
 }
 
 DESERIALIZERS = {
@@ -199,4 +210,5 @@ DESERIALIZERS = {
     MsgType.EOF: _deserialize_eof,
     MsgType.RING_EOF: _deserialize_ring_eof,
     MsgType.ACCOUNT_EDGE_BATCH: _deserialize_account_edge_batch,
+    MsgType.PATH_BATCH: _deserialize_path_batch,
 }
