@@ -97,7 +97,7 @@ class AccountFrequencyFilter(SentCoordinatedWorker):
                     continue
                 for other_bank, other_account in accounts:
                     edges_by_routing_key.setdefault(
-                        self._shard_key(bank, account), []
+                        self._shard_key(other_bank, other_account), []
                     ).append(
                         AccountEdge(
                             bank=other_bank,
