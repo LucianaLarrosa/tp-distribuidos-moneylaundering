@@ -17,6 +17,7 @@ class Client:
     def __init__(self, config):
         self._config = config
         self._sock = None
+        self._receiver_thread = None
         self._closed = False
 
     def run(self):
