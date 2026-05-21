@@ -89,7 +89,12 @@ class Client:
         os.makedirs(self._config.output_dir, exist_ok=True)
         files = {
             qid: open(
-                os.path.join(self._config.output_dir, f"q{qid}.csv"), "w", newline=""
+                os.path.join(
+                    self._config.output_dir,
+                    f"q{qid}_client_{self._config.client_id}.csv",
+                ),
+                "w",
+                newline="",
             )
             for qid in pending
         }

@@ -12,6 +12,7 @@ class Config:
     batch_size: int
     expected_query_ids: List[int]
     output_dir: str
+    client_id: str
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -27,4 +28,5 @@ class Config:
             batch_size=int(os.environ.get("BATCH_SIZE", 1000)),
             expected_query_ids=expected_query_ids,
             output_dir=os.environ.get("OUTPUT_DIR", "results"),
+            client_id=os.environ.get("CLIENT_ID", "1"),
         )

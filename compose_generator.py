@@ -59,10 +59,10 @@ def _gateway(transactions_field_mappers, accounts_field_mappers):
     }
 
 
-def _client():
+def _client(i):
     return {
         "build": {"context": ".", "dockerfile": "src/client/Dockerfile"},
-        "container_name": "client_1",
+        "container_name": f"client_{i}",
         "depends_on": {"gateway_1": {"condition": "service_started"}},
         "volumes": [
             "${DATASET_PATH:-./data}:/data:ro",
@@ -76,6 +76,7 @@ def _client():
             "BATCH_SIZE": "1000",
             "EXPECTED_QUERY_IDS": "1,2,3,4,5",
             "OUTPUT_DIR": "/output",
+            "CLIENT_ID": str(i),
         },
     }
 
@@ -585,6 +586,7 @@ def _path_frequency_filter(i, path_frequency_filters):
 
 
 def build_compose(
+    clients,
     transactions_field_mappers,
     accounts_field_mappers,
     date_filters,
@@ -607,7 +609,8 @@ def build_compose(
     services = {}
     services["rabbitmq"] = _rabbitmq()
     services["gateway_1"] = _gateway(transactions_field_mappers, accounts_field_mappers)
-    services["client_1"] = _client()
+    for i in range(1, clients + 1):
+        services[f"client_{i}"] = _client(i)
     for i in range(transactions_field_mappers):
         services[f"transactions_field_mapper_{i}"] = _transactions_field_mapper(
             i, date_filters, bank_max_aggregators, amount_filters
@@ -698,6 +701,12 @@ def main():
         default=DEFAULT_REPLICAS,
         help="Default replica count for every scalable worker.",
     )
+    parser.add_argument(
+        "--clients",
+        type=int,
+        default=1,
+        help="Number of client containers to spawn.",
+    )
     parser.add_argument("--transactions-field-mappers", type=int, default=None)
     parser.add_argument("--accounts-field-mappers", type=int, default=None)
     parser.add_argument("--date-filters", type=int, default=None)
@@ -721,6 +730,8 @@ def main():
 
     if args.replicas < 1:
         parser.error(f"--replicas must be >= 1 (got {args.replicas})")
+    if args.clients < 1:
+        parser.error(f"--clients must be >= 1 (got {args.clients})")
 
     transactions_field_mappers = _resolve_count(
         args.transactions_field_mappers, args.replicas
@@ -774,6 +785,7 @@ def main():
             parser.error(f"{flag} must be >= 1 (got {value})")
 
     compose = build_compose(
+        clients=args.clients,
         transactions_field_mappers=transactions_field_mappers,
         accounts_field_mappers=accounts_field_mappers,
         date_filters=date_filters,

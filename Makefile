@@ -39,6 +39,7 @@ COMPOSE_FILE ?= docker-compose.yaml
 
 COMPOSE_ARGS = \
 	--replicas                    $(REPLICAS) \
+	--clients                     $(N_CLIENTS) \
 	--transactions-field-mappers  $(TRANSACTIONS_FIELD_MAPPERS) \
 	--accounts-field-mappers      $(ACCOUNTS_FIELD_MAPPERS) \
 	--date-filters                $(DATE_FILTERS) \
