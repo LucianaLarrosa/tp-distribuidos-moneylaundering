@@ -104,11 +104,12 @@ class LowAmountAggregator(StatefulCoordinatedWorker):
         """
         Handle incoming data messages by counting the number of transactions with amounts below the configured maximum amount.
         """
+        client_gateway_key = (client_id, gateway_id)
         transaction_count = sum(
             1 for transaction in payload if transaction.amount < self.config.max_amount
         )
-        self._counts[(client_id, gateway_id)] = (
-            self._counts.get((client_id, gateway_id), 0) + transaction_count
+        self._counts[client_gateway_key] = (
+            self._counts.get(client_gateway_key, 0) + transaction_count
         )
         super()._handle_data_message(_, client_id, gateway_id, payload)
 

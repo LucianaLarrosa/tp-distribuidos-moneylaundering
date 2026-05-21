@@ -126,10 +126,10 @@ class LowAmountReducer(StatefulCoordinatedWorker):
         """
         Handle incoming data messages by accumulating the count of low amount transactions.
         """
-        if msg_type != internal.MsgType.COUNT:
-            return
-        key = (client_id, gateway_id)
-        self._counts[key] = self._counts.get(key, 0) + payload.count
+        client_gateway_key = (client_id, gateway_id)
+        self._counts[client_gateway_key] = (
+            self._counts.get(client_gateway_key, 0) + payload.count
+        )
         super()._handle_data_message(msg_type, client_id, gateway_id, payload)
 
 

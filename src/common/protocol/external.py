@@ -134,19 +134,19 @@ def _deserialize_result_record_q3(buf, offset):
 
 
 def _serialize_result_record_q4(record):
-    """result_record = [4B from_bank_len][N][4B from_account_len][N]"""
+    """result_record = [4B bank_len][N][4B account_len][N]"""
     return b"".join(
         [
-            _serialize_lp_string(record.from_bank),
-            _serialize_lp_string(record.from_account),
+            _serialize_lp_string(record.bank),
+            _serialize_lp_string(record.account),
         ]
     )
 
 
 def _deserialize_result_record_q4(buf, offset):
-    from_bank, offset = _deserialize_lp_string(buf, offset)
-    from_account, offset = _deserialize_lp_string(buf, offset)
-    return Q4Result(from_bank, from_account), offset
+    bank, offset = _deserialize_lp_string(buf, offset)
+    account, offset = _deserialize_lp_string(buf, offset)
+    return Q4Result(bank, account), offset
 
 
 def _serialize_result_record_q5(record):

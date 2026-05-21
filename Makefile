@@ -30,6 +30,10 @@ AMOUNT_FILTERS             ?= $(REPLICAS)
 PAYMENT_FORMAT_AGGREGATORS ?= $(REPLICAS)
 PAYMENT_FORMAT_REDUCERS    ?= $(REPLICAS)
 ANOMALY_FILTERS            ?= $(REPLICAS)
+BIDIRECTIONAL_SHARDERS     ?= $(REPLICAS)
+ACCOUNT_FREQUENCY_FILTERS  ?= $(REPLICAS)
+PATH_MAPPERS               ?= $(REPLICAS)
+PATH_FREQUENCY_FILTERS     ?= $(REPLICAS)
 
 COMPOSE_FILE ?= docker-compose.yaml
 
@@ -49,6 +53,10 @@ COMPOSE_ARGS = \
 	--payment-format-aggregators  $(PAYMENT_FORMAT_AGGREGATORS) \
 	--payment-format-reducers     $(PAYMENT_FORMAT_REDUCERS) \
 	--anomaly-filters             $(ANOMALY_FILTERS) \
+	--bidirectional-sharders      $(BIDIRECTIONAL_SHARDERS) \
+	--account-frequency-filters   $(ACCOUNT_FREQUENCY_FILTERS) \
+	--path-mappers                $(PATH_MAPPERS) \
+	--path-frequency-filters      $(PATH_FREQUENCY_FILTERS) \
 	--output                      $(COMPOSE_FILE)
 
 .PHONY: compose build up down logs clean gateway client clients verify clean-tmp

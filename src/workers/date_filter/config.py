@@ -7,9 +7,8 @@ class Config:
         self.rabbitmq_host = os.environ["RABBITMQ_HOST"]
         self.input_exchange = os.environ["INPUT_EXCHANGE"]
         self.input_routing_keys = [
-            key.strip()
-            for key in os.environ["INPUT_ROUTING_KEY"].split(",")
-            if key.strip()
+            routing_key.strip()
+            for routing_key in os.environ["INPUT_ROUTING_KEY"].split(",")
         ]
         self.input_queue_name = os.environ.get("INPUT_QUEUE_NAME")
         self.output_exchange = os.environ["OUTPUT_EXCHANGE"]

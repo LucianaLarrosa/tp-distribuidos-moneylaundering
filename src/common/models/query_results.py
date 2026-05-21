@@ -26,8 +26,8 @@ class Q3Result:
 
 @dataclass
 class Q4Result:
-    from_bank: str
-    from_account: str
+    bank: str
+    account: str
 
 
 @dataclass

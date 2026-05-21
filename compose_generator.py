@@ -6,6 +6,8 @@ import yaml
 DEFAULT_REPLICAS = 3
 LOW_AMOUNT_REDUCERS = 1
 NODE_PREFIX = "node."
+MIN_REQUIRED_ACCOUNTS = 5
+BATCH_SIZE = 1000
 
 DATE_FROM_1 = "2022/09/01 00:00"
 DATE_TO_1 = "2022/09/05 23:59"
@@ -72,15 +74,13 @@ def _client():
             "INPUT_CSV_TRANSACTIONS": "/data/HI-Small_Trans.csv",
             "INPUT_CSV_ACCOUNTS": "/data/HI-Small_accounts.csv",
             "BATCH_SIZE": "1000",
-            "EXPECTED_QUERY_IDS": "1,2,3,5",
+            "EXPECTED_QUERY_IDS": "1,2,3,4,5",
             "OUTPUT_DIR": "/output",
         },
     }
 
 
-def _transactions_field_mapper(
-    i, date_filters, bank_max_aggregators, amount_filters
-):
+def _transactions_field_mapper(i, date_filters, bank_max_aggregators, amount_filters):
     return {
         "build": {
             "context": ".",
@@ -117,7 +117,11 @@ def _transactions_field_mapper(
 
 
 def _date_filter(
-    i, payment_format_filters, payment_format_aggregators, anomaly_filters
+    i,
+    payment_format_filters,
+    payment_format_aggregators,
+    anomaly_filters,
+    bidirectional_sharders,
 ):
     return {
         "build": {"context": ".", "dockerfile": "src/workers/date_filter/Dockerfile"},
@@ -135,6 +139,10 @@ def _date_filter(
             **{
                 f"anomaly_filter_{j}": {"condition": "service_started"}
                 for j in range(anomaly_filters)
+            },
+            **{
+                f"bidirectional_sharder_{j}": {"condition": "service_started"}
+                for j in range(bidirectional_sharders)
             },
         },
         "environment": {
@@ -175,7 +183,7 @@ def _payment_format_filter(i, currency_mappers):
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
             "INPUT_EXCHANGE": "date_filter_output",
-            "INPUT_ROUTING_KEY": "*.period1,eof",
+            "INPUT_ROUTING_KEY": "all.period1,eof",
             "INPUT_QUEUE_NAME": "payment_format_filter_input",
             "OUTPUT_QUEUE": "currency_mapper_input",
             "VALID_PAYMENT_FORMATS": "Wire,ACH",
@@ -382,9 +390,7 @@ def _bank_mapper(i, bank_mappers):
     }
 
 
-def _payment_format_aggregator(
-    i, payment_format_aggregators, payment_format_reducers
-):
+def _payment_format_aggregator(i, payment_format_aggregators, payment_format_reducers):
     return {
         "build": {
             "context": ".",
@@ -467,6 +473,117 @@ def _anomaly_filter(i, anomaly_filters):
     }
 
 
+def _bidirectional_sharder(i, bidirectional_sharders, account_frequency_filters):
+    return {
+        "build": {
+            "context": ".",
+            "dockerfile": "src/workers/bidirectional_sharder/Dockerfile",
+        },
+        "container_name": f"bidirectional_sharder_{i}",
+        "depends_on": {
+            "rabbitmq": {"condition": "service_healthy"},
+            **{
+                f"account_frequency_filter_{j}": {"condition": "service_started"}
+                for j in range(account_frequency_filters)
+            },
+        },
+        "environment": {
+            "RABBITMQ_HOST": "rabbitmq",
+            "INPUT_EXCHANGE": "date_filter_output",
+            "INPUT_ROUTING_KEY": "usd.period1,eof",
+            "INPUT_QUEUE_NAME": "bidirectional_sharder_input",
+            "OUTPUT_EXCHANGE": "bidirectional_sharder_output",
+            "CONTROL_EXCHANGE": "bidirectional_sharder_control",
+            "NODE_PREFIX": NODE_PREFIX,
+            "NODE_ID": str(i),
+            "RING_SIZE": str(bidirectional_sharders),
+            "OUTPUT_NODE_COUNT": str(account_frequency_filters),
+            "OUTPUT_NODE_PREFIX": NODE_PREFIX,
+        },
+    }
+
+
+def _account_frequency_filter(i, account_frequency_filters, path_mappers):
+    return {
+        "build": {
+            "context": ".",
+            "dockerfile": "src/workers/account_frequency_filter/Dockerfile",
+        },
+        "container_name": f"account_frequency_filter_{i}",
+        "depends_on": {
+            "rabbitmq": {"condition": "service_healthy"},
+            **{
+                f"path_mapper_{j}": {"condition": "service_started"}
+                for j in range(path_mappers)
+            },
+        },
+        "environment": {
+            "RABBITMQ_HOST": "rabbitmq",
+            "INPUT_EXCHANGE": "bidirectional_sharder_output",
+            "OUTPUT_EXCHANGE": "account_freq_filter_output",
+            "CONTROL_EXCHANGE": "account_freq_filter_control",
+            "NODE_PREFIX": NODE_PREFIX,
+            "NODE_ID": str(i),
+            "RING_SIZE": str(account_frequency_filters),
+            "OUTPUT_NODE_COUNT": str(path_mappers),
+            "OUTPUT_NODE_PREFIX": NODE_PREFIX,
+            "MIN_REQUIRED_ACCOUNTS": str(MIN_REQUIRED_ACCOUNTS),
+            "BATCH_SIZE": str(BATCH_SIZE),
+        },
+    }
+
+
+def _path_mapper(i, path_mappers, path_frequency_filters):
+    return {
+        "build": {
+            "context": ".",
+            "dockerfile": "src/workers/path_mapper/Dockerfile",
+        },
+        "container_name": f"path_mapper_{i}",
+        "depends_on": {
+            "rabbitmq": {"condition": "service_healthy"},
+            **{
+                f"path_frequency_filter_{j}": {"condition": "service_started"}
+                for j in range(path_frequency_filters)
+            },
+        },
+        "environment": {
+            "RABBITMQ_HOST": "rabbitmq",
+            "INPUT_EXCHANGE": "account_freq_filter_output",
+            "OUTPUT_EXCHANGE": "path_mapper_output",
+            "CONTROL_EXCHANGE": "path_mapper_control",
+            "NODE_PREFIX": NODE_PREFIX,
+            "NODE_ID": str(i),
+            "RING_SIZE": str(path_mappers),
+            "OUTPUT_NODE_COUNT": str(path_frequency_filters),
+            "OUTPUT_NODE_PREFIX": NODE_PREFIX,
+            "BATCH_SIZE": str(BATCH_SIZE),
+        },
+    }
+
+
+def _path_frequency_filter(i, path_frequency_filters):
+    return {
+        "build": {
+            "context": ".",
+            "dockerfile": "src/workers/path_frequency_filter/Dockerfile",
+        },
+        "container_name": f"path_frequency_filter_{i}",
+        "depends_on": {"rabbitmq": {"condition": "service_healthy"}},
+        "environment": {
+            "RABBITMQ_HOST": "rabbitmq",
+            "INPUT_EXCHANGE": "path_mapper_output",
+            "OUTPUT_EXCHANGE": "query_results",
+            "CONTROL_EXCHANGE": "path_freq_filter_control",
+            "NODE_PREFIX": NODE_PREFIX,
+            "NODE_ID": str(i),
+            "RING_SIZE": str(path_frequency_filters),
+            "MIN_REQUIRED_ACCOUNTS": str(MIN_REQUIRED_ACCOUNTS),
+            "BATCH_SIZE": str(BATCH_SIZE),
+        },
+    }
+
+
 def build_compose(
     transactions_field_mappers,
     accounts_field_mappers,
@@ -482,6 +599,10 @@ def build_compose(
     payment_format_aggregators,
     payment_format_reducers,
     anomaly_filters,
+    bidirectional_sharders,
+    account_frequency_filters,
+    path_mappers,
+    path_frequency_filters,
 ):
     services = {}
     services["rabbitmq"] = _rabbitmq()
@@ -493,7 +614,27 @@ def build_compose(
         )
     for i in range(date_filters):
         services[f"date_filter_{i}"] = _date_filter(
-            i, payment_format_filters, payment_format_aggregators, anomaly_filters
+            i,
+            payment_format_filters,
+            payment_format_aggregators,
+            anomaly_filters,
+            bidirectional_sharders,
+        )
+    for i in range(bidirectional_sharders):
+        services[f"bidirectional_sharder_{i}"] = _bidirectional_sharder(
+            i, bidirectional_sharders, account_frequency_filters
+        )
+    for i in range(account_frequency_filters):
+        services[f"account_frequency_filter_{i}"] = _account_frequency_filter(
+            i, account_frequency_filters, path_mappers
+        )
+    for i in range(path_mappers):
+        services[f"path_mapper_{i}"] = _path_mapper(
+            i, path_mappers, path_frequency_filters
+        )
+    for i in range(path_frequency_filters):
+        services[f"path_frequency_filter_{i}"] = _path_frequency_filter(
+            i, path_frequency_filters
         )
     for i in range(payment_format_filters):
         services[f"payment_format_filter_{i}"] = _payment_format_filter(
@@ -533,9 +674,7 @@ def build_compose(
         )
     for i in range(anomaly_filters):
         services[f"anomaly_filter_{i}"] = _anomaly_filter(i, anomaly_filters)
-    volumes = {
-        f"anomaly_filter_spill_{i}": None for i in range(anomaly_filters)
-    }
+    volumes = {f"anomaly_filter_spill_{i}": None for i in range(anomaly_filters)}
     return {
         "name": "moneylaundering-client",
         "services": services,
@@ -573,6 +712,10 @@ def main():
     parser.add_argument("--payment-format-aggregators", type=int, default=None)
     parser.add_argument("--payment-format-reducers", type=int, default=None)
     parser.add_argument("--anomaly-filters", type=int, default=None)
+    parser.add_argument("--bidirectional-sharders", type=int, default=None)
+    parser.add_argument("--account-frequency-filters", type=int, default=None)
+    parser.add_argument("--path-mappers", type=int, default=None)
+    parser.add_argument("--path-frequency-filters", type=int, default=None)
     parser.add_argument("--output", default=None, help="Output file (default: stdout).")
     args = parser.parse_args()
 
@@ -599,6 +742,12 @@ def main():
         args.payment_format_reducers, args.replicas
     )
     anomaly_filters = _resolve_count(args.anomaly_filters, args.replicas)
+    bidirectional_sharders = _resolve_count(args.bidirectional_sharders, args.replicas)
+    account_frequency_filters = _resolve_count(
+        args.account_frequency_filters, args.replicas
+    )
+    path_mappers = _resolve_count(args.path_mappers, args.replicas)
+    path_frequency_filters = _resolve_count(args.path_frequency_filters, args.replicas)
 
     counts = [
         ("--transactions-field-mappers", transactions_field_mappers),
@@ -615,6 +764,10 @@ def main():
         ("--payment-format-aggregators", payment_format_aggregators),
         ("--payment-format-reducers", payment_format_reducers),
         ("--anomaly-filters", anomaly_filters),
+        ("--bidirectional-sharders", bidirectional_sharders),
+        ("--account-frequency-filters", account_frequency_filters),
+        ("--path-mappers", path_mappers),
+        ("--path-frequency-filters", path_frequency_filters),
     ]
     for flag, value in counts:
         if value < 1:
@@ -635,6 +788,10 @@ def main():
         payment_format_aggregators=payment_format_aggregators,
         payment_format_reducers=payment_format_reducers,
         anomaly_filters=anomaly_filters,
+        bidirectional_sharders=bidirectional_sharders,
+        account_frequency_filters=account_frequency_filters,
+        path_mappers=path_mappers,
+        path_frequency_filters=path_frequency_filters,
     )
 
     output = yaml.safe_dump(compose, sort_keys=False, default_flow_style=False)

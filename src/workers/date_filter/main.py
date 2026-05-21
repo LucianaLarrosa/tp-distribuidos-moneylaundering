@@ -53,15 +53,24 @@ class DateFilter(StatelessWorker):
         """
         Classify a transaction based on its timestamp and currency, returning the appropriate routing key for the output exchange.
         """
-        timestamp = transaction.timestamp
+        transaction_timestamp = transaction.timestamp
         is_usd = transaction.currency.lower() == self.config.usd_currency
-        if self.config.date_from_1 <= timestamp <= self.config.date_to_1:
-            keys = [f"{self.config.output_routing_key_all}.{self.config.output_routing_key_period_1}"]
+        if self.config.date_from_1 <= transaction_timestamp <= self.config.date_to_1:
+            routing_keys = [
+                f"{self.config.output_routing_key_all}.{self.config.output_routing_key_period_1}"
+            ]
             if is_usd:
-                keys.append(f"{self.config.output_routing_key_usd}.{self.config.output_routing_key_period_1}")
-            return keys
-        if self.config.date_from_2 <= timestamp <= self.config.date_to_2 and is_usd:
-            return [f"{self.config.output_routing_key_usd}.{self.config.output_routing_key_period_2}"]
+                routing_keys.append(
+                    f"{self.config.output_routing_key_usd}.{self.config.output_routing_key_period_1}"
+                )
+            return routing_keys
+        if (
+            self.config.date_from_2 <= transaction_timestamp <= self.config.date_to_2
+            and is_usd
+        ):
+            return [
+                f"{self.config.output_routing_key_usd}.{self.config.output_routing_key_period_2}"
+            ]
         return []
 
     def _handle_data_message(self, _, client_id, gateway_id, payload):
