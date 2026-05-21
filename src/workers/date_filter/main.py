@@ -17,7 +17,7 @@ class DateFilter(StatelessWorker):
         self._input_exchange = MessageMiddlewareExchangeTopicRabbitMQ(
             host=config.rabbitmq_host,
             exchange_name=config.input_exchange,
-            binding_patterns=[config.input_routing_key],
+            binding_patterns=config.input_routing_keys,
             queue_name=config.input_queue_name,
         )
         self._output_exchange = MessageMiddlewareExchangeTopicRabbitMQ(
@@ -54,19 +54,24 @@ class DateFilter(StatelessWorker):
         Classify a transaction based on its timestamp and currency, returning the appropriate routing key for the output exchange.
         """
         transaction_timestamp = transaction.timestamp
-        currency_key = (
-            self.config.output_routing_key_usd
-            if transaction.currency.lower() == self.config.usd_currency
-            else self.config.output_routing_key_no_usd
-        )
+        is_usd = transaction.currency.lower() == self.config.usd_currency
         if self.config.date_from_1 <= transaction_timestamp <= self.config.date_to_1:
-            return f"{currency_key}.{self.config.output_routing_key_period_1}"
+            routing_keys = [
+                f"{self.config.output_routing_key_all}.{self.config.output_routing_key_period_1}"
+            ]
+            if is_usd:
+                routing_keys.append(
+                    f"{self.config.output_routing_key_usd}.{self.config.output_routing_key_period_1}"
+                )
+            return routing_keys
         if (
             self.config.date_from_2 <= transaction_timestamp <= self.config.date_to_2
-            and currency_key == self.config.output_routing_key_usd
+            and is_usd
         ):
-            return f"{currency_key}.{self.config.output_routing_key_period_2}"
-        return None
+            return [
+                f"{self.config.output_routing_key_usd}.{self.config.output_routing_key_period_2}"
+            ]
+        return []
 
     def _handle_data_message(self, _, client_id, gateway_id, payload):
         """
@@ -77,12 +82,11 @@ class DateFilter(StatelessWorker):
             for routing_key in [
                 f"{self.config.output_routing_key_usd}.{self.config.output_routing_key_period_1}",
                 f"{self.config.output_routing_key_usd}.{self.config.output_routing_key_period_2}",
-                f"{self.config.output_routing_key_no_usd}.{self.config.output_routing_key_period_1}",
+                f"{self.config.output_routing_key_all}.{self.config.output_routing_key_period_1}",
             ]
         }
         for transaction in payload:
-            routing_key = self._classify_transaction(transaction)
-            if routing_key is not None:
+            for routing_key in self._classify_transaction(transaction):
                 transactions_by_routing_key[routing_key].append(transaction)
         for routing_key, transactions in transactions_by_routing_key.items():
             self._output_exchange.send(

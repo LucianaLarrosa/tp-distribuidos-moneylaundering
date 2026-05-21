@@ -103,7 +103,7 @@ def _transactions_field_mapper(i, date_filters, bank_max_aggregators):
             "INPUT_QUEUE_NAME": "transactions_field_mapper_input",
             "OUTPUT_EXCHANGE": "filtered_transactions",
             "OUTPUT_ROUTING_KEY_USD": "usd",
-            "OUTPUT_ROUTING_KEY_NOUSD": "nousd",
+            "OUTPUT_ROUTING_KEY_ALL": "all",
             "OUTPUT_ROUTING_KEY_EOF": "eof",
             "USD_CURRENCY": "US Dollar",
         },
@@ -124,7 +124,7 @@ def _date_filter(i, payment_format_filters):
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
             "INPUT_EXCHANGE": "filtered_transactions",
-            "INPUT_ROUTING_KEY": "#",
+            "INPUT_ROUTING_KEY": "all,eof",
             "INPUT_QUEUE_NAME": "date_filter_input",
             "OUTPUT_EXCHANGE": "date_filter_output",
             "DATE_FORMAT": "%Y/%m/%d %H:%M",
@@ -134,7 +134,7 @@ def _date_filter(i, payment_format_filters):
             "DATE_TO_2": DATE_TO_2,
             "USD_CURRENCY": "US Dollar",
             "OUTPUT_ROUTING_KEY_USD": "usd",
-            "OUTPUT_ROUTING_KEY_NO_USD": "nousd",
+            "OUTPUT_ROUTING_KEY_ALL": "all",
             "OUTPUT_ROUTING_KEY_PERIOD_1": "period1",
             "OUTPUT_ROUTING_KEY_PERIOD_2": "period2",
             "OUTPUT_ROUTING_KEY_EOF": "eof",
@@ -159,7 +159,7 @@ def _payment_format_filter(i, currency_mappers):
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
             "INPUT_EXCHANGE": "date_filter_output",
-            "INPUT_ROUTING_KEY": "*.period1,eof",
+            "INPUT_ROUTING_KEY": "all.period1,eof",
             "INPUT_QUEUE_NAME": "payment_format_filter_input",
             "OUTPUT_QUEUE": "currency_mapper_input",
             "VALID_PAYMENT_FORMATS": "Wire,ACH",
@@ -173,7 +173,10 @@ def _currency_mapper(i, low_amount_aggregators):
         for j in range(low_amount_aggregators)
     }
     return {
-        "build": {"context": ".", "dockerfile": "src/workers/currency_mapper/Dockerfile"},
+        "build": {
+            "context": ".",
+            "dockerfile": "src/workers/currency_mapper/Dockerfile",
+        },
         "container_name": f"currency_mapper_{i}",
         "depends_on": {"rabbitmq": {"condition": "service_healthy"}, **laa_deps},
         "environment": {
