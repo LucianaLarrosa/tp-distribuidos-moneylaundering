@@ -93,7 +93,7 @@ class AccountFrequencyFilter(SentCoordinatedWorker):
                 (in_accounts, False),
                 (out_accounts, True),
             ]:
-                if len(accounts) < self.config.min_transaction_count:
+                if len(accounts) < self.config.min_required_accounts:
                     continue
                 for other_bank, other_account in accounts:
                     edges_by_routing_key.setdefault(

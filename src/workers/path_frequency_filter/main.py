@@ -87,7 +87,7 @@ class PathFrequencyFilter(SentCoordinatedWorker):
             to_bank,
             to_account,
         ), mid_accounts in paths.items():
-            if len(mid_accounts) < self.config.min_intermediary_count:
+            if len(mid_accounts) < self.config.min_required_accounts:
                 continue
             result.append(Q4Result(from_bank, from_account))
             result.append(Q4Result(to_bank, to_account))

@@ -10,5 +10,5 @@ class Config:
         self.node_id = int(os.environ["NODE_ID"])
         self.ring_size = int(os.environ["RING_SIZE"])
         self.node_prefix = os.environ["NODE_PREFIX"]
-        self.min_intermediary_count = int(os.environ["MIN_INTERMEDIARY_COUNT"])
+        self.min_required_accounts = int(os.environ["MIN_REQUIRED_ACCOUNTS"])
         self.batch_size = int(os.environ["BATCH_SIZE"])

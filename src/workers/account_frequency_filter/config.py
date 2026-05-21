@@ -12,5 +12,5 @@ class Config:
         self.node_prefix = os.environ["NODE_PREFIX"]
         self.output_node_count = int(os.environ["OUTPUT_NODE_COUNT"])
         self.output_node_prefix = os.environ["OUTPUT_NODE_PREFIX"]
-        self.min_transaction_count = int(os.environ["MIN_TRANSACTION_COUNT"])
+        self.min_required_accounts = int(os.environ["MIN_REQUIRED_ACCOUNTS"])
         self.batch_size = int(os.environ.get("BATCH_SIZE"))

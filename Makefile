@@ -26,6 +26,10 @@ LOW_AMOUNT_REDUCERS        ?= 1
 BANK_MAX_AGGREGATORS       ?= $(REPLICAS)
 BANK_MAX_REDUCERS          ?= $(REPLICAS)
 BANK_MAPPERS               ?= $(REPLICAS)
+BIDIRECTIONAL_SHARDERS     ?= $(REPLICAS)
+ACCOUNT_FREQUENCY_FILTERS  ?= $(REPLICAS)
+PATH_MAPPERS               ?= $(REPLICAS)
+PATH_FREQUENCY_FILTERS     ?= $(REPLICAS)
 
 COMPOSE_FILE ?= docker-compose.yaml
 
@@ -41,6 +45,10 @@ COMPOSE_ARGS = \
 	--bank-max-aggregators        $(BANK_MAX_AGGREGATORS) \
 	--bank-max-reducers           $(BANK_MAX_REDUCERS) \
 	--bank-mappers                $(BANK_MAPPERS) \
+	--bidirectional-sharders      $(BIDIRECTIONAL_SHARDERS) \
+	--account-frequency-filters   $(ACCOUNT_FREQUENCY_FILTERS) \
+	--path-mappers                $(PATH_MAPPERS) \
+	--path-frequency-filters      $(PATH_FREQUENCY_FILTERS) \
 	--output                      $(COMPOSE_FILE)
 
 .PHONY: compose build up down logs clean gateway client clients verify clean-tmp
