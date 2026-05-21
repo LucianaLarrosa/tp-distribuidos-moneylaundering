@@ -6,13 +6,15 @@ from common.models.raw_transaction import RawTransaction
 from common.models.raw_account import RawAccount
 from common.models.transaction import Transaction
 from common.models.bank import Bank
-from common.models.query_results import Q1Result, Q2Result, Q5Result
+from common.models.query_results import Q1Result, Q2Result, Q3Result, Q5Result
 from common.models.transaction_for_currency_conversion import (
     TransactionForCurrencyConversion,
 )
 from common.models.transaction_amount import TransactionAmount
 from common.models.count import Count
 from common.models.bank_max_partial import BankMaxPartial
+from common.models.payment_format_partial import PaymentFormatPartial
+from common.models.payment_format_average import PaymentFormatAverage
 from common.models.eof import EOF, RingEOF
 
 
@@ -33,6 +35,8 @@ class MsgType:
     EOF = 14
     RING_EOF = 15
     BANK_MAX_PARTIAL_BATCH = 16
+    PAYMENT_FORMAT_PARTIAL_BATCH = 17
+    PAYMENT_FORMAT_AVERAGE_BATCH = 18
 
 
 # ---------- API ----------
@@ -118,12 +122,24 @@ def _deserialize_bank_max_partial_batch(payload):
     return _deserialize_batch(BankMaxPartial, payload)
 
 
+def _deserialize_payment_format_partial_batch(payload):
+    return _deserialize_batch(PaymentFormatPartial, payload)
+
+
+def _deserialize_payment_format_average_batch(payload):
+    return _deserialize_batch(PaymentFormatAverage, payload)
+
+
 def _deserialize_q1_result_batch(payload):
     return _deserialize_batch(Q1Result, payload)
 
 
 def _deserialize_q2_result_batch(payload):
     return _deserialize_batch(Q2Result, payload)
+
+
+def _deserialize_q3_result_batch(payload):
+    return _deserialize_batch(Q3Result, payload)
 
 
 def _deserialize_q5_result_batch(payload):
@@ -168,12 +184,15 @@ SERIALIZERS = {
     MsgType.BANK_BATCH: _serialize_batch,
     MsgType.Q1_RESULT_BATCH: _serialize_batch,
     MsgType.Q2_RESULT_BATCH: _serialize_batch,
+    MsgType.Q3_RESULT_BATCH: _serialize_batch,
     MsgType.Q5_RESULT_BATCH: _serialize_batch,
     MsgType.QUERY_END: _serialize_query_end,
     MsgType.CURRENCY_CONVERSION_BATCH: _serialize_currency_conversion_batch,
     MsgType.AMOUNT_TRANSACTION_BATCH: _serialize_amount_transaction_batch,
     MsgType.COUNT: _serialize_count,
     MsgType.BANK_MAX_PARTIAL_BATCH: _serialize_batch,
+    MsgType.PAYMENT_FORMAT_PARTIAL_BATCH: _serialize_batch,
+    MsgType.PAYMENT_FORMAT_AVERAGE_BATCH: _serialize_batch,
     MsgType.EOF: _serialize_eof,
     MsgType.RING_EOF: _serialize_ring_eof,
 }
@@ -185,12 +204,15 @@ DESERIALIZERS = {
     MsgType.BANK_BATCH: _deserialize_bank_batch,
     MsgType.Q1_RESULT_BATCH: _deserialize_q1_result_batch,
     MsgType.Q2_RESULT_BATCH: _deserialize_q2_result_batch,
+    MsgType.Q3_RESULT_BATCH: _deserialize_q3_result_batch,
     MsgType.Q5_RESULT_BATCH: _deserialize_q5_result_batch,
     MsgType.QUERY_END: _deserialize_query_end,
     MsgType.CURRENCY_CONVERSION_BATCH: _deserialize_currency_conversion_batch,
     MsgType.AMOUNT_TRANSACTION_BATCH: _deserialize_amount_transaction_batch,
     MsgType.COUNT: _deserialize_count,
     MsgType.BANK_MAX_PARTIAL_BATCH: _deserialize_bank_max_partial_batch,
+    MsgType.PAYMENT_FORMAT_PARTIAL_BATCH: _deserialize_payment_format_partial_batch,
+    MsgType.PAYMENT_FORMAT_AVERAGE_BATCH: _deserialize_payment_format_average_batch,
     MsgType.EOF: _deserialize_eof,
     MsgType.RING_EOF: _deserialize_ring_eof,
 }

@@ -27,6 +27,9 @@ BANK_MAX_AGGREGATORS       ?= $(REPLICAS)
 BANK_MAX_REDUCERS          ?= $(REPLICAS)
 BANK_MAPPERS               ?= $(REPLICAS)
 AMOUNT_FILTERS             ?= $(REPLICAS)
+PAYMENT_FORMAT_AGGREGATORS ?= $(REPLICAS)
+PAYMENT_FORMAT_REDUCERS    ?= $(REPLICAS)
+ANOMALY_FILTERS            ?= $(REPLICAS)
 
 COMPOSE_FILE ?= docker-compose.yaml
 
@@ -43,6 +46,9 @@ COMPOSE_ARGS = \
 	--bank-max-reducers           $(BANK_MAX_REDUCERS) \
 	--bank-mappers                $(BANK_MAPPERS) \
 	--amount-filters              $(AMOUNT_FILTERS) \
+	--payment-format-aggregators  $(PAYMENT_FORMAT_AGGREGATORS) \
+	--payment-format-reducers     $(PAYMENT_FORMAT_REDUCERS) \
+	--anomaly-filters             $(ANOMALY_FILTERS) \
 	--output                      $(COMPOSE_FILE)
 
 .PHONY: compose build up down logs clean gateway client clients verify clean-tmp

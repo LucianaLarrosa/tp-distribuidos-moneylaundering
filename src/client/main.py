@@ -2,6 +2,7 @@ import csv
 import logging
 import os
 import signal
+import threading
 from dataclasses import asdict
 
 from client.config import Config
@@ -28,12 +29,17 @@ class Client:
             self._config.server_host, self._config.server_port
         )
 
+        self._receiver_thread = threading.Thread(
+            target=self._wait_for_query_results, daemon=True
+        )
+        self._receiver_thread.start()
+
         try:
             self._send_accounts()
-            self._send_eof_and_wait_ack(MsgType.EOF_ACCOUNTS)
+            self._send_eof(MsgType.EOF_ACCOUNTS)
             self._send_transactions()
-            self._send_eof_and_wait_ack(MsgType.EOF_TRANSACTIONS)
-            self._wait_for_query_results()
+            self._send_eof(MsgType.EOF_TRANSACTIONS)
+            self._receiver_thread.join()
         finally:
             self._disconnect()
 
@@ -72,13 +78,8 @@ class Client:
             total += len(batch)
         return total
 
-    def _send_eof_and_wait_ack(self, eof_msg_type):
+    def _send_eof(self, eof_msg_type):
         external.send_msg(self._sock, eof_msg_type)
-
-        msg_type, _ = external.recv_msg(self._sock)
-        if msg_type != MsgType.ACK:
-            raise RuntimeError(f"Expected ACK, got msg_type={msg_type}")
-        logging.info("ACK received")
 
     def _wait_for_query_results(self):
         pending = set(self._config.expected_query_ids)

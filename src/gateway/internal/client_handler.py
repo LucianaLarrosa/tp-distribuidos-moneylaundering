@@ -5,7 +5,7 @@ from common.protocol import external
 from common.protocol import internal
 from common.protocol.external import MsgType
 
-EXPECTED_QUERY_IDS = (1, 2, 5)
+EXPECTED_QUERY_IDS = (1, 2, 3, 5)
 _SENDER_STOP = "__sender_stop__"
 
 
@@ -57,14 +57,12 @@ class ClientHandler:
                 self._router.forward_eof_transactions(
                     self._client_id, self._gateway_id, self._tx_batch_count
                 )
-                self._send_to_client(MsgType.ACK)
                 got_eof_tx = True
             elif msg_type == MsgType.EOF_ACCOUNTS:
                 logging.info("[%s] EOF_ACCOUNTS received", self._client_id)
                 self._router.forward_eof_accounts(
                     self._client_id, self._gateway_id, self._acc_batch_count
                 )
-                self._send_to_client(MsgType.ACK)
                 got_eof_acc = True
             else:
                 logging.warning(

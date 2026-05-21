@@ -15,9 +15,8 @@ class MsgType:
     ACCOUNT_BATCH = 2  # [1byte type] [4 bytes payload_size] [4 bytes count] [account * count] (client -> gateway)
     EOF_TRANSACTIONS = 3  # [1byte type] (client -> gateway)
     EOF_ACCOUNTS = 4  # [1byte type] (client -> gateway)
-    ACK = 5  # [1byte type] (gateway -> client)
-    QUERY_RESULT = 6  # [1byte type] [4 bytes payload_size] [1byte query_id] [4 bytes count] [result_record * count] (gateway -> client) result_record cambia según query_id porque cada query devuelve algo distinto
-    QUERY_END = 7  # [1byte type] [1byte query_id] (gateway -> client)
+    QUERY_RESULT = 5  # [1byte type] [4 bytes payload_size] [1byte query_id] [4 bytes count] [result_record * count] (gateway -> client) result_record cambia según query_id porque cada query devuelve algo distinto
+    QUERY_END = 6  # [1byte type] [1byte query_id] (gateway -> client)
 
 
 # TRANSACTION = [4B + N raw_line]
@@ -247,14 +246,6 @@ def _recv_eof_accounts(sock):
     return None
 
 
-def _send_ack(sock):
-    sock.send_all(external_serializer.serialize_uint8(MsgType.ACK))
-
-
-def _recv_ack(sock):
-    return None
-
-
 def _send_query_result(sock, query_id, records):
     serializer = RESULT_RECORD_SERIALIZERS[query_id]
 
@@ -314,7 +305,6 @@ SEND_MSG_HANDLERS = {
     MsgType.ACCOUNT_BATCH: _send_account_batch,
     MsgType.EOF_TRANSACTIONS: _send_eof_transactions,
     MsgType.EOF_ACCOUNTS: _send_eof_accounts,
-    MsgType.ACK: _send_ack,
     MsgType.QUERY_RESULT: _send_query_result,
     MsgType.QUERY_END: _send_query_end,
 }
@@ -324,7 +314,6 @@ RECV_MSG_HANDLERS = {
     MsgType.ACCOUNT_BATCH: _recv_account_batch,
     MsgType.EOF_TRANSACTIONS: _recv_eof_transactions,
     MsgType.EOF_ACCOUNTS: _recv_eof_accounts,
-    MsgType.ACK: _recv_ack,
     MsgType.QUERY_RESULT: _recv_query_result,
     MsgType.QUERY_END: _recv_query_end,
 }

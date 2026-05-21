@@ -72,13 +72,15 @@ def _client():
             "INPUT_CSV_TRANSACTIONS": "/data/HI-Small_Trans.csv",
             "INPUT_CSV_ACCOUNTS": "/data/HI-Small_accounts.csv",
             "BATCH_SIZE": "1000",
-            "EXPECTED_QUERY_IDS": "1,2,5",
+            "EXPECTED_QUERY_IDS": "1,2,3,5",
             "OUTPUT_DIR": "/output",
         },
     }
 
 
-def _transactions_field_mapper(i, date_filters, bank_max_aggregators):
+def _transactions_field_mapper(
+    i, date_filters, bank_max_aggregators, amount_filters
+):
     return {
         "build": {
             "context": ".",
@@ -95,6 +97,10 @@ def _transactions_field_mapper(i, date_filters, bank_max_aggregators):
                 f"bank_max_aggregator_{j}": {"condition": "service_started"}
                 for j in range(bank_max_aggregators)
             },
+            **{
+                f"amount_filter_{j}": {"condition": "service_started"}
+                for j in range(amount_filters)
+            },
         },
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
@@ -103,14 +109,16 @@ def _transactions_field_mapper(i, date_filters, bank_max_aggregators):
             "INPUT_QUEUE_NAME": "transactions_field_mapper_input",
             "OUTPUT_EXCHANGE": "filtered_transactions",
             "OUTPUT_ROUTING_KEY_USD": "usd",
-            "OUTPUT_ROUTING_KEY_NOUSD": "nousd",
+            "OUTPUT_ROUTING_KEY_ALL": "all",
             "OUTPUT_ROUTING_KEY_EOF": "eof",
             "USD_CURRENCY": "US Dollar",
         },
     }
 
 
-def _date_filter(i, payment_format_filters):
+def _date_filter(
+    i, payment_format_filters, payment_format_aggregators, anomaly_filters
+):
     return {
         "build": {"context": ".", "dockerfile": "src/workers/date_filter/Dockerfile"},
         "container_name": f"date_filter_{i}",
@@ -120,11 +128,19 @@ def _date_filter(i, payment_format_filters):
                 f"payment_format_filter_{j}": {"condition": "service_started"}
                 for j in range(payment_format_filters)
             },
+            **{
+                f"payment_format_aggregator_{j}": {"condition": "service_started"}
+                for j in range(payment_format_aggregators)
+            },
+            **{
+                f"anomaly_filter_{j}": {"condition": "service_started"}
+                for j in range(anomaly_filters)
+            },
         },
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
             "INPUT_EXCHANGE": "filtered_transactions",
-            "INPUT_ROUTING_KEY": "#",
+            "INPUT_ROUTING_KEY": "all,eof",
             "INPUT_QUEUE_NAME": "date_filter_input",
             "OUTPUT_EXCHANGE": "date_filter_output",
             "DATE_FORMAT": "%Y/%m/%d %H:%M",
@@ -134,7 +150,7 @@ def _date_filter(i, payment_format_filters):
             "DATE_TO_2": DATE_TO_2,
             "USD_CURRENCY": "US Dollar",
             "OUTPUT_ROUTING_KEY_USD": "usd",
-            "OUTPUT_ROUTING_KEY_NO_USD": "nousd",
+            "OUTPUT_ROUTING_KEY_ALL": "all",
             "OUTPUT_ROUTING_KEY_PERIOD_1": "period1",
             "OUTPUT_ROUTING_KEY_PERIOD_2": "period2",
             "OUTPUT_ROUTING_KEY_EOF": "eof",
@@ -366,6 +382,91 @@ def _bank_mapper(i, bank_mappers):
     }
 
 
+def _payment_format_aggregator(
+    i, payment_format_aggregators, payment_format_reducers
+):
+    return {
+        "build": {
+            "context": ".",
+            "dockerfile": "src/workers/payment_format_aggregator/Dockerfile",
+        },
+        "container_name": f"payment_format_aggregator_{i}",
+        "depends_on": {
+            "rabbitmq": {"condition": "service_healthy"},
+            **{
+                f"payment_format_reducer_{j}": {"condition": "service_started"}
+                for j in range(payment_format_reducers)
+            },
+        },
+        "environment": {
+            "RABBITMQ_HOST": "rabbitmq",
+            "INPUT_EXCHANGE": "date_filter_output",
+            "INPUT_BINDING_PATTERNS": "usd.period1,eof",
+            "INPUT_QUEUE": "payment_format_aggregator_input",
+            "OUTPUT_EXCHANGE": "payment_format_shards",
+            "CONTROL_EXCHANGE": "payment_format_aggregator_control",
+            "NODE_PREFIX": NODE_PREFIX,
+            "NODE_ID": str(i),
+            "RING_SIZE": str(payment_format_aggregators),
+            "BATCH_SIZE": "20",
+            "NUM_SHARDS": str(payment_format_reducers),
+        },
+    }
+
+
+def _payment_format_reducer(i, payment_format_reducers, anomaly_filters):
+    return {
+        "build": {
+            "context": ".",
+            "dockerfile": "src/workers/payment_format_reducer/Dockerfile",
+        },
+        "container_name": f"payment_format_reducer_{i}",
+        "depends_on": {
+            "rabbitmq": {"condition": "service_healthy"},
+            **{
+                f"anomaly_filter_{j}": {"condition": "service_started"}
+                for j in range(anomaly_filters)
+            },
+        },
+        "environment": {
+            "RABBITMQ_HOST": "rabbitmq",
+            "INPUT_EXCHANGE": "payment_format_shards",
+            "SHARD_ID": str(i),
+            "OUTPUT_EXCHANGE": "payment_format_averages",
+            "CONTROL_EXCHANGE": "payment_format_reducer_control",
+            "NODE_PREFIX": NODE_PREFIX,
+            "NODE_ID": str(i),
+            "RING_SIZE": str(payment_format_reducers),
+        },
+    }
+
+
+def _anomaly_filter(i, anomaly_filters):
+    return {
+        "build": {
+            "context": ".",
+            "dockerfile": "src/workers/anomaly_filter/Dockerfile",
+        },
+        "container_name": f"anomaly_filter_{i}",
+        "depends_on": {"rabbitmq": {"condition": "service_healthy"}},
+        "volumes": [f"anomaly_filter_spill_{i}:/tmp/anomaly_filter"],
+        "environment": {
+            "RABBITMQ_HOST": "rabbitmq",
+            "INPUT_EXCHANGE": "date_filter_output",
+            "INPUT_ROUTING_KEYS": "usd.period2,eof",
+            "INPUT_QUEUE_NAME": "anomaly_filter_input",
+            "AVG_EXCHANGE": "payment_format_averages",
+            "OUTPUT_EXCHANGE": "query_results",
+            "CONTROL_EXCHANGE": "anomaly_filter_control",
+            "NODE_PREFIX": NODE_PREFIX,
+            "NODE_ID": str(i),
+            "RING_SIZE": str(anomaly_filters),
+            "SPILL_DIR": "/tmp/anomaly_filter",
+            "ANOMALY_THRESHOLD": "0.01",
+        },
+    }
+
+
 def build_compose(
     transactions_field_mappers,
     accounts_field_mappers,
@@ -378,6 +479,9 @@ def build_compose(
     low_amount_reducers,
     bank_mappers,
     amount_filters,
+    payment_format_aggregators,
+    payment_format_reducers,
+    anomaly_filters,
 ):
     services = {}
     services["rabbitmq"] = _rabbitmq()
@@ -385,10 +489,12 @@ def build_compose(
     services["client_1"] = _client()
     for i in range(transactions_field_mappers):
         services[f"transactions_field_mapper_{i}"] = _transactions_field_mapper(
-            i, date_filters, bank_max_aggregators
+            i, date_filters, bank_max_aggregators, amount_filters
         )
     for i in range(date_filters):
-        services[f"date_filter_{i}"] = _date_filter(i, payment_format_filters)
+        services[f"date_filter_{i}"] = _date_filter(
+            i, payment_format_filters, payment_format_aggregators, anomaly_filters
+        )
     for i in range(payment_format_filters):
         services[f"payment_format_filter_{i}"] = _payment_format_filter(
             i, currency_mappers
@@ -417,7 +523,24 @@ def build_compose(
         services[f"bank_mapper_{i}"] = _bank_mapper(i, bank_mappers)
     for i in range(amount_filters):
         services[f"amount_filter_{i}"] = _amount_filter(i, amount_filters)
-    return {"name": "moneylaundering-client", "services": services}
+    for i in range(payment_format_aggregators):
+        services[f"payment_format_aggregator_{i}"] = _payment_format_aggregator(
+            i, payment_format_aggregators, payment_format_reducers
+        )
+    for i in range(payment_format_reducers):
+        services[f"payment_format_reducer_{i}"] = _payment_format_reducer(
+            i, payment_format_reducers, anomaly_filters
+        )
+    for i in range(anomaly_filters):
+        services[f"anomaly_filter_{i}"] = _anomaly_filter(i, anomaly_filters)
+    volumes = {
+        f"anomaly_filter_spill_{i}": None for i in range(anomaly_filters)
+    }
+    return {
+        "name": "moneylaundering-client",
+        "services": services,
+        "volumes": volumes,
+    }
 
 
 def _resolve_count(value, replicas):
@@ -447,6 +570,9 @@ def main():
     parser.add_argument("--low-amount-reducers", type=int, default=LOW_AMOUNT_REDUCERS)
     parser.add_argument("--bank-mappers", type=int, default=None)
     parser.add_argument("--amount-filters", type=int, default=None)
+    parser.add_argument("--payment-format-aggregators", type=int, default=None)
+    parser.add_argument("--payment-format-reducers", type=int, default=None)
+    parser.add_argument("--anomaly-filters", type=int, default=None)
     parser.add_argument("--output", default=None, help="Output file (default: stdout).")
     args = parser.parse_args()
 
@@ -466,6 +592,13 @@ def main():
     low_amount_reducers = args.low_amount_reducers
     bank_mappers = _resolve_count(args.bank_mappers, args.replicas)
     amount_filters = _resolve_count(args.amount_filters, args.replicas)
+    payment_format_aggregators = _resolve_count(
+        args.payment_format_aggregators, args.replicas
+    )
+    payment_format_reducers = _resolve_count(
+        args.payment_format_reducers, args.replicas
+    )
+    anomaly_filters = _resolve_count(args.anomaly_filters, args.replicas)
 
     counts = [
         ("--transactions-field-mappers", transactions_field_mappers),
@@ -479,6 +612,9 @@ def main():
         ("--low-amount-reducers", low_amount_reducers),
         ("--bank-mappers", bank_mappers),
         ("--amount-filters", amount_filters),
+        ("--payment-format-aggregators", payment_format_aggregators),
+        ("--payment-format-reducers", payment_format_reducers),
+        ("--anomaly-filters", anomaly_filters),
     ]
     for flag, value in counts:
         if value < 1:
@@ -496,6 +632,9 @@ def main():
         low_amount_reducers=low_amount_reducers,
         bank_mappers=bank_mappers,
         amount_filters=amount_filters,
+        payment_format_aggregators=payment_format_aggregators,
+        payment_format_reducers=payment_format_reducers,
+        anomaly_filters=anomaly_filters,
     )
 
     output = yaml.safe_dump(compose, sort_keys=False, default_flow_style=False)

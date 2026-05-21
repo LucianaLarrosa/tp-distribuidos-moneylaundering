@@ -1,9 +1,6 @@
 __pycache__/
-
 .DS_Store
-
-dataset/*.csv
-
-tmp/
+data/
 __pycache__
 output/
+docker-compose.yaml
