@@ -1,5 +1,4 @@
 import logging
-import threading
 
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
@@ -7,13 +6,13 @@ from common.middleware.middleware_rabbitmq import (
 )
 from common.models.query_results import Q1Result
 from common.protocol import internal
-from common.worker.stateless_coordinated_worker import StatelessCoordinatedWorker
+from common.worker.stateless_worker import StatelessWorker
 from config import Config
 
 QUERY_ID = 1
 
 
-class AmountFilter(StatelessCoordinatedWorker):
+class AmountFilter(StatelessWorker):
     def __init__(self, config):
         super().__init__()
         self.config = config
@@ -32,29 +31,6 @@ class AmountFilter(StatelessCoordinatedWorker):
             exchange_name=config.output_exchange,
             routing_keys=[],
         )
-        self._input_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
-            host=config.rabbitmq_host,
-            exchange_name=config.control_exchange,
-            routing_keys=[self._ring_routing_key(config.node_id)],
-        )
-        self._output_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
-            host=config.rabbitmq_host,
-            exchange_name=config.control_exchange,
-            routing_keys=[],
-        )
-        self._control_output_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
-            host=config.rabbitmq_host,
-            exchange_name=config.control_exchange,
-            routing_keys=[],
-        )
-
-    @property
-    def _node_id(self):
-        return self.config.node_id
-
-    @property
-    def _ring_size(self):
-        return self.config.ring_size
 
     @property
     def _input_middleware(self):
@@ -64,24 +40,7 @@ class AmountFilter(StatelessCoordinatedWorker):
     def _output_middleware(self):
         return self._output_exchange
 
-    @property
-    def _input_control_middleware(self):
-        return self._input_control_exchange
-
-    @property
-    def _output_control_middleware(self):
-        return self._output_control_exchange
-
-    @property
-    def _control_output_control_middleware(self):
-        return self._control_output_control_exchange
-
-    def _ring_routing_key(self, node_id):
-        return f"{self.config.node_prefix}{node_id}"
-
     def _handle_data_message(self, _, client_id, gateway_id, payload):
-        super()._handle_data_message(_, client_id, gateway_id, payload)
-
         filtered = [
             Q1Result(
                 from_bank=tx.from_bank,

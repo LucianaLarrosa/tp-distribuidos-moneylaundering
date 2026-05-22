@@ -349,7 +349,7 @@ def _bank_max_reducer(i, bank_max_reducers, bank_mappers):
     }
 
 
-def _amount_filter(i, amount_filters):
+def _amount_filter(i):
     return {
         "build": {
             "context": ".",
@@ -364,10 +364,6 @@ def _amount_filter(i, amount_filters):
             "INPUT_EOF_ROUTING_KEY": "eof",
             "INPUT_QUEUE_NAME": "amount_filter_input",
             "OUTPUT_EXCHANGE": "query_results",
-            "CONTROL_EXCHANGE": "amount_filter_control",
-            "NODE_PREFIX": NODE_PREFIX,
-            "NODE_ID": str(i),
-            "RING_SIZE": str(amount_filters),
             "AMOUNT_THRESHOLD": "50.0",
         },
     }
@@ -666,7 +662,7 @@ def build_compose(
     for i in range(bank_mappers):
         services[f"bank_mapper_{i}"] = _bank_mapper(i, bank_mappers)
     for i in range(amount_filters):
-        services[f"amount_filter_{i}"] = _amount_filter(i, amount_filters)
+        services[f"amount_filter_{i}"] = _amount_filter(i)
     for i in range(payment_format_aggregators):
         services[f"payment_format_aggregator_{i}"] = _payment_format_aggregator(
             i, payment_format_aggregators, payment_format_reducers
