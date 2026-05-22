@@ -13,14 +13,13 @@ from common.middleware.middleware_rabbitmq import (
 from common.models.query_results import Q3Result
 from common.models.transaction import Transaction
 from common.protocol import internal
-from common.worker.sent_coordinated_worker import SentCoordinatedWorker
+from common.worker.stateless_coordinated_worker import StatelessCoordinatedWorker
 from config import Config
 
 QUERY_ID = 3
-DRAIN_BATCH_SIZE = 1000
 
 
-class AnomalyFilter(SentCoordinatedWorker):
+class AnomalyFilter(StatelessCoordinatedWorker):
     def __init__(self, config):
         super().__init__()
         self.config = config
@@ -146,18 +145,22 @@ class AnomalyFilter(SentCoordinatedWorker):
     def _serialize_tx(self, tx):
         d = asdict(tx)
         d["timestamp"] = tx.timestamp.isoformat()
-        return json.dumps(d)
+        return d
 
-    def _deserialize_tx(self, line):
-        d = json.loads(line)
+    def _deserialize_tx(self, d):
         d["timestamp"] = datetime.fromisoformat(d["timestamp"])
         return Transaction(**d)
 
+    def _serialize_batch(self, batch):
+        return json.dumps([self._serialize_tx(tx) for tx in batch])
+
+    def _deserialize_batch(self, line):
+        return [self._deserialize_tx(d) for d in json.loads(line)]
+
     def _write_spill(self, key, batch):
         f = self._spill_file(key)
-        for tx in batch:
-            f.write(self._serialize_tx(tx))
-            f.write("\n")
+        f.write(self._serialize_batch(batch))
+        f.write("\n")
         f.flush()
         os.fsync(f.fileno())
 
@@ -187,8 +190,6 @@ class AnomalyFilter(SentCoordinatedWorker):
             len(result_batch),
             list(avgs.keys()) if avgs else [],
         )
-        if not result_batch:
-            return
         with self._output_lock:
             self._output_exchange.send(
                 internal.serialize_msg(
@@ -199,7 +200,6 @@ class AnomalyFilter(SentCoordinatedWorker):
                 ),
                 routing_key=gateway_id,
             )
-        self._increment_sent_count(client_id, gateway_id)
 
     def _drain_spill(self, client_id, gateway_id, avgs):
         key = self._flow_key(client_id, gateway_id)
@@ -207,18 +207,14 @@ class AnomalyFilter(SentCoordinatedWorker):
         path = self._spill_path(key)
         if not os.path.exists(path):
             return
-        batch = []
         with open(path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
                     continue
-                batch.append(self._deserialize_tx(line))
-                if len(batch) >= DRAIN_BATCH_SIZE:
-                    self._filter_and_emit(client_id, gateway_id, batch, avgs)
-                    batch = []
-        if batch:
-            self._filter_and_emit(client_id, gateway_id, batch, avgs)
+                self._filter_and_emit(
+                    client_id, gateway_id, self._deserialize_batch(line), avgs
+                )
         os.remove(path)
 
     def _handle_data_message(self, _, client_id, gateway_id, batch):
