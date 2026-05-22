@@ -378,6 +378,7 @@ def _bank_mapper(i, bank_mappers):
         "build": {"context": ".", "dockerfile": "src/workers/bank_mapper/Dockerfile"},
         "container_name": f"bank_mapper_{i}",
         "depends_on": {"rabbitmq": {"condition": "service_healthy"}},
+        "volumes": [f"bank_mapper_spill_{i}:/tmp/bank_mapper"],
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
             "INPUT_QUEUE": "bank_max_results",
@@ -387,6 +388,7 @@ def _bank_mapper(i, bank_mappers):
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
             "RING_SIZE": str(bank_mappers),
+            "SPILL_DIR": "/tmp/bank_mapper",
         },
     }
 
@@ -678,6 +680,7 @@ def build_compose(
     for i in range(anomaly_filters):
         services[f"anomaly_filter_{i}"] = _anomaly_filter(i, anomaly_filters)
     volumes = {f"anomaly_filter_spill_{i}": None for i in range(anomaly_filters)}
+    volumes.update({f"bank_mapper_spill_{i}": None for i in range(bank_mappers)})
     return {
         "name": "moneylaundering-client",
         "services": services,

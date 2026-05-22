@@ -11,3 +11,4 @@ class Config:
         self.node_id = int(os.environ["NODE_ID"])
         self.node_prefix = os.environ["NODE_PREFIX"]
         self.ring_size = int(os.environ["RING_SIZE"])
+        self.spill_dir = os.environ.get("SPILL_DIR", "/tmp/bank_mapper")

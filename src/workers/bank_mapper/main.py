@@ -1,11 +1,15 @@
+import json
 import logging
+import os
 import threading
+from dataclasses import asdict
 
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
     MessageMiddlewareExchangeFanoutRabbitMQ,
     MessageMiddlewareQueueRabbitMQ,
 )
+from common.models.bank_max_partial import BankMaxPartial
 from common.models.query_results import Q2Result
 from common.protocol import internal
 from common.worker.stateless_coordinated_worker import StatelessCoordinatedWorker
@@ -22,6 +26,13 @@ class BankMapper(StatelessCoordinatedWorker):
         self._banks_loaded = {}
         self._banks_thread = None
         self._bank_names = {}
+        self._bank_batch_counts = {}
+        self._bank_expected_counts = {}
+        self._flow_locks = {}
+        self._flow_locks_guard = threading.Lock()
+        self._spill_files = {}
+
+        os.makedirs(self.config.spill_dir, exist_ok=True)
 
         self._input_queue = MessageMiddlewareQueueRabbitMQ(
             host=config.rabbitmq_host,
@@ -51,6 +62,9 @@ class BankMapper(StatelessCoordinatedWorker):
             exchange_name=config.control_exchange,
             routing_keys=[],
         )
+
+    def _has_side_input(self):
+        return True
 
     @property
     def _node_id(self):
@@ -93,42 +107,102 @@ class BankMapper(StatelessCoordinatedWorker):
                 self._banks_loaded[key] = threading.Event()
             return self._banks_loaded[key]
 
-    def _store_bank(self, client_id, gateway_id, bank):
-        key = self._flow_key(client_id, gateway_id)
+    def _get_flow_lock(self, key):
+        with self._flow_locks_guard:
+            lock = self._flow_locks.get(key)
+            if lock is None:
+                lock = threading.Lock()
+                self._flow_locks[key] = lock
+            return lock
+
+    def _spill_path(self, key):
+        client_id, gateway_id = key
+        return os.path.join(
+            self.config.spill_dir, f"{client_id}__{gateway_id}.jsonl"
+        )
+
+    def _spill_file(self, key):
+        f = self._spill_files.get(key)
+        if f is None:
+            f = open(self._spill_path(key), "a", encoding="utf-8")
+            self._spill_files[key] = f
+        return f
+
+    def _close_spill(self, key):
+        f = self._spill_files.pop(key, None)
+        if f is not None:
+            try:
+                f.close()
+            except Exception:
+                pass
+
+    def _serialize_batch(self, batch):
+        return json.dumps([asdict(bm) for bm in batch])
+
+    def _deserialize_batch(self, line):
+        return [BankMaxPartial(**d) for d in json.loads(line)]
+
+    def _write_spill(self, key, batch):
+        f = self._spill_file(key)
+        f.write(self._serialize_batch(batch))
+        f.write("\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+    def _store_bank_unlocked(self, key, bank, client_id, gateway_id):
         bank_id = str(int(bank.bank_id))
-        with self._bank_names_lock:
-            bank_names = self._bank_names.setdefault(key, {})
-            current = bank_names.get(bank_id)
-            if current is None:
-                bank_names[bank_id] = bank.name
-                return
-            if current != bank.name:
-                logging.warning(
-                    "Bank id %s arrived with conflicting names for client %s/%s: %s / %s",
-                    bank_id,
-                    client_id,
-                    gateway_id,
-                    current,
-                    bank.name,
-                )
+        bank_names = self._bank_names.setdefault(key, {})
+        current = bank_names.get(bank_id)
+        if current is None:
+            bank_names[bank_id] = bank.name
+            return
+        if current != bank.name:
+            logging.warning(
+                "Bank id %s arrived with conflicting names for client %s/%s: %s / %s",
+                bank_id,
+                client_id,
+                gateway_id,
+                current,
+                bank.name,
+            )
 
     def _handle_bank_message(self, message, ack, nack):
         try:
             msg_type, client_id, gateway_id, payload = internal.deserialize_msg(message)
+            key = self._flow_key(client_id, gateway_id)
+
             if msg_type == internal.MsgType.BANK_BATCH:
-                for bank in payload:
-                    self._store_bank(client_id, gateway_id, bank)
+                became_ready = False
+                with self._bank_names_lock:
+                    for bank in payload:
+                        self._store_bank_unlocked(key, bank, client_id, gateway_id)
+                    self._bank_batch_counts[key] = (
+                        self._bank_batch_counts.get(key, 0) + 1
+                    )
+                    became_ready = self._mark_banks_ready_if_complete(
+                        client_id, gateway_id
+                    )
                 ack()
+                if became_ready:
+                    self._mark_side_input_ready(client_id, gateway_id)
                 return
 
             if msg_type == internal.MsgType.EOF:
                 logging.info(
-                    "Bank catalog EOF received for client %s/%s.",
+                    "Bank catalog EOF received for client %s/%s: expected=%s",
                     client_id,
                     gateway_id,
+                    payload.message_count,
                 )
-                self._get_banks_loaded_event(client_id, gateway_id).set()
+                became_ready = False
+                with self._bank_names_lock:
+                    self._bank_expected_counts[key] = payload.message_count
+                    became_ready = self._mark_banks_ready_if_complete(
+                        client_id, gateway_id
+                    )
                 ack()
+                if became_ready:
+                    self._mark_side_input_ready(client_id, gateway_id)
                 return
 
             logging.warning("Unexpected bank catalog message type: %s", msg_type)
@@ -138,9 +212,31 @@ class BankMapper(StatelessCoordinatedWorker):
             nack()
             raise
 
-    def _handle_data_message(self, _, client_id, gateway_id, bank_max_batch):
-        super()._handle_data_message(_, client_id, gateway_id, bank_max_batch)
-        self._get_banks_loaded_event(client_id, gateway_id).wait()
+    def _mark_banks_ready_if_complete(self, client_id, gateway_id):
+        key = self._flow_key(client_id, gateway_id)
+        event = self._banks_loaded.get(key)
+        if event is None:
+            event = threading.Event()
+            self._banks_loaded[key] = event
+        if event.is_set():
+            return False
+        expected = self._bank_expected_counts.get(key)
+        if expected is None:
+            return False
+        received = self._bank_batch_counts.get(key, 0)
+        if received < expected:
+            return False
+        logging.info(
+            "Bank catalog ready for %s: received=%s expected=%s names=%d",
+            key,
+            received,
+            expected,
+            len(self._bank_names.get(key, {})),
+        )
+        event.set()
+        return True
+
+    def _map_and_emit(self, client_id, gateway_id, bank_max_batch):
         key = self._flow_key(client_id, gateway_id)
         mapped_batch = []
         for bank_max in bank_max_batch:
@@ -154,19 +250,57 @@ class BankMapper(StatelessCoordinatedWorker):
                     amount_paid=bank_max.amount,
                 )
             )
-
         self._output_exchange.send(
             internal.serialize_msg(
-                internal.MsgType.Q2_RESULT_BATCH, client_id, gateway_id, mapped_batch
+                internal.MsgType.Q2_RESULT_BATCH,
+                client_id,
+                gateway_id,
+                mapped_batch,
             ),
             routing_key=gateway_id,
         )
 
+    def _drain_spill(self, client_id, gateway_id):
+        key = self._flow_key(client_id, gateway_id)
+        self._close_spill(key)
+        path = self._spill_path(key)
+        if not os.path.exists(path):
+            return
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                self._map_and_emit(client_id, gateway_id, self._deserialize_batch(line))
+        os.remove(path)
+
+    def _handle_data_message(self, _, client_id, gateway_id, bank_max_batch):
+        key = self._flow_key(client_id, gateway_id)
+        event = self._get_banks_loaded_event(client_id, gateway_id)
+        with self._get_flow_lock(key):
+            super()._handle_data_message(_, client_id, gateway_id, bank_max_batch)
+            if not event.is_set():
+                self._write_spill(key, bank_max_batch)
+                return
+        self._map_and_emit(client_id, gateway_id, bank_max_batch)
+
     def _flush_data(self, client_id, gateway_id):
+        self._drain_spill(client_id, gateway_id)
         key = self._flow_key(client_id, gateway_id)
         with self._bank_names_lock:
             self._bank_names.pop(key, None)
             self._banks_loaded.pop(key, None)
+            self._bank_batch_counts.pop(key, None)
+            self._bank_expected_counts.pop(key, None)
+        self._close_spill(key)
+        path = self._spill_path(key)
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+        with self._flow_locks_guard:
+            self._flow_locks.pop(key, None)
 
     def _send_final_eof(self, client_id, gateway_id, eof):
         self._output_exchange.send(
@@ -195,6 +329,8 @@ class BankMapper(StatelessCoordinatedWorker):
             self._input_banks_exchange.stop_consuming_threadsafe()
             self._banks_thread.join()
         self._input_banks_exchange.close()
+        for key in list(self._spill_files.keys()):
+            self._close_spill(key)
 
 
 def main():
