@@ -36,10 +36,10 @@ class Client:
         self._receiver_thread.start()
 
         try:
-            self._send_accounts()
-            self._send_eof(MsgType.EOF_ACCOUNTS)
             self._send_transactions()
             self._send_eof(MsgType.EOF_TRANSACTIONS)
+            self._send_accounts()
+            self._send_eof(MsgType.EOF_ACCOUNTS)
             self._receiver_thread.join()
         finally:
             self._disconnect()
