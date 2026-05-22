@@ -21,6 +21,15 @@ class RingCoordinatedWorker(Worker):
         self._processed_counts_lock = threading.Lock()
         self._control_thread = None
 
+        # Defer-EOF state
+        self._side_input_ready = {}  # (client_id, gateway_id) -> bool
+        self._deferred_data_eofs = {}  # (client_id, gateway_id) -> EOF
+        self._deferred_ring_eofs = {}  # (client_id, gateway_id) -> RingEOF
+        self._deferred_lock = threading.Lock()
+
+    def _has_side_input(self):
+        return False
+
     @property
     @abstractmethod
     def _node_id(self):
@@ -133,7 +142,24 @@ class RingCoordinatedWorker(Worker):
 
     def _handle_control_eof_message(self, client_id, gateway_id, ring_eof):
         """
-        Handle a RING_EOF message by either forwarding it to the next node in the ring, flushing data and sending an EOF to the output middleware if this node is the coordinator.
+        Entry point for RING_EOF messages on the control thread. If this worker has a
+        side-input that is not yet ready for this flow, defer processing; otherwise
+        process the RING_EOF immediately.
+        """
+        if not self._has_side_input():
+            self._process_ring_eof(client_id, gateway_id, ring_eof)
+            return
+        key = (client_id, gateway_id)
+        with self._deferred_lock:
+            if not self._side_input_ready.get(key, False):
+                self._deferred_ring_eofs[key] = ring_eof
+                return
+        self._process_ring_eof(client_id, gateway_id, ring_eof)
+
+    def _process_ring_eof(self, client_id, gateway_id, ring_eof):
+        """
+        Process a RING_EOF by forwarding it to the next node in the ring, or by flushing
+        data and emitting the final EOF if this node is the coordinator.
         """
         if ring_eof.coordinator_id is None:
             ring_eof = self._update_ring_eof(client_id, gateway_id, ring_eof)
@@ -174,7 +200,23 @@ class RingCoordinatedWorker(Worker):
 
     def _handle_eof_message(self, client_id, gateway_id, eof):
         """
-        Handle an EOF message by sending a RING_EOF to the next node in the ring.
+        Entry point for the data-stream EOF on the data thread. If this worker has a
+        side-input that is not yet ready for this flow, defer the EOF; otherwise start
+        the ring immediately.
+        """
+        if not self._has_side_input():
+            self._start_ring_eof(client_id, gateway_id, eof)
+            return
+        key = (client_id, gateway_id)
+        with self._deferred_lock:
+            if not self._side_input_ready.get(key, False):
+                self._deferred_data_eofs[key] = eof
+                return
+        self._start_ring_eof(client_id, gateway_id, eof)
+
+    def _start_ring_eof(self, client_id, gateway_id, eof):
+        """
+        Convert a data-stream EOF into a RING_EOF and send it to the next node in the ring.
         """
         total_processed_count = self._get_total_count(
             (client_id, gateway_id),
@@ -198,6 +240,20 @@ class RingCoordinatedWorker(Worker):
             ),
             routing_key=self._ring_routing_key(self._get_next_node_id()),
         )
+
+    def _mark_side_input_ready(self, client_id, gateway_id):
+        """
+        Releases any data EOF or RING_EOF that arrived earlier and was deferred.
+        """
+        key = (client_id, gateway_id)
+        with self._deferred_lock:
+            self._side_input_ready[key] = True
+            deferred_data = self._deferred_data_eofs.pop(key, None)
+            deferred_ring = self._deferred_ring_eofs.pop(key, None)
+        if deferred_data is not None:
+            self._start_ring_eof(client_id, gateway_id, deferred_data)
+        if deferred_ring is not None:
+            self._process_ring_eof(client_id, gateway_id, deferred_ring)
 
     def _handle_data_message(self, msg_type, client_id, gateway_id, payload):
         """
