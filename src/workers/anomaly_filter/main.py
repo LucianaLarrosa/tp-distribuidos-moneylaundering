@@ -69,6 +69,9 @@ class AnomalyFilter(SentCoordinatedWorker):
             routing_keys=[],
         )
 
+    def _has_side_input(self):
+        return True
+
     @property
     def _node_id(self):
         return self.config.node_id
@@ -251,6 +254,7 @@ class AnomalyFilter(SentCoordinatedWorker):
 
     def _merge_avgs(self, client_id, gateway_id, batch):
         key = self._flow_key(client_id, gateway_id)
+        became_ready = False
         with self._get_flow_lock(key):
             table = self._avgs.setdefault(key, {})
             for entry in batch:
@@ -258,10 +262,13 @@ class AnomalyFilter(SentCoordinatedWorker):
                     entry.average_amount
                 )
             self._avg_batch_counts[key] = self._avg_batch_counts.get(key, 0) + 1
-            self._mark_avgs_ready_if_complete(client_id, gateway_id)
+            became_ready = self._mark_avgs_ready_if_complete(client_id, gateway_id)
+        if became_ready:
+            self._mark_side_input_ready(client_id, gateway_id)
 
     def _on_avg_eof(self, client_id, gateway_id, eof):
         key = self._flow_key(client_id, gateway_id)
+        became_ready = False
         with self._get_flow_lock(key):
             self._avg_expected_counts[key] = eof.message_count
             logging.info(
@@ -272,33 +279,34 @@ class AnomalyFilter(SentCoordinatedWorker):
                 self._avgs.get(key, {}),
                 os.path.exists(self._spill_path(key)),
             )
-            self._mark_avgs_ready_if_complete(client_id, gateway_id)
+            became_ready = self._mark_avgs_ready_if_complete(client_id, gateway_id)
+        if became_ready:
+            self._mark_side_input_ready(client_id, gateway_id)
 
     def _mark_avgs_ready_if_complete(self, client_id, gateway_id):
         key = self._flow_key(client_id, gateway_id)
         event = self._get_avgs_ready_event(key)
         if event.is_set():
-            return
+            return False
 
         expected_count = self._avg_expected_counts.get(key)
         if expected_count is None:
-            return
+            return False
 
         received_count = self._avg_batch_counts.get(key, 0)
         if received_count < expected_count:
-            return
+            return False
 
-        avgs = self._avgs.get(key, {})
         logging.info(
             "AVG table ready for %s: received=%s expected=%s avgs=%s spill_exists=%s",
             key,
             received_count,
             expected_count,
-            avgs,
+            self._avgs.get(key, {}),
             os.path.exists(self._spill_path(key)),
         )
-        self._drain_spill(client_id, gateway_id, avgs)
         event.set()
+        return True
 
     def _drop_flow_state(self, key):
         self._avgs.pop(key, None)
@@ -309,7 +317,8 @@ class AnomalyFilter(SentCoordinatedWorker):
 
     def _flush_data(self, client_id, gateway_id):
         key = self._flow_key(client_id, gateway_id)
-        self._get_avgs_ready_event(key).wait()
+        avgs = self._avgs.get(key, {})
+        self._drain_spill(client_id, gateway_id, avgs)
         with self._get_flow_lock(key):
             self._drop_flow_state(key)
             self._close_spill(key)
