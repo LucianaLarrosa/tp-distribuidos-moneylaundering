@@ -1,20 +1,8 @@
 SHELL := /bin/bash
 
-GATEWAY_HOST ?=
-GATEWAY_PORT ?= 5000
-SERVER_HOST  ?= localhost
-SERVER_PORT  ?= 5000
-INPUT_CSV_TRANSACTIONS ?= ../dataset/HI-Small_Trans2.csv
-INPUT_CSV_ACCOUNTS     ?= ../dataset/HI-Small_accounts.csv
-BATCH_SIZE             ?= 1000
-
-DEBUG_OUTPUT_DIR ?= ../tmp
-POOL_SIZE        ?=
-
 N_CLIENTS ?= 2
+GATEWAYS  ?= 1
 
-# Replica count for every scalable worker.
-# gateway and low_amount_reducer stay fixed at one instance.
 REPLICAS ?= 3
 TRANSACTIONS_FIELD_MAPPERS ?= $(REPLICAS)
 ACCOUNTS_FIELD_MAPPERS     ?= $(REPLICAS)
@@ -37,13 +25,13 @@ PATH_FREQUENCY_FILTERS     ?= $(REPLICAS)
 
 COMPOSE_FILE ?= docker-compose.yaml
 
-DATASET_PATH ?= ./data
+DATASET_DIR ?= ./data
 EXPECTED_DIR ?= ./output_expected
 OUTPUT_DIR   ?= ./output
 
 COMPOSE_ARGS = \
-	--replicas                    $(REPLICAS) \
 	--clients                     $(N_CLIENTS) \
+	--gateways                    $(GATEWAYS) \
 	--transactions-field-mappers  $(TRANSACTIONS_FIELD_MAPPERS) \
 	--accounts-field-mappers      $(ACCOUNTS_FIELD_MAPPERS) \
 	--date-filters                $(DATE_FILTERS) \
@@ -62,45 +50,11 @@ COMPOSE_ARGS = \
 	--account-frequency-filters   $(ACCOUNT_FREQUENCY_FILTERS) \
 	--path-mappers                $(PATH_MAPPERS) \
 	--path-frequency-filters      $(PATH_FREQUENCY_FILTERS) \
-	--output                      $(COMPOSE_FILE)
+	--output-file                 $(COMPOSE_FILE)
 
-.PHONY: compose build up down logs clean gateway client clients verify clean-tmp build-expected wait-clients diff-output test
+.PHONY: all compose build up down logs clean build-expected wait-clients diff-output test
 
-gateway:
-	cd src && GATEWAY_HOST="$(GATEWAY_HOST)" GATEWAY_PORT=$(GATEWAY_PORT) \
-	DEBUG_OUTPUT_DIR="$(DEBUG_OUTPUT_DIR)" $(if $(POOL_SIZE),POOL_SIZE=$(POOL_SIZE),) \
-	python3 -m gateway.main
-
-client:
-	cd src && SERVER_HOST=$(SERVER_HOST) SERVER_PORT=$(SERVER_PORT) \
-	INPUT_CSV_TRANSACTIONS=$(INPUT_CSV_TRANSACTIONS) INPUT_CSV_ACCOUNTS=$(INPUT_CSV_ACCOUNTS) \
-	BATCH_SIZE=$(BATCH_SIZE) \
-	python3 -m client.main
-
-clients: clean-tmp
-	@for i in $$(seq 1 $(N_CLIENTS)); do \
-		$(MAKE) client & \
-	done; wait
-
-clean-tmp:
-	rm -f tmp/gateway_received_*.csv
-
-verify:
-	@for f in tmp/gateway_received_transactions_*.csv; do \
-		if diff -q <(tail -n +2 dataset/HI-Small_Trans2.csv) $$f >/dev/null; then \
-			echo "✓ $$f matches transactions dataset"; \
-		else \
-			echo "✗ $$f differs from transactions dataset"; \
-		fi; \
-	done; \
-	for f in tmp/gateway_received_accounts_*.csv; do \
-		if diff -q <(tail -n +2 dataset/HI-Small_accounts.csv) $$f >/dev/null; then \
-			echo "✓ $$f matches accounts dataset"; \
-		else \
-			echo "✗ $$f differs from accounts dataset"; \
-		fi; \
-	done
-	@$(MAKE) clean-tmp
+all: build test
 
 compose:
 	python3 compose_generator.py $(COMPOSE_ARGS)
@@ -109,7 +63,7 @@ build: compose
 	docker compose -f $(COMPOSE_FILE) build
 
 up: compose
-	DATASET_PATH=$(DATASET_PATH) docker compose -f $(COMPOSE_FILE) up -d
+	DATASET_DIR=$(DATASET_DIR) OUTPUT_DIR=$(OUTPUT_DIR) docker compose -f $(COMPOSE_FILE) up -d
 
 down:
 	docker compose -f $(COMPOSE_FILE) down -v
@@ -120,9 +74,10 @@ logs:
 clean:
 	docker compose -f $(COMPOSE_FILE) down -v --rmi local
 	rm -f $(COMPOSE_FILE)
+	rm -rf $(OUTPUT_DIR) $(EXPECTED_DIR)
 
 build-expected:
-	DATASET_PATH=$(DATASET_PATH) EXPECTED_DIR=$(EXPECTED_DIR) python3 build_expected.py
+	DATASET_DIR=$(DATASET_DIR) EXPECTED_DIR=$(EXPECTED_DIR) python3 build_expected.py
 
 wait-clients:
 	@client_names=""; \
