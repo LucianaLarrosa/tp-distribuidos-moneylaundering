@@ -30,10 +30,10 @@ def _rabbitmq():
     }
 
 
-def _gateway(transactions_field_mappers, accounts_field_mappers):
+def _gateway(i, transactions_field_mappers, accounts_field_mappers):
     return {
         "build": {"context": ".", "dockerfile": "src/gateway/Dockerfile"},
-        "container_name": "gateway_1",
+        "container_name": f"gateway_{i}",
         "depends_on": {
             "rabbitmq": {"condition": "service_healthy"},
             **{
@@ -45,7 +45,6 @@ def _gateway(transactions_field_mappers, accounts_field_mappers):
                 for j in range(accounts_field_mappers)
             },
         },
-        "ports": ["5000:5000"],
         "environment": {
             "GATEWAY_HOST": "0.0.0.0",
             "GATEWAY_PORT": "5000",
@@ -59,18 +58,37 @@ def _gateway(transactions_field_mappers, accounts_field_mappers):
     }
 
 
+def _proxy(gateways):
+    gateway_hosts = ",".join(f"gateway_{i}" for i in range(1, gateways + 1))
+    return {
+        "build": {"context": ".", "dockerfile": "src/proxy/Dockerfile"},
+        "container_name": "proxy",
+        "depends_on": {
+            f"gateway_{i}": {"condition": "service_started"}
+            for i in range(1, gateways + 1)
+        },
+        "ports": ["6000:6000"],
+        "environment": {
+            "PROXY_HOST": "0.0.0.0",
+            "PROXY_PORT": "6000",
+            "GATEWAY_HOSTS": gateway_hosts,
+            "GATEWAY_PORT": "5000",
+        },
+    }
+
+
 def _client(i):
     return {
         "build": {"context": ".", "dockerfile": "src/client/Dockerfile"},
         "container_name": f"client_{i}",
-        "depends_on": {"gateway_1": {"condition": "service_started"}},
+        "depends_on": {"proxy": {"condition": "service_started"}},
         "volumes": [
             "${DATASET_PATH:-./data}:/data:ro",
             "./output:/output",
         ],
         "environment": {
-            "SERVER_HOST": "gateway_1",
-            "SERVER_PORT": "5000",
+            "PROXY_HOST": "proxy",
+            "PROXY_PORT": "6000",
             "INPUT_CSV_TRANSACTIONS": "/data/HI-Small_Trans.csv",
             "INPUT_CSV_ACCOUNTS": "/data/HI-Small_accounts.csv",
             "BATCH_SIZE": "1000",
@@ -583,6 +601,7 @@ def _path_frequency_filter(i, path_frequency_filters):
 
 def build_compose(
     clients,
+    gateways,
     transactions_field_mappers,
     accounts_field_mappers,
     date_filters,
@@ -604,7 +623,11 @@ def build_compose(
 ):
     services = {}
     services["rabbitmq"] = _rabbitmq()
-    services["gateway_1"] = _gateway(transactions_field_mappers, accounts_field_mappers)
+    for i in range(1, gateways + 1):
+        services[f"gateway_{i}"] = _gateway(
+            i, transactions_field_mappers, accounts_field_mappers
+        )
+    services["proxy"] = _proxy(gateways)
     for i in range(1, clients + 1):
         services[f"client_{i}"] = _client(i)
     for i in range(transactions_field_mappers):
@@ -703,6 +726,12 @@ def main():
         default=1,
         help="Number of client containers to spawn.",
     )
+    parser.add_argument(
+        "--gateways",
+        type=int,
+        default=1,
+        help="Number of gateway containers to spawn.",
+    )
     parser.add_argument("--transactions-field-mappers", type=int, default=None)
     parser.add_argument("--accounts-field-mappers", type=int, default=None)
     parser.add_argument("--date-filters", type=int, default=None)
@@ -728,6 +757,8 @@ def main():
         parser.error(f"--replicas must be >= 1 (got {args.replicas})")
     if args.clients < 1:
         parser.error(f"--clients must be >= 1 (got {args.clients})")
+    if args.gateways < 1:
+        parser.error(f"--gateways must be >= 1 (got {args.gateways})")
 
     transactions_field_mappers = _resolve_count(
         args.transactions_field_mappers, args.replicas
@@ -782,6 +813,7 @@ def main():
 
     compose = build_compose(
         clients=args.clients,
+        gateways=args.gateways,
         transactions_field_mappers=transactions_field_mappers,
         accounts_field_mappers=accounts_field_mappers,
         date_filters=date_filters,

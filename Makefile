@@ -12,6 +12,7 @@ DEBUG_OUTPUT_DIR ?= ../tmp
 POOL_SIZE        ?=
 
 N_CLIENTS ?= 2
+N_GATEWAYS ?= 2
 
 # Replica count for every scalable worker.
 # gateway and low_amount_reducer stay fixed at one instance.
@@ -40,6 +41,7 @@ COMPOSE_FILE ?= docker-compose.yaml
 COMPOSE_ARGS = \
 	--replicas                    $(REPLICAS) \
 	--clients                     $(N_CLIENTS) \
+	--gateways                    $(N_GATEWAYS) \
 	--transactions-field-mappers  $(TRANSACTIONS_FIELD_MAPPERS) \
 	--accounts-field-mappers      $(ACCOUNTS_FIELD_MAPPERS) \
 	--date-filters                $(DATE_FILTERS) \

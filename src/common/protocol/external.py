@@ -17,6 +17,7 @@ class MsgType:
     EOF_ACCOUNTS = 4  # [1byte type] (client -> gateway)
     QUERY_RESULT = 5  # [1byte type] [4 bytes payload_size] [1byte query_id] [4 bytes count] [result_record * count] (gateway -> client) result_record cambia según query_id porque cada query devuelve algo distinto
     QUERY_END = 6  # [1byte type] [1byte query_id] (gateway -> client)
+    REDIRECT = 7  # [1byte type] [4 bytes host_len] [host] [4 bytes port] (proxy -> client)
 
 
 # TRANSACTION = [4B + N raw_line]
@@ -286,6 +287,23 @@ def _recv_query_result(sock):
     return query_id, records
 
 
+def _send_redirect(sock, host, port):
+    payload = _serialize_lp_string(host) + external_serializer.serialize_uint32(port)
+    frame = external_serializer.serialize_uint8(MsgType.REDIRECT) + payload
+    sock.send_all(frame)
+
+
+def _recv_redirect(sock):
+    host_len = external_serializer.deserialize_uint32(
+        sock.recv_exact(external_serializer.UINT32_SIZE)
+    )
+    host = external_serializer.deserialize_string(sock.recv_exact(host_len))
+    port = external_serializer.deserialize_uint32(
+        sock.recv_exact(external_serializer.UINT32_SIZE)
+    )
+    return host, port
+
+
 def _send_query_end(sock, query_id):
     frame = external_serializer.serialize_uint8(
         MsgType.QUERY_END
@@ -307,6 +325,7 @@ SEND_MSG_HANDLERS = {
     MsgType.EOF_ACCOUNTS: _send_eof_accounts,
     MsgType.QUERY_RESULT: _send_query_result,
     MsgType.QUERY_END: _send_query_end,
+    MsgType.REDIRECT: _send_redirect,
 }
 
 RECV_MSG_HANDLERS = {
@@ -316,6 +335,7 @@ RECV_MSG_HANDLERS = {
     MsgType.EOF_ACCOUNTS: _recv_eof_accounts,
     MsgType.QUERY_RESULT: _recv_query_result,
     MsgType.QUERY_END: _recv_query_end,
+    MsgType.REDIRECT: _recv_redirect,
 }
 
 
