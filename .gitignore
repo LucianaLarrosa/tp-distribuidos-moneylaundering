@@ -1,6 +1,11 @@
+# Python
 __pycache__/
+
+# macOS
 .DS_Store
+
+# Testing
 data/
-__pycache__
 output/
+output_expected/
 docker-compose.yaml

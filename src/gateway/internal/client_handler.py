@@ -16,7 +16,6 @@ class ClientHandler:
         self._gateway_id = gateway_id
         self._router = router
         self._results_queue = results_queue
-        self._sock_lock = threading.Lock()
         self._tx_batch_count = 0
         self._acc_batch_count = 0
 
@@ -107,5 +106,4 @@ class ClientHandler:
         self._send_to_client(MsgType.QUERY_END, query_id)
 
     def _send_to_client(self, msg_type, *args):
-        with self._sock_lock:
-            external.send_msg(self._sock, msg_type, *args)
+        external.send_msg(self._sock, msg_type, *args)

@@ -5,8 +5,8 @@ from typing import List
 
 @dataclass
 class Config:
-    server_host: str
-    server_port: int
+    proxy_host: str
+    proxy_port: int
     input_csv_transactions: str
     input_csv_accounts: str
     batch_size: int
@@ -21,8 +21,8 @@ class Config:
             int(qid.strip()) for qid in raw_ids.split(",") if qid.strip()
         ]
         return cls(
-            server_host=os.environ["SERVER_HOST"],
-            server_port=int(os.environ["SERVER_PORT"]),
+            proxy_host=os.environ["PROXY_HOST"],
+            proxy_port=int(os.environ["PROXY_PORT"]),
             input_csv_transactions=os.environ["INPUT_CSV_TRANSACTIONS"],
             input_csv_accounts=os.environ["INPUT_CSV_ACCOUNTS"],
             batch_size=int(os.environ.get("BATCH_SIZE", 1000)),

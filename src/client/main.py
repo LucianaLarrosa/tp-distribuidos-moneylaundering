@@ -21,14 +21,9 @@ class Client:
         self._closed = False
 
     def run(self):
-        logging.info(
-            "Connecting to %s:%s",
-            self._config.server_host,
-            self._config.server_port,
-        )
-        self._sock = SafeSocket.connect(
-            self._config.server_host, self._config.server_port
-        )
+        gateway_host, gateway_port = self._resolve_gateway()
+        logging.info("Connecting to gateway %s:%s", gateway_host, gateway_port)
+        self._sock = SafeSocket.connect(gateway_host, gateway_port)
 
         self._receiver_thread = threading.Thread(
             target=self._wait_for_query_results, daemon=True
@@ -36,13 +31,30 @@ class Client:
         self._receiver_thread.start()
 
         try:
-            self._send_accounts()
-            self._send_eof(MsgType.EOF_ACCOUNTS)
             self._send_transactions()
             self._send_eof(MsgType.EOF_TRANSACTIONS)
+            self._send_accounts()
+            self._send_eof(MsgType.EOF_ACCOUNTS)
             self._receiver_thread.join()
         finally:
             self._disconnect()
+
+    def _resolve_gateway(self):
+        logging.info("Connecting to proxy")
+        proxy_sock = SafeSocket.connect(
+            self._config.proxy_host, self._config.proxy_port
+        )
+        
+        try:
+            msg_type, payload = external.recv_msg(proxy_sock)
+            if msg_type != MsgType.REDIRECT:
+                raise RuntimeError(
+                    f"Expected REDIRECT from proxy, got msg_type={msg_type}"
+                )
+            host, port = payload
+            return host, port
+        finally:
+            proxy_sock.close()
 
     def _send_accounts(self):
         total = self._send_batches(

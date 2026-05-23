@@ -1,18 +1,52 @@
 import argparse
-import sys
 
 import yaml
 
+# --- Configuration ---
+
+DEFAULT_CLIENTS = 1
+DEFAULT_GATEWAYS = 1
 DEFAULT_REPLICAS = 3
 LOW_AMOUNT_REDUCERS = 1
-NODE_PREFIX = "node."
-MIN_REQUIRED_ACCOUNTS = 5
-BATCH_SIZE = 1000
 
+# --- Middleware Configuration ---
+
+EXCHANGE_RAW_DATA = "raw_data"
+EXCHANGE_FILTERED_TRANSACTIONS = "filtered_transactions"
+EXCHANGE_DATE_FILTER_OUTPUT = "date_filter_output"
+EXCHANGE_BANK_CATALOG = "bank_catalog"
+EXCHANGE_BANK_MAX_OUTPUT = "bank_max_output"
+EXCHANGE_PAYMENT_FORMAT_SHARDS = "payment_format_shards"
+EXCHANGE_PAYMENT_FORMAT_AVERAGES = "payment_format_averages"
+EXCHANGE_BIDIRECTIONAL_SHARDER_OUTPUT = "bidirectional_sharder_output"
+EXCHANGE_ACCOUNT_FREQ_FILTER_OUTPUT = "account_freq_filter_output"
+EXCHANGE_PATH_MAPPER_OUTPUT = "path_mapper_output"
+EXCHANGE_QUERY_RESULTS = "query_results"
+QUEUE_CURRENCY_MAPPER_INPUT = "currency_mapper_input"
+QUEUE_CURRENCY_MAPPER_OUTPUT = "currency_mapper_output"
+QUEUE_LOW_AMOUNT_AGGREGATOR_OUTPUT = "low_amount_aggregator_output"
+QUEUE_BANK_MAX_RESULTS = "bank_max_results"
+
+# --- Constants ---
+
+NODE_PREFIX = "node."
+MIN_REQUIRED_ACCOUNTS = "5"
+BATCH_SIZE = "1000"
+TRANSACTION_DATE_FORMAT = "%Y/%m/%d %H:%M"
 DATE_FROM_1 = "2022/09/01 00:00"
 DATE_TO_1 = "2022/09/05 23:59"
 DATE_FROM_2 = "2022/09/06 00:00"
 DATE_TO_2 = "2022/09/15 23:59"
+USD_CURRENCY = "US Dollar"
+ROUTING_KEY_USD = "usd"
+ROUTING_KEYS_ALL = "all"
+ROUTING_KEYS_EOF = "eof"
+ROUTING_KEY_PERIOD_1 = "period1"
+ROUTING_KEY_PERIOD_2 = "period2"
+ROUTING_KEY_TRANSACTION = "transaction"
+ROUTING_KEY_ACCOUNT = "account"
+
+# --- Containers ---
 
 
 def _rabbitmq():
@@ -30,10 +64,10 @@ def _rabbitmq():
     }
 
 
-def _gateway(transactions_field_mappers, accounts_field_mappers):
+def _gateway(i, transactions_field_mappers, accounts_field_mappers):
     return {
         "build": {"context": ".", "dockerfile": "src/gateway/Dockerfile"},
-        "container_name": "gateway_1",
+        "container_name": f"gateway_{i}",
         "depends_on": {
             "rabbitmq": {"condition": "service_healthy"},
             **{
@@ -45,16 +79,35 @@ def _gateway(transactions_field_mappers, accounts_field_mappers):
                 for j in range(accounts_field_mappers)
             },
         },
-        "ports": ["5000:5000"],
+        "ports": [f"{5000 + i - 1}:5000"],
         "environment": {
             "GATEWAY_HOST": "0.0.0.0",
             "GATEWAY_PORT": "5000",
             "POOL_SIZE": "4",
             "RABBITMQ_HOST": "rabbitmq",
-            "RAW_DATA_EXCHANGE": "raw_data",
-            "TRANSACTION_ROUTING_KEY": "transaction",
-            "ACCOUNT_ROUTING_KEY": "account",
-            "QUERY_RESULTS_EXCHANGE": "query_results",
+            "RAW_DATA_EXCHANGE": EXCHANGE_RAW_DATA,
+            "TRANSACTION_ROUTING_KEY": ROUTING_KEY_TRANSACTION,
+            "ACCOUNT_ROUTING_KEY": ROUTING_KEY_ACCOUNT,
+            "QUERY_RESULTS_EXCHANGE": EXCHANGE_QUERY_RESULTS,
+        },
+    }
+
+
+def _proxy(gateways):
+    gateway_hosts = ",".join(f"gateway_{i}" for i in range(1, gateways + 1))
+    return {
+        "build": {"context": ".", "dockerfile": "src/proxy/Dockerfile"},
+        "container_name": "proxy",
+        "depends_on": {
+            f"gateway_{i}": {"condition": "service_started"}
+            for i in range(1, gateways + 1)
+        },
+        "ports": ["6000:6000"],
+        "environment": {
+            "PROXY_HOST": "0.0.0.0",
+            "PROXY_PORT": "6000",
+            "GATEWAY_HOSTS": gateway_hosts,
+            "GATEWAY_PORT": "5000",
         },
     }
 
@@ -63,17 +116,17 @@ def _client(i):
     return {
         "build": {"context": ".", "dockerfile": "src/client/Dockerfile"},
         "container_name": f"client_{i}",
-        "depends_on": {"gateway_1": {"condition": "service_started"}},
+        "depends_on": {"proxy": {"condition": "service_started"}},
         "volumes": [
-            "${DATASET_PATH:-./data}:/data:ro",
-            "./output:/output",
+            "${DATASET_DIR:-./data}:/data:ro",
+            "${OUTPUT_DIR:-./output}:/output",
         ],
         "environment": {
-            "SERVER_HOST": "gateway_1",
-            "SERVER_PORT": "5000",
+            "PROXY_HOST": "proxy",
+            "PROXY_PORT": "6000",
             "INPUT_CSV_TRANSACTIONS": "/data/HI-Small_Trans.csv",
             "INPUT_CSV_ACCOUNTS": "/data/HI-Small_accounts.csv",
-            "BATCH_SIZE": "1000",
+            "BATCH_SIZE": BATCH_SIZE,
             "EXPECTED_QUERY_IDS": "1,2,3,4,5",
             "OUTPUT_DIR": "/output",
             "CLIENT_ID": str(i),
@@ -105,14 +158,14 @@ def _transactions_field_mapper(i, date_filters, bank_max_aggregators, amount_fil
         },
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "RAW_DATA_EXCHANGE": "raw_data",
-            "INPUT_ROUTING_KEY": "transaction",
+            "RAW_DATA_EXCHANGE": EXCHANGE_RAW_DATA,
+            "INPUT_ROUTING_KEY": ROUTING_KEY_TRANSACTION,
             "INPUT_QUEUE_NAME": "transactions_field_mapper_input",
-            "OUTPUT_EXCHANGE": "filtered_transactions",
-            "OUTPUT_ROUTING_KEY_USD": "usd",
-            "OUTPUT_ROUTING_KEY_ALL": "all",
-            "OUTPUT_ROUTING_KEY_EOF": "eof",
-            "USD_CURRENCY": "US Dollar",
+            "OUTPUT_EXCHANGE": EXCHANGE_FILTERED_TRANSACTIONS,
+            "OUTPUT_ROUTING_KEY_USD": ROUTING_KEY_USD,
+            "OUTPUT_ROUTING_KEY_ALL": ROUTING_KEYS_ALL,
+            "OUTPUT_ROUTING_KEY_EOF": ROUTING_KEYS_EOF,
+            "USD_CURRENCY": USD_CURRENCY,
         },
     }
 
@@ -148,21 +201,21 @@ def _date_filter(
         },
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "INPUT_EXCHANGE": "filtered_transactions",
-            "INPUT_ROUTING_KEY": "all,eof",
+            "INPUT_EXCHANGE": EXCHANGE_FILTERED_TRANSACTIONS,
+            "INPUT_ROUTING_KEY": f"{ROUTING_KEYS_ALL},{ROUTING_KEYS_EOF}",
             "INPUT_QUEUE_NAME": "date_filter_input",
-            "OUTPUT_EXCHANGE": "date_filter_output",
-            "DATE_FORMAT": "%Y/%m/%d %H:%M",
+            "OUTPUT_EXCHANGE": EXCHANGE_DATE_FILTER_OUTPUT,
+            "DATE_FORMAT": TRANSACTION_DATE_FORMAT,
             "DATE_FROM_1": DATE_FROM_1,
             "DATE_TO_1": DATE_TO_1,
             "DATE_FROM_2": DATE_FROM_2,
             "DATE_TO_2": DATE_TO_2,
-            "USD_CURRENCY": "US Dollar",
-            "OUTPUT_ROUTING_KEY_USD": "usd",
-            "OUTPUT_ROUTING_KEY_ALL": "all",
-            "OUTPUT_ROUTING_KEY_PERIOD_1": "period1",
-            "OUTPUT_ROUTING_KEY_PERIOD_2": "period2",
-            "OUTPUT_ROUTING_KEY_EOF": "eof",
+            "USD_CURRENCY": USD_CURRENCY,
+            "OUTPUT_ROUTING_KEY_USD": ROUTING_KEY_USD,
+            "OUTPUT_ROUTING_KEY_ALL": ROUTING_KEYS_ALL,
+            "OUTPUT_ROUTING_KEY_PERIOD_1": ROUTING_KEY_PERIOD_1,
+            "OUTPUT_ROUTING_KEY_PERIOD_2": ROUTING_KEY_PERIOD_2,
+            "OUTPUT_ROUTING_KEY_EOF": ROUTING_KEYS_EOF,
         },
     }
 
@@ -183,11 +236,12 @@ def _payment_format_filter(i, currency_mappers):
         },
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "INPUT_EXCHANGE": "date_filter_output",
-            "INPUT_ROUTING_KEY": "all.period1,eof",
+            "INPUT_EXCHANGE": EXCHANGE_DATE_FILTER_OUTPUT,
+            "INPUT_ROUTING_KEY": f"{ROUTING_KEYS_ALL}.{ROUTING_KEY_PERIOD_1},{ROUTING_KEYS_EOF}",
             "INPUT_QUEUE_NAME": "payment_format_filter_input",
-            "OUTPUT_QUEUE": "currency_mapper_input",
+            "OUTPUT_QUEUE": QUEUE_CURRENCY_MAPPER_INPUT,
             "VALID_PAYMENT_FORMATS": "Wire,ACH",
+            "USD_CURRENCY": USD_CURRENCY,
         },
     }
 
@@ -206,16 +260,16 @@ def _currency_mapper(i, low_amount_aggregators):
         "depends_on": {"rabbitmq": {"condition": "service_healthy"}, **laa_deps},
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "INPUT_QUEUE": "currency_mapper_input",
-            "OUTPUT_QUEUE": "currency_mapper_output",
-            "TARGET_CURRENCY": "US Dollar",
+            "INPUT_QUEUE": QUEUE_CURRENCY_MAPPER_INPUT,
+            "OUTPUT_QUEUE": QUEUE_CURRENCY_MAPPER_OUTPUT,
+            "TARGET_CURRENCY": USD_CURRENCY,
             "FRANKFURTER_URL": "https://api.frankfurter.dev/v2/rates?from=2022-09-01&to=2022-09-05&base=USD",
             "FRANKFURTER_TIMEOUT_SECONDS": "10",
             "RATES_DATE_FIELD": "date",
             "RATES_QUOTE_FIELD": "quote",
             "RATES_RATE_FIELD": "rate",
             "RATES_DATE_FORMAT": "%Y-%m-%d",
-            "TRANSACTION_DATE_FORMAT": "%Y/%m/%d %H:%M",
+            "TRANSACTION_DATE_FORMAT": TRANSACTION_DATE_FORMAT,
         },
     }
 
@@ -236,13 +290,13 @@ def _low_amount_aggregator(i, low_amount_aggregators, low_amount_reducers):
         },
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "INPUT_QUEUE": "currency_mapper_output",
-            "OUTPUT_QUEUE": "low_amount_aggregator_output",
+            "INPUT_QUEUE": QUEUE_CURRENCY_MAPPER_OUTPUT,
+            "OUTPUT_QUEUE": QUEUE_LOW_AMOUNT_AGGREGATOR_OUTPUT,
             "CONTROL_EXCHANGE": "low_amount_aggregator_control",
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
             "RING_SIZE": str(low_amount_aggregators),
-            "MAX_AMOUNT": "1.0",
+            "AMOUNT_THRESHOLD": "1.0",
         },
     }
 
@@ -257,8 +311,8 @@ def _low_amount_reducer(i, low_amount_reducers):
         "depends_on": {"rabbitmq": {"condition": "service_healthy"}},
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "INPUT_QUEUE": "low_amount_aggregator_output",
-            "OUTPUT_EXCHANGE": "query_results",
+            "INPUT_QUEUE": QUEUE_LOW_AMOUNT_AGGREGATOR_OUTPUT,
+            "OUTPUT_EXCHANGE": EXCHANGE_QUERY_RESULTS,
             "CONTROL_EXCHANGE": "low_amount_reducer_control",
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
@@ -283,10 +337,10 @@ def _accounts_field_mapper(i, bank_mappers):
         },
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "RAW_DATA_EXCHANGE": "raw_data",
-            "INPUT_ROUTING_KEY": "account",
+            "RAW_DATA_EXCHANGE": EXCHANGE_RAW_DATA,
+            "INPUT_ROUTING_KEY": ROUTING_KEY_ACCOUNT,
             "INPUT_QUEUE_NAME": "accounts_field_mapper_input",
-            "OUTPUT_EXCHANGE": "bank_catalog",
+            "OUTPUT_EXCHANGE": EXCHANGE_BANK_CATALOG,
         },
     }
 
@@ -307,10 +361,10 @@ def _bank_max_aggregator(i, bank_max_aggregators, bank_max_reducers):
         },
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "INPUT_EXCHANGE": "filtered_transactions",
-            "INPUT_BINDING_PATTERNS": "usd,eof",
+            "INPUT_EXCHANGE": EXCHANGE_FILTERED_TRANSACTIONS,
+            "INPUT_BINDING_PATTERNS": f"{ROUTING_KEY_USD},{ROUTING_KEYS_EOF}",
             "INPUT_QUEUE": "bank_max_input",
-            "OUTPUT_EXCHANGE": "bank_max_output",
+            "OUTPUT_EXCHANGE": EXCHANGE_BANK_MAX_OUTPUT,
             "CONTROL_EXCHANGE": "bank_max_aggregator_control",
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
@@ -337,9 +391,9 @@ def _bank_max_reducer(i, bank_max_reducers, bank_mappers):
         },
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "INPUT_EXCHANGE": "bank_max_output",
+            "INPUT_EXCHANGE": EXCHANGE_BANK_MAX_OUTPUT,
             "SHARD_ID": str(i),
-            "OUTPUT_QUEUE": "bank_max_results",
+            "OUTPUT_QUEUE": QUEUE_BANK_MAX_RESULTS,
             "CONTROL_EXCHANGE": "bank_max_reducer_control",
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
@@ -349,7 +403,7 @@ def _bank_max_reducer(i, bank_max_reducers, bank_mappers):
     }
 
 
-def _amount_filter(i, amount_filters):
+def _amount_filter(i):
     return {
         "build": {
             "context": ".",
@@ -359,15 +413,11 @@ def _amount_filter(i, amount_filters):
         "depends_on": {"rabbitmq": {"condition": "service_healthy"}},
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "INPUT_EXCHANGE": "filtered_transactions",
-            "INPUT_ROUTING_KEY": "usd",
-            "INPUT_EOF_ROUTING_KEY": "eof",
+            "INPUT_EXCHANGE": EXCHANGE_FILTERED_TRANSACTIONS,
+            "INPUT_ROUTING_KEY": ROUTING_KEY_USD,
+            "INPUT_EOF_ROUTING_KEY": ROUTING_KEYS_EOF,
             "INPUT_QUEUE_NAME": "amount_filter_input",
-            "OUTPUT_EXCHANGE": "query_results",
-            "CONTROL_EXCHANGE": "amount_filter_control",
-            "NODE_PREFIX": NODE_PREFIX,
-            "NODE_ID": str(i),
-            "RING_SIZE": str(amount_filters),
+            "OUTPUT_EXCHANGE": EXCHANGE_QUERY_RESULTS,
             "AMOUNT_THRESHOLD": "50.0",
         },
     }
@@ -381,9 +431,9 @@ def _bank_mapper(i, bank_mappers):
         "volumes": [f"bank_mapper_spill_{i}:/tmp/bank_mapper"],
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "INPUT_QUEUE": "bank_max_results",
-            "OUTPUT_EXCHANGE": "query_results",
-            "BANKS_EXCHANGE": "bank_catalog",
+            "INPUT_QUEUE": QUEUE_BANK_MAX_RESULTS,
+            "OUTPUT_EXCHANGE": EXCHANGE_QUERY_RESULTS,
+            "BANKS_EXCHANGE": EXCHANGE_BANK_CATALOG,
             "CONTROL_EXCHANGE": "bank_mapper_control",
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
@@ -409,10 +459,10 @@ def _payment_format_aggregator(i, payment_format_aggregators, payment_format_red
         },
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "INPUT_EXCHANGE": "date_filter_output",
-            "INPUT_BINDING_PATTERNS": "usd.period1,eof",
+            "INPUT_EXCHANGE": EXCHANGE_DATE_FILTER_OUTPUT,
+            "INPUT_BINDING_PATTERNS": f"{ROUTING_KEY_USD}.{ROUTING_KEY_PERIOD_1},{ROUTING_KEYS_EOF}",
             "INPUT_QUEUE": "payment_format_aggregator_input",
-            "OUTPUT_EXCHANGE": "payment_format_shards",
+            "OUTPUT_EXCHANGE": EXCHANGE_PAYMENT_FORMAT_SHARDS,
             "CONTROL_EXCHANGE": "payment_format_aggregator_control",
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
@@ -439,9 +489,9 @@ def _payment_format_reducer(i, payment_format_reducers, anomaly_filters):
         },
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "INPUT_EXCHANGE": "payment_format_shards",
+            "INPUT_EXCHANGE": EXCHANGE_PAYMENT_FORMAT_SHARDS,
             "SHARD_ID": str(i),
-            "OUTPUT_EXCHANGE": "payment_format_averages",
+            "OUTPUT_EXCHANGE": EXCHANGE_PAYMENT_FORMAT_AVERAGES,
             "CONTROL_EXCHANGE": "payment_format_reducer_control",
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
@@ -461,11 +511,11 @@ def _anomaly_filter(i, anomaly_filters):
         "volumes": [f"anomaly_filter_spill_{i}:/tmp/anomaly_filter"],
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "INPUT_EXCHANGE": "date_filter_output",
-            "INPUT_ROUTING_KEYS": "usd.period2,eof",
+            "INPUT_EXCHANGE": EXCHANGE_DATE_FILTER_OUTPUT,
+            "INPUT_ROUTING_KEYS": f"{ROUTING_KEY_USD}.{ROUTING_KEY_PERIOD_2},{ROUTING_KEYS_EOF}",
             "INPUT_QUEUE_NAME": "anomaly_filter_input",
-            "AVG_EXCHANGE": "payment_format_averages",
-            "OUTPUT_EXCHANGE": "query_results",
+            "AVG_EXCHANGE": EXCHANGE_PAYMENT_FORMAT_AVERAGES,
+            "OUTPUT_EXCHANGE": EXCHANGE_QUERY_RESULTS,
             "CONTROL_EXCHANGE": "anomaly_filter_control",
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
@@ -492,10 +542,10 @@ def _bidirectional_sharder(i, bidirectional_sharders, account_frequency_filters)
         },
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "INPUT_EXCHANGE": "date_filter_output",
-            "INPUT_ROUTING_KEY": "usd.period1,eof",
+            "INPUT_EXCHANGE": EXCHANGE_DATE_FILTER_OUTPUT,
+            "INPUT_ROUTING_KEY": f"{ROUTING_KEY_USD}.{ROUTING_KEY_PERIOD_1},{ROUTING_KEYS_EOF}",
             "INPUT_QUEUE_NAME": "bidirectional_sharder_input",
-            "OUTPUT_EXCHANGE": "bidirectional_sharder_output",
+            "OUTPUT_EXCHANGE": EXCHANGE_BIDIRECTIONAL_SHARDER_OUTPUT,
             "CONTROL_EXCHANGE": "bidirectional_sharder_control",
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
@@ -522,16 +572,16 @@ def _account_frequency_filter(i, account_frequency_filters, path_mappers):
         },
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "INPUT_EXCHANGE": "bidirectional_sharder_output",
-            "OUTPUT_EXCHANGE": "account_freq_filter_output",
+            "INPUT_EXCHANGE": EXCHANGE_BIDIRECTIONAL_SHARDER_OUTPUT,
+            "OUTPUT_EXCHANGE": EXCHANGE_ACCOUNT_FREQ_FILTER_OUTPUT,
             "CONTROL_EXCHANGE": "account_freq_filter_control",
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
             "RING_SIZE": str(account_frequency_filters),
             "OUTPUT_NODE_COUNT": str(path_mappers),
             "OUTPUT_NODE_PREFIX": NODE_PREFIX,
-            "MIN_REQUIRED_ACCOUNTS": str(MIN_REQUIRED_ACCOUNTS),
-            "BATCH_SIZE": str(BATCH_SIZE),
+            "MIN_REQUIRED_ACCOUNTS": MIN_REQUIRED_ACCOUNTS,
+            "BATCH_SIZE": BATCH_SIZE,
         },
     }
 
@@ -552,15 +602,15 @@ def _path_mapper(i, path_mappers, path_frequency_filters):
         },
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "INPUT_EXCHANGE": "account_freq_filter_output",
-            "OUTPUT_EXCHANGE": "path_mapper_output",
+            "INPUT_EXCHANGE": EXCHANGE_ACCOUNT_FREQ_FILTER_OUTPUT,
+            "OUTPUT_EXCHANGE": EXCHANGE_PATH_MAPPER_OUTPUT,
             "CONTROL_EXCHANGE": "path_mapper_control",
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
             "RING_SIZE": str(path_mappers),
             "OUTPUT_NODE_COUNT": str(path_frequency_filters),
             "OUTPUT_NODE_PREFIX": NODE_PREFIX,
-            "BATCH_SIZE": str(BATCH_SIZE),
+            "BATCH_SIZE": BATCH_SIZE,
         },
     }
 
@@ -575,20 +625,24 @@ def _path_frequency_filter(i, path_frequency_filters):
         "depends_on": {"rabbitmq": {"condition": "service_healthy"}},
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "INPUT_EXCHANGE": "path_mapper_output",
-            "OUTPUT_EXCHANGE": "query_results",
+            "INPUT_EXCHANGE": EXCHANGE_PATH_MAPPER_OUTPUT,
+            "OUTPUT_EXCHANGE": EXCHANGE_QUERY_RESULTS,
             "CONTROL_EXCHANGE": "path_freq_filter_control",
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
             "RING_SIZE": str(path_frequency_filters),
-            "MIN_REQUIRED_ACCOUNTS": str(MIN_REQUIRED_ACCOUNTS),
-            "BATCH_SIZE": str(BATCH_SIZE),
+            "MIN_REQUIRED_ACCOUNTS": MIN_REQUIRED_ACCOUNTS,
+            "BATCH_SIZE": BATCH_SIZE,
         },
     }
 
 
+# --- Builder ---
+
+
 def build_compose(
     clients,
+    gateways,
     transactions_field_mappers,
     accounts_field_mappers,
     date_filters,
@@ -610,7 +664,11 @@ def build_compose(
 ):
     services = {}
     services["rabbitmq"] = _rabbitmq()
-    services["gateway_1"] = _gateway(transactions_field_mappers, accounts_field_mappers)
+    for i in range(1, gateways + 1):
+        services[f"gateway_{i}"] = _gateway(
+            i, transactions_field_mappers, accounts_field_mappers
+        )
+    services["proxy"] = _proxy(gateways)
     for i in range(1, clients + 1):
         services[f"client_{i}"] = _client(i)
     for i in range(transactions_field_mappers):
@@ -668,7 +726,7 @@ def build_compose(
     for i in range(bank_mappers):
         services[f"bank_mapper_{i}"] = _bank_mapper(i, bank_mappers)
     for i in range(amount_filters):
-        services[f"amount_filter_{i}"] = _amount_filter(i, amount_filters)
+        services[f"amount_filter_{i}"] = _amount_filter(i)
     for i in range(payment_format_aggregators):
         services[f"payment_format_aggregator_{i}"] = _payment_format_aggregator(
             i, payment_format_aggregators, payment_format_reducers
@@ -688,10 +746,7 @@ def build_compose(
     }
 
 
-def _resolve_count(value, replicas):
-    if value is None:
-        return replicas
-    return value
+# --- Main ---
 
 
 def main():
@@ -699,89 +754,66 @@ def main():
         description="Generate docker-compose.yaml with configurable replica counts."
     )
     parser.add_argument(
-        "--replicas",
-        type=int,
-        default=DEFAULT_REPLICAS,
-        help="Default replica count for every scalable worker.",
-    )
-    parser.add_argument(
         "--clients",
         type=int,
-        default=1,
+        default=DEFAULT_CLIENTS,
         help="Number of client containers to spawn.",
     )
-    parser.add_argument("--transactions-field-mappers", type=int, default=None)
-    parser.add_argument("--accounts-field-mappers", type=int, default=None)
-    parser.add_argument("--date-filters", type=int, default=None)
-    parser.add_argument("--payment-format-filters", type=int, default=None)
-    parser.add_argument("--currency-mappers", type=int, default=None)
-    parser.add_argument("--low-amount-aggregators", type=int, default=None)
-    parser.add_argument("--bank-max-aggregators", type=int, default=None)
-    parser.add_argument("--bank-max-reducers", type=int, default=None)
+    parser.add_argument(
+        "--gateways",
+        type=int,
+        default=DEFAULT_GATEWAYS,
+        help="Number of gateway containers to spawn.",
+    )
+
+    parser.add_argument(
+        "--transactions-field-mappers", type=int, default=DEFAULT_REPLICAS
+    )
+    parser.add_argument("--accounts-field-mappers", type=int, default=DEFAULT_REPLICAS)
+    parser.add_argument("--date-filters", type=int, default=DEFAULT_REPLICAS)
+    parser.add_argument("--payment-format-filters", type=int, default=DEFAULT_REPLICAS)
+    parser.add_argument("--currency-mappers", type=int, default=DEFAULT_REPLICAS)
+    parser.add_argument("--low-amount-aggregators", type=int, default=DEFAULT_REPLICAS)
+    parser.add_argument("--bank-max-aggregators", type=int, default=DEFAULT_REPLICAS)
+    parser.add_argument("--bank-max-reducers", type=int, default=DEFAULT_REPLICAS)
     parser.add_argument("--low-amount-reducers", type=int, default=LOW_AMOUNT_REDUCERS)
-    parser.add_argument("--bank-mappers", type=int, default=None)
-    parser.add_argument("--amount-filters", type=int, default=None)
-    parser.add_argument("--payment-format-aggregators", type=int, default=None)
-    parser.add_argument("--payment-format-reducers", type=int, default=None)
-    parser.add_argument("--anomaly-filters", type=int, default=None)
-    parser.add_argument("--bidirectional-sharders", type=int, default=None)
-    parser.add_argument("--account-frequency-filters", type=int, default=None)
-    parser.add_argument("--path-mappers", type=int, default=None)
-    parser.add_argument("--path-frequency-filters", type=int, default=None)
-    parser.add_argument("--output", default=None, help="Output file (default: stdout).")
+    parser.add_argument("--bank-mappers", type=int, default=DEFAULT_REPLICAS)
+    parser.add_argument("--amount-filters", type=int, default=DEFAULT_REPLICAS)
+    parser.add_argument(
+        "--payment-format-aggregators", type=int, default=DEFAULT_REPLICAS
+    )
+    parser.add_argument("--payment-format-reducers", type=int, default=DEFAULT_REPLICAS)
+    parser.add_argument("--anomaly-filters", type=int, default=DEFAULT_REPLICAS)
+    parser.add_argument("--bidirectional-sharders", type=int, default=DEFAULT_REPLICAS)
+    parser.add_argument(
+        "--account-frequency-filters", type=int, default=DEFAULT_REPLICAS
+    )
+    parser.add_argument("--path-mappers", type=int, default=DEFAULT_REPLICAS)
+    parser.add_argument("--path-frequency-filters", type=int, default=DEFAULT_REPLICAS)
+    parser.add_argument("--output-file", required=True)
     args = parser.parse_args()
 
-    if args.replicas < 1:
-        parser.error(f"--replicas must be >= 1 (got {args.replicas})")
-    if args.clients < 1:
-        parser.error(f"--clients must be >= 1 (got {args.clients})")
-
-    transactions_field_mappers = _resolve_count(
-        args.transactions_field_mappers, args.replicas
-    )
-    accounts_field_mappers = _resolve_count(args.accounts_field_mappers, args.replicas)
-    date_filters = _resolve_count(args.date_filters, args.replicas)
-    payment_format_filters = _resolve_count(args.payment_format_filters, args.replicas)
-    currency_mappers = _resolve_count(args.currency_mappers, args.replicas)
-    low_amount_aggregators = _resolve_count(args.low_amount_aggregators, args.replicas)
-    bank_max_aggregators = _resolve_count(args.bank_max_aggregators, args.replicas)
-    bank_max_reducers = _resolve_count(args.bank_max_reducers, args.replicas)
-    low_amount_reducers = args.low_amount_reducers
-    bank_mappers = _resolve_count(args.bank_mappers, args.replicas)
-    amount_filters = _resolve_count(args.amount_filters, args.replicas)
-    payment_format_aggregators = _resolve_count(
-        args.payment_format_aggregators, args.replicas
-    )
-    payment_format_reducers = _resolve_count(
-        args.payment_format_reducers, args.replicas
-    )
-    anomaly_filters = _resolve_count(args.anomaly_filters, args.replicas)
-    bidirectional_sharders = _resolve_count(args.bidirectional_sharders, args.replicas)
-    account_frequency_filters = _resolve_count(
-        args.account_frequency_filters, args.replicas
-    )
-    path_mappers = _resolve_count(args.path_mappers, args.replicas)
-    path_frequency_filters = _resolve_count(args.path_frequency_filters, args.replicas)
-
     counts = [
-        ("--transactions-field-mappers", transactions_field_mappers),
-        ("--accounts-field-mappers", accounts_field_mappers),
-        ("--date-filters", date_filters),
-        ("--payment-format-filters", payment_format_filters),
-        ("--currency-mappers", currency_mappers),
-        ("--low-amount-aggregators", low_amount_aggregators),
-        ("--bank-max-aggregators", bank_max_aggregators),
-        ("--bank-max-reducers", bank_max_reducers),
-        ("--low-amount-reducers", low_amount_reducers),
-        ("--bank-mappers", bank_mappers),
-        ("--amount-filters", amount_filters),
-        ("--payment-format-aggregators", payment_format_aggregators),
-        ("--payment-format-reducers", payment_format_reducers),
-        ("--anomaly-filters", anomaly_filters),
-        ("--bidirectional-sharders", bidirectional_sharders),
-        ("--account-frequency-filters", account_frequency_filters),
-        ("--path-mappers", path_mappers),
-        ("--path-frequency-filters", path_frequency_filters),
+        ("--clients", args.clients),
+        ("--gateways", args.gateways),
+        ("--transactions-field-mappers", args.transactions_field_mappers),
+        ("--accounts-field-mappers", args.accounts_field_mappers),
+        ("--date-filters", args.date_filters),
+        ("--payment-format-filters", args.payment_format_filters),
+        ("--currency-mappers", args.currency_mappers),
+        ("--low-amount-aggregators", args.low_amount_aggregators),
+        ("--bank-max-aggregators", args.bank_max_aggregators),
+        ("--bank-max-reducers", args.bank_max_reducers),
+        ("--low-amount-reducers", args.low_amount_reducers),
+        ("--bank-mappers", args.bank_mappers),
+        ("--amount-filters", args.amount_filters),
+        ("--payment-format-aggregators", args.payment_format_aggregators),
+        ("--payment-format-reducers", args.payment_format_reducers),
+        ("--anomaly-filters", args.anomaly_filters),
+        ("--bidirectional-sharders", args.bidirectional_sharders),
+        ("--account-frequency-filters", args.account_frequency_filters),
+        ("--path-mappers", args.path_mappers),
+        ("--path-frequency-filters", args.path_frequency_filters),
     ]
     for flag, value in counts:
         if value < 1:
@@ -789,32 +821,30 @@ def main():
 
     compose = build_compose(
         clients=args.clients,
-        transactions_field_mappers=transactions_field_mappers,
-        accounts_field_mappers=accounts_field_mappers,
-        date_filters=date_filters,
-        payment_format_filters=payment_format_filters,
-        currency_mappers=currency_mappers,
-        low_amount_aggregators=low_amount_aggregators,
-        bank_max_aggregators=bank_max_aggregators,
-        bank_max_reducers=bank_max_reducers,
-        low_amount_reducers=low_amount_reducers,
-        bank_mappers=bank_mappers,
-        amount_filters=amount_filters,
-        payment_format_aggregators=payment_format_aggregators,
-        payment_format_reducers=payment_format_reducers,
-        anomaly_filters=anomaly_filters,
-        bidirectional_sharders=bidirectional_sharders,
-        account_frequency_filters=account_frequency_filters,
-        path_mappers=path_mappers,
-        path_frequency_filters=path_frequency_filters,
+        gateways=args.gateways,
+        transactions_field_mappers=args.transactions_field_mappers,
+        accounts_field_mappers=args.accounts_field_mappers,
+        date_filters=args.date_filters,
+        payment_format_filters=args.payment_format_filters,
+        currency_mappers=args.currency_mappers,
+        low_amount_aggregators=args.low_amount_aggregators,
+        bank_max_aggregators=args.bank_max_aggregators,
+        bank_max_reducers=args.bank_max_reducers,
+        low_amount_reducers=args.low_amount_reducers,
+        bank_mappers=args.bank_mappers,
+        amount_filters=args.amount_filters,
+        payment_format_aggregators=args.payment_format_aggregators,
+        payment_format_reducers=args.payment_format_reducers,
+        anomaly_filters=args.anomaly_filters,
+        bidirectional_sharders=args.bidirectional_sharders,
+        account_frequency_filters=args.account_frequency_filters,
+        path_mappers=args.path_mappers,
+        path_frequency_filters=args.path_frequency_filters,
     )
 
     output = yaml.safe_dump(compose, sort_keys=False, default_flow_style=False)
-    if args.output:
-        with open(args.output, "w") as f:
-            f.write(output)
-    else:
-        sys.stdout.write(output)
+    with open(args.output_file, "w") as f:
+        f.write(output)
 
 
 if __name__ == "__main__":

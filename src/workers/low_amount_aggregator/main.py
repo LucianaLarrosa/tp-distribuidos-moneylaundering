@@ -106,7 +106,9 @@ class LowAmountAggregator(StatefulCoordinatedWorker):
         """
         client_gateway_key = (client_id, gateway_id)
         transaction_count = sum(
-            1 for transaction in payload if transaction.amount < self.config.max_amount
+            1
+            for transaction in payload
+            if transaction.amount < self.config.amount_threshold
         )
         self._counts[client_gateway_key] = (
             self._counts.get(client_gateway_key, 0) + transaction_count
