@@ -17,7 +17,7 @@ class CurrencyMapper(StatelessWorker):
         "brazil real": "BRL",
         "canadian dollar": "CAD",
         "euro": "EUR",
-        "mexico peso": "MXN",
+        "mexican peso": "MXN",
         "ruble": "RUB",
         "rupee": "INR",
         "saudi riyal": "SAR",
