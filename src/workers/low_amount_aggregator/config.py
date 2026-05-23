@@ -10,4 +10,4 @@ class Config:
         self.node_id = int(os.environ.get("NODE_ID"))
         self.ring_size = int(os.environ.get("RING_SIZE"))
         self.node_prefix = os.environ.get("NODE_PREFIX")
-        self.max_amount = float(os.environ.get("MAX_AMOUNT"))
+        self.amount_threshold = float(os.environ.get("AMOUNT_THRESHOLD"))

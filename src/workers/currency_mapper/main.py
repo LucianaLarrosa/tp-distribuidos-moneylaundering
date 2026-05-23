@@ -17,7 +17,7 @@ class CurrencyMapper(StatelessWorker):
         "brazil real": "BRL",
         "canadian dollar": "CAD",
         "euro": "EUR",
-        "mexico peso": "MXN",
+        "mexican peso": "MXN",
         "ruble": "RUB",
         "rupee": "INR",
         "saudi riyal": "SAR",
@@ -77,7 +77,7 @@ class CurrencyMapper(StatelessWorker):
             ] = entry[self.config.rates_rate_field]
         return rates
 
-    def _resolve_rate(self, timestamp, currency):
+    def _resolve_rate(self, amount, currency, timestamp):
         """
         Resolve the rate for a given transaction timestamp and currency by looking up the appropriate rate from the fetched rates, returning the rate if found or a default rate if not found.
         """
@@ -85,28 +85,25 @@ class CurrencyMapper(StatelessWorker):
         date_str = datetime.strptime(
             timestamp, self.config.transaction_date_format
         ).strftime(self.config.rates_date_format)
-        if (
-            iso_code is not None
-            and date_str in self._rates
-            and iso_code in self._rates[date_str]
-        ):
-            return self._rates[date_str][iso_code]
-        return self._DEFAULT_RATE
-
-    def _convert(self, transaction):
-        """
-        Convert the amount of a transaction to the target currency using the appropriate rate, returning a TransactionAmount with the converted amount.
-        """
-        rate = self._resolve_rate(transaction.timestamp, transaction.currency)
-        return TransactionAmount(
-            amount=round(transaction.amount * (1.0 / rate), self._DECIMAL_PLACES),
+        rate = (
+            self._rates.get(date_str, {}).get(iso_code, self._DEFAULT_RATE)
+            if iso_code
+            else self._DEFAULT_RATE
         )
+        return round(float(amount) * (1.0 / rate), self._DECIMAL_PLACES)
 
     def _handle_data_message(self, _, client_id, gateway_id, payload):
         """
         Handle incoming data messages by converting transaction amounts to the target currency and sending the converted amounts to the output queue.
         """
-        converted = [self._convert(transaction) for transaction in payload]
+        converted = [
+            TransactionAmount(
+                amount=self._resolve_rate(
+                    transaction.amount, transaction.currency, transaction.timestamp
+                )
+            )
+            for transaction in payload
+        ]
         self._output_queue.send(
             internal.serialize_msg(
                 internal.MsgType.AMOUNT_TRANSACTION_BATCH,

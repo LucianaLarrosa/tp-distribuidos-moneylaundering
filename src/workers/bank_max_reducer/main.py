@@ -76,7 +76,14 @@ class BankMaxReducer(SentCoordinatedWorker):
         flow_max = self._global_max.setdefault((client_id, gateway_id), {})
         for bank_max in bank_max_batch:
             current = flow_max.get(bank_max.from_bank)
-            if current is None or bank_max.amount > current.amount:
+            if (
+                current is None
+                or bank_max.amount > current.amount
+                or (
+                    bank_max.amount == current.amount
+                    and bank_max.from_account < current.from_account
+                )
+            ):
                 flow_max[bank_max.from_bank] = bank_max
 
     def _flush_data(self, client_id, gateway_id):
@@ -100,9 +107,7 @@ class BankMaxReducer(SentCoordinatedWorker):
 
     def _send_final_eof(self, client_id, gateway_id, eof):
         self._output_queue.send(
-            internal.serialize_msg(
-                internal.MsgType.EOF, client_id, gateway_id, eof
-            )
+            internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof)
         )
 
 

@@ -1,21 +1,12 @@
 SHELL := /bin/bash
 
-GATEWAY_HOST ?=
-GATEWAY_PORT ?= 5000
-SERVER_HOST  ?= localhost
-SERVER_PORT  ?= 5000
-INPUT_CSV_TRANSACTIONS ?= ../dataset/HI-Small_Trans2.csv
-INPUT_CSV_ACCOUNTS     ?= ../dataset/HI-Small_accounts.csv
-BATCH_SIZE             ?= 1000
-
-DEBUG_OUTPUT_DIR ?= ../tmp
-POOL_SIZE        ?=
+LIME  := \033[38;2;138;206;0m
+RED   := \033[31m
+RESET := \033[0m
 
 N_CLIENTS ?= 2
 N_GATEWAYS ?= 2
 
-# Replica count for every scalable worker.
-# gateway and low_amount_reducer stay fixed at one instance.
 REPLICAS ?= 3
 TRANSACTIONS_FIELD_MAPPERS ?= $(REPLICAS)
 ACCOUNTS_FIELD_MAPPERS     ?= $(REPLICAS)
@@ -38,8 +29,12 @@ PATH_FREQUENCY_FILTERS     ?= $(REPLICAS)
 
 COMPOSE_FILE ?= docker-compose.yaml
 
+DATASET_DIR ?= ./data
+EXPECTED_DIR ?= ./output_expected
+OUTPUT_DIR   ?= ./output
+SLEEP_TIME   ?= 30
+
 COMPOSE_ARGS = \
-	--replicas                    $(REPLICAS) \
 	--clients                     $(N_CLIENTS) \
 	--gateways                    $(N_GATEWAYS) \
 	--transactions-field-mappers  $(TRANSACTIONS_FIELD_MAPPERS) \
@@ -60,45 +55,11 @@ COMPOSE_ARGS = \
 	--account-frequency-filters   $(ACCOUNT_FREQUENCY_FILTERS) \
 	--path-mappers                $(PATH_MAPPERS) \
 	--path-frequency-filters      $(PATH_FREQUENCY_FILTERS) \
-	--output                      $(COMPOSE_FILE)
+	--output-file                 $(COMPOSE_FILE)
 
-.PHONY: compose build up down logs clean gateway client clients verify clean-tmp
+.PHONY: all compose build up down logs clean wait-clients build-expected diff-output output-test exit-test test
 
-gateway:
-	cd src && GATEWAY_HOST="$(GATEWAY_HOST)" GATEWAY_PORT=$(GATEWAY_PORT) \
-	DEBUG_OUTPUT_DIR="$(DEBUG_OUTPUT_DIR)" $(if $(POOL_SIZE),POOL_SIZE=$(POOL_SIZE),) \
-	python3 -m gateway.main
-
-client:
-	cd src && SERVER_HOST=$(SERVER_HOST) SERVER_PORT=$(SERVER_PORT) \
-	INPUT_CSV_TRANSACTIONS=$(INPUT_CSV_TRANSACTIONS) INPUT_CSV_ACCOUNTS=$(INPUT_CSV_ACCOUNTS) \
-	BATCH_SIZE=$(BATCH_SIZE) \
-	python3 -m client.main
-
-clients: clean-tmp
-	@for i in $$(seq 1 $(N_CLIENTS)); do \
-		$(MAKE) client & \
-	done; wait
-
-clean-tmp:
-	rm -f tmp/gateway_received_*.csv
-
-verify:
-	@for f in tmp/gateway_received_transactions_*.csv; do \
-		if diff -q <(tail -n +2 dataset/HI-Small_Trans2.csv) $$f >/dev/null; then \
-			echo "✓ $$f matches transactions dataset"; \
-		else \
-			echo "✗ $$f differs from transactions dataset"; \
-		fi; \
-	done; \
-	for f in tmp/gateway_received_accounts_*.csv; do \
-		if diff -q <(tail -n +2 dataset/HI-Small_accounts.csv) $$f >/dev/null; then \
-			echo "✓ $$f matches accounts dataset"; \
-		else \
-			echo "✗ $$f differs from accounts dataset"; \
-		fi; \
-	done
-	@$(MAKE) clean-tmp
+all: build test
 
 compose:
 	python3 compose_generator.py $(COMPOSE_ARGS)
@@ -107,7 +68,7 @@ build: compose
 	docker compose -f $(COMPOSE_FILE) build
 
 up: compose
-	docker compose -f $(COMPOSE_FILE) up -d
+	DATASET_DIR=$(DATASET_DIR) OUTPUT_DIR=$(OUTPUT_DIR) docker compose -f $(COMPOSE_FILE) up -d
 
 down:
 	docker compose -f $(COMPOSE_FILE) down -v
@@ -118,3 +79,71 @@ logs:
 clean:
 	docker compose -f $(COMPOSE_FILE) down -v --rmi local
 	rm -f $(COMPOSE_FILE)
+	rm -rf $(OUTPUT_DIR) $(EXPECTED_DIR)
+
+wait-clients:
+	@client_names=""; \
+	for i in $$(seq 1 $(N_CLIENTS)); do client_names="$$client_names client_$$i"; done; \
+	docker container wait $$client_names
+
+build-expected:
+	DATASET_DIR=$(DATASET_DIR) EXPECTED_DIR=$(EXPECTED_DIR) python3 build_expected.py
+
+diff-output:
+	@mismatch=0; \
+	for query_number in 1 2 3 4 5; do \
+		for i in $$(seq 1 $(N_CLIENTS)); do \
+			output_file="$(OUTPUT_DIR)/q$${query_number}_client_$${i}.csv"; \
+			expected_file="$(EXPECTED_DIR)/q$${query_number}_expected.csv"; \
+			if diff <(LC_ALL=C sort "$$output_file") <(LC_ALL=C sort "$$expected_file") > /dev/null 2>&1; then \
+				printf "$(LIME)✓ Q%s client %s: OK$(RESET)\n" "$$query_number" "$$i"; \
+			else \
+				printf "$(RED)✗ Q%s client %s: MISMATCH$(RESET)\n" "$$query_number" "$$i"; \
+				diff <(LC_ALL=C sort "$$output_file") <(LC_ALL=C sort "$$expected_file") | head -20; \
+				mismatch=1; \
+			fi; \
+		done; \
+	done; \
+	if [ $$mismatch -eq 0 ]; then \
+		printf "$(LIME)Output test passed$(RESET)\n"; \
+	else \
+		printf "$(RED)Output test failed$(RESET)\n"; \
+	fi; \
+	[ $$mismatch -eq 0 ]
+
+output-test: build up wait-clients build-expected diff-output down
+
+exit-test: up
+	sleep $(SLEEP_TIME)
+	@docker compose -f $(COMPOSE_FILE) stop --timeout 10; \
+	all_shutdown=0; \
+	has_successful_exit=1; \
+	for name in $$(docker compose -f $(COMPOSE_FILE) ps --all --format '{{.Name}}'); do \
+		code=$$(docker inspect $$name --format='{{.State.ExitCode}}'); \
+		logs=$$(docker logs $$name 2>&1); \
+		if [ "$$name" != "rabbitmq" ]; then \
+			if echo "$$logs" | grep -Eq "Shutting down|Shutdown"; then \
+				printf "$(LIME)✓ %-45s shutdown detected$(RESET)\n" "$$name"; \
+			else \
+				printf "$(RED)✗ %-45s missing shutdown log$(RESET)\n" "$$name"; \
+				all_shutdown=1; \
+			fi; \
+		fi; \
+		if [ "$$code" = "0" ]; then \
+			printf "$(LIME)✓ %-45s exit code 0$(RESET)\n" "$$name"; \
+			has_successful_exit=0; \
+		else \
+			printf "$(RED)✗ %-45s exit code $$code$(RESET)\n" "$$name"; \
+		fi; \
+	done; \
+	if [ $$all_shutdown -eq 0 ] && [ $$has_successful_exit -eq 0 ]; then \
+		printf "$(LIME)Graceful shutdown test passed$(RESET)\n"; \
+	else \
+		printf "$(RED)Graceful shutdown test failed$(RESET)\n"; \
+	fi; \
+	$(MAKE) down; \
+	[ $$all_shutdown -eq 0 ] && [ $$has_successful_exit -eq 0 ]
+
+test:
+	$(MAKE) output-test
+	$(MAKE) exit-test
