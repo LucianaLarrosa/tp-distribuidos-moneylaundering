@@ -1,0 +1,61 @@
+import os
+
+
+class BatchSpill:
+    """
+    Per-flow on-disk JSONL spill for batches that arrive before a worker is ready to
+    emit them (e.g. side-input not yet complete). One line in the JSONL holds one
+    serialized batch — preserving the 1:1 mapping between input and output batches.
+
+    The owner supplies serialize/deserialize callables that convert a batch (list of
+    domain objects) to/from a single JSON string.
+    """
+
+    def __init__(self, spill_dir, serialize, deserialize):
+        self._dir = spill_dir
+        self._serialize = serialize
+        self._deserialize = deserialize
+        self._files = {}
+        os.makedirs(spill_dir, exist_ok=True)
+
+    def _path(self, key):
+        a, b = key
+        return os.path.join(self._dir, f"{a}__{b}.jsonl")
+
+    def _open(self, key):
+        f = self._files.get(key)
+        if f is None:
+            f = open(self._path(key), "a", encoding="utf-8")
+            self._files[key] = f
+        return f
+
+    def close(self, key):
+        f = self._files.pop(key, None)
+        if f is not None:
+            try:
+                f.close()
+            except Exception:
+                pass
+
+    def write(self, key, batch):
+        f = self._open(key)
+        f.write(self._serialize(batch))
+        f.write("\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+    def drain(self, key, emit):
+        self.close(key)
+        path = self._path(key)
+        if not os.path.exists(path):
+            return
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    emit(self._deserialize(line))
+        os.remove(path)
+
+    def close_all(self):
+        for key in list(self._files.keys()):
+            self.close(key)

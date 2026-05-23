@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 import threading
 from dataclasses import asdict
 from datetime import datetime
@@ -13,6 +12,7 @@ from common.middleware.middleware_rabbitmq import (
 from common.models.query_results import Q3Result
 from common.models.transaction import Transaction
 from common.protocol import internal
+from common.utils import BatchSpill
 from common.worker.stateless_coordinated_worker import StatelessCoordinatedWorker
 from config import Config
 
@@ -31,11 +31,14 @@ class AnomalyFilter(StatelessCoordinatedWorker):
         self._flow_locks = {}
         self._flow_locks_guard = threading.Lock()
         self._output_lock = threading.Lock()
-        self._spill_files = {}
 
         self._avg_thread = None
 
-        os.makedirs(self.config.spill_dir, exist_ok=True)
+        self._spill = BatchSpill(
+            spill_dir=self.config.spill_dir,
+            serialize=lambda batch: json.dumps([self._serialize_tx(tx) for tx in batch]),
+            deserialize=lambda line: [self._deserialize_tx(d) for d in json.loads(line)],
+        )
 
         self._input_topic = MessageMiddlewareExchangeTopicRabbitMQ(
             host=config.rabbitmq_host,
@@ -121,27 +124,6 @@ class AnomalyFilter(StatelessCoordinatedWorker):
                 self._avgs_ready[key] = event
             return event
 
-    def _spill_path(self, key):
-        client_id, gateway_id = key
-        return os.path.join(
-            self.config.spill_dir, f"{client_id}__{gateway_id}.jsonl"
-        )
-
-    def _spill_file(self, key):
-        f = self._spill_files.get(key)
-        if f is None:
-            f = open(self._spill_path(key), "a", encoding="utf-8")
-            self._spill_files[key] = f
-        return f
-
-    def _close_spill(self, key):
-        f = self._spill_files.pop(key, None)
-        if f is not None:
-            try:
-                f.close()
-            except Exception:
-                pass
-
     def _serialize_tx(self, tx):
         d = asdict(tx)
         d["timestamp"] = tx.timestamp.isoformat()
@@ -150,19 +132,6 @@ class AnomalyFilter(StatelessCoordinatedWorker):
     def _deserialize_tx(self, d):
         d["timestamp"] = datetime.fromisoformat(d["timestamp"])
         return Transaction(**d)
-
-    def _serialize_batch(self, batch):
-        return json.dumps([self._serialize_tx(tx) for tx in batch])
-
-    def _deserialize_batch(self, line):
-        return [self._deserialize_tx(d) for d in json.loads(line)]
-
-    def _write_spill(self, key, batch):
-        f = self._spill_file(key)
-        f.write(self._serialize_batch(batch))
-        f.write("\n")
-        f.flush()
-        os.fsync(f.fileno())
 
     def _is_anomalous(self, tx, avgs):
         avg = avgs.get(tx.payment_format.strip().lower())
@@ -201,22 +170,6 @@ class AnomalyFilter(StatelessCoordinatedWorker):
                 routing_key=gateway_id,
             )
 
-    def _drain_spill(self, client_id, gateway_id, avgs):
-        key = self._flow_key(client_id, gateway_id)
-        self._close_spill(key)
-        path = self._spill_path(key)
-        if not os.path.exists(path):
-            return
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                self._filter_and_emit(
-                    client_id, gateway_id, self._deserialize_batch(line), avgs
-                )
-        os.remove(path)
-
     def _handle_data_message(self, _, client_id, gateway_id, batch):
         key = self._flow_key(client_id, gateway_id)
         event = self._get_avgs_ready_event(key)
@@ -226,7 +179,7 @@ class AnomalyFilter(StatelessCoordinatedWorker):
             if event.is_set():
                 avgs = self._avgs.get(key, {})
             else:
-                self._write_spill(key, batch)
+                self._spill.write(key, batch)
                 return
         self._filter_and_emit(client_id, gateway_id, batch, avgs)
 
@@ -268,12 +221,11 @@ class AnomalyFilter(StatelessCoordinatedWorker):
         with self._get_flow_lock(key):
             self._avg_expected_counts[key] = eof.message_count
             logging.info(
-                "AVG EOF for %s: received=%s expected=%s avgs=%s spill_exists=%s",
+                "AVG EOF for %s: received=%s expected=%s avgs=%s",
                 key,
                 self._avg_batch_counts.get(key, 0),
                 eof.message_count,
                 self._avgs.get(key, {}),
-                os.path.exists(self._spill_path(key)),
             )
             became_ready = self._mark_avgs_ready_if_complete(client_id, gateway_id)
         if became_ready:
@@ -294,12 +246,11 @@ class AnomalyFilter(StatelessCoordinatedWorker):
             return False
 
         logging.info(
-            "AVG table ready for %s: received=%s expected=%s avgs=%s spill_exists=%s",
+            "AVG table ready for %s: received=%s expected=%s avgs=%s",
             key,
             received_count,
             expected_count,
             self._avgs.get(key, {}),
-            os.path.exists(self._spill_path(key)),
         )
         event.set()
         return True
@@ -314,16 +265,11 @@ class AnomalyFilter(StatelessCoordinatedWorker):
     def _flush_data(self, client_id, gateway_id):
         key = self._flow_key(client_id, gateway_id)
         avgs = self._avgs.get(key, {})
-        self._drain_spill(client_id, gateway_id, avgs)
+        self._spill.drain(
+            key, lambda batch: self._filter_and_emit(client_id, gateway_id, batch, avgs)
+        )
         with self._get_flow_lock(key):
             self._drop_flow_state(key)
-            self._close_spill(key)
-            path = self._spill_path(key)
-            if os.path.exists(path):
-                try:
-                    os.remove(path)
-                except Exception:
-                    pass
 
     def _send_final_eof(self, client_id, gateway_id, eof):
         with self._output_lock:
@@ -353,8 +299,7 @@ class AnomalyFilter(StatelessCoordinatedWorker):
             self._input_avg_exchange.stop_consuming_threadsafe()
             self._avg_thread.join()
         self._input_avg_exchange.close()
-        for key in list(self._spill_files.keys()):
-            self._close_spill(key)
+        self._spill.close_all()
 
 
 def main():
