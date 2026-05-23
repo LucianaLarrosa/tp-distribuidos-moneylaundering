@@ -37,6 +37,10 @@ PATH_FREQUENCY_FILTERS     ?= $(REPLICAS)
 
 COMPOSE_FILE ?= docker-compose.yaml
 
+DATASET_PATH ?= ./data
+EXPECTED_DIR ?= ./output_expected
+OUTPUT_DIR   ?= ./output
+
 COMPOSE_ARGS = \
 	--replicas                    $(REPLICAS) \
 	--clients                     $(N_CLIENTS) \
@@ -60,7 +64,7 @@ COMPOSE_ARGS = \
 	--path-frequency-filters      $(PATH_FREQUENCY_FILTERS) \
 	--output                      $(COMPOSE_FILE)
 
-.PHONY: compose build up down logs clean gateway client clients verify clean-tmp
+.PHONY: compose build up down logs clean gateway client clients verify clean-tmp build-expected wait-clients diff-output test
 
 gateway:
 	cd src && GATEWAY_HOST="$(GATEWAY_HOST)" GATEWAY_PORT=$(GATEWAY_PORT) \
@@ -105,7 +109,7 @@ build: compose
 	docker compose -f $(COMPOSE_FILE) build
 
 up: compose
-	docker compose -f $(COMPOSE_FILE) up -d
+	DATASET_PATH=$(DATASET_PATH) docker compose -f $(COMPOSE_FILE) up -d
 
 down:
 	docker compose -f $(COMPOSE_FILE) down -v
@@ -116,3 +120,30 @@ logs:
 clean:
 	docker compose -f $(COMPOSE_FILE) down -v --rmi local
 	rm -f $(COMPOSE_FILE)
+
+build-expected:
+	DATASET_PATH=$(DATASET_PATH) EXPECTED_DIR=$(EXPECTED_DIR) python3 build_expected.py
+
+wait-clients:
+	@client_names=""; \
+	for i in $$(seq 1 $(N_CLIENTS)); do client_names="$$client_names client_$$i"; done; \
+	docker container wait $$client_names
+
+diff-output:
+	@mismatch=0; \
+	for query_number in 1 2 3 4 5; do \
+		for i in $$(seq 1 $(N_CLIENTS)); do \
+			output_file="$(OUTPUT_DIR)/q$${query_number}_client_$${i}.csv"; \
+			expected_file="$(EXPECTED_DIR)/q$${query_number}_expected.csv"; \
+			if diff <(sort "$$output_file") <(sort "$$expected_file") > /dev/null 2>&1; then \
+				printf "✓ Q%s client %s: OK\n" "$$query_number" "$$i"; \
+			else \
+				printf "✗ Q%s client %s: MISMATCH\n" "$$query_number" "$$i"; \
+				diff <(sort "$$output_file") <(sort "$$expected_file") | head -20; \
+				mismatch=1; \
+			fi; \
+		done; \
+	done; \
+	[ $$mismatch -eq 0 ]
+
+test: up wait-clients build-expected diff-output

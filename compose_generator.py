@@ -242,7 +242,7 @@ def _low_amount_aggregator(i, low_amount_aggregators, low_amount_reducers):
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
             "RING_SIZE": str(low_amount_aggregators),
-            "MAX_AMOUNT": "1.0",
+            "AMOUNT_THRESHOLD": "1.0",
         },
     }
 
