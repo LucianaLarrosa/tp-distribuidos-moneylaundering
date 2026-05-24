@@ -1,9 +1,10 @@
 import logging
+import hashlib
 
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
-    MessageMiddlewareQueueRabbitMQ,
 )
+
 from common.protocol import internal
 from common.worker.sent_coordinated_worker import SentCoordinatedWorker
 from config import Config
@@ -20,9 +21,10 @@ class BankMaxReducer(SentCoordinatedWorker):
             exchange_name=config.input_exchange,
             routing_keys=[config.shard_id],
         )
-        self._output_queue = MessageMiddlewareQueueRabbitMQ(
+        self._output_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
-            queue_name=config.output_queue,
+            exchange_name=config.output_exchange,
+            routing_keys=["1"],
         )
         self._input_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
@@ -54,7 +56,7 @@ class BankMaxReducer(SentCoordinatedWorker):
 
     @property
     def _output_middleware(self):
-        return self._output_queue
+        return self._output_exchange
 
     @property
     def _input_control_middleware(self):
@@ -97,19 +99,32 @@ class BankMaxReducer(SentCoordinatedWorker):
         if batch:
             self._send_result_batch(client_id, gateway_id, batch)
 
-    def _send_result_batch(self, client_id, gateway_id, batch):
-        self._output_queue.send(
-            internal.serialize_msg(
-                internal.MsgType.BANK_MAX_PARTIAL_BATCH, client_id, gateway_id, batch
-            )
+    def _shard_key(self, bank):
+        node_id = (
+            int(hashlib.md5(f"{bank}".encode()).hexdigest(), 16)
+            % self.config.output_node_count
         )
-        self._increment_sent_count(client_id, gateway_id)
+        return str(node_id)
+
+    def _send_result_batch(self, client_id, gateway_id, batch):
+        sharded_banks = {self._shard_key(bank.from_bank): [] for bank in batch}
+        for bank in batch:
+            routing_key = self._shard_key(bank.from_bank)
+            sharded_banks[routing_key].append(bank)
+
+        for routing_key, bank_list in sharded_banks.items():
+            self._output_exchange.send(
+                internal.serialize_msg(
+                    internal.MsgType.BANK_MAX_PARTIAL_BATCH, client_id, gateway_id, bank_list
+                ),
+                routing_key=routing_key,
+            )
+            self._increment_sent_count(client_id, gateway_id)
 
     def _send_final_eof(self, client_id, gateway_id, eof):
-        self._output_queue.send(
+        self._output_exchange.send(
             internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof)
         )
-
 
 def main():
     logging.basicConfig(

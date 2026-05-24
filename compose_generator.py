@@ -16,6 +16,7 @@ EXCHANGE_FILTERED_TRANSACTIONS = "filtered_transactions"
 EXCHANGE_DATE_FILTER_OUTPUT = "date_filter_output"
 EXCHANGE_BANK_CATALOG = "bank_catalog"
 EXCHANGE_BANK_MAX_OUTPUT = "bank_max_output"
+EXCHANGE_BANK_MAX_SHARDED = "bank_max_sharded"
 EXCHANGE_PAYMENT_FORMAT_SHARDS = "payment_format_shards"
 EXCHANGE_PAYMENT_FORMAT_AVERAGES = "payment_format_averages"
 EXCHANGE_BIDIRECTIONAL_SHARDER_OUTPUT = "bidirectional_sharder_output"
@@ -341,6 +342,9 @@ def _accounts_field_mapper(i, bank_mappers):
             "INPUT_ROUTING_KEY": ROUTING_KEY_ACCOUNT,
             "INPUT_QUEUE_NAME": "accounts_field_mapper_input",
             "OUTPUT_EXCHANGE": EXCHANGE_BANK_CATALOG,
+            "OUTPUT_ROUTING_KEYS": ",".join(str(j) for j in range(bank_mappers)),
+            "OUTPUT_NODE_COUNT": str(bank_mappers),
+            "OUTPUT_NODE_PREFIX": "bank_mapper_side_input_node_",
         },
     }
 
@@ -393,7 +397,9 @@ def _bank_max_reducer(i, bank_max_reducers, bank_mappers):
             "RABBITMQ_HOST": "rabbitmq",
             "INPUT_EXCHANGE": EXCHANGE_BANK_MAX_OUTPUT,
             "SHARD_ID": str(i),
-            "OUTPUT_QUEUE": QUEUE_BANK_MAX_RESULTS,
+            "OUTPUT_EXCHANGE": EXCHANGE_BANK_MAX_SHARDED,
+            "OUTPUT_ROUTING_KEYS": ",".join(str(j) for j in range(bank_mappers)),
+            "OUTPUT_NODE_COUNT": str(bank_mappers),
             "CONTROL_EXCHANGE": "bank_max_reducer_control",
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
@@ -431,9 +437,11 @@ def _bank_mapper(i, bank_mappers):
         "volumes": [f"bank_mapper_spill_{i}:/tmp/bank_mapper"],
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "INPUT_QUEUE": QUEUE_BANK_MAX_RESULTS,
+            "INPUT_EXCHANGE": EXCHANGE_BANK_MAX_SHARDED,
+            "SHARD_ID": str(i),
             "OUTPUT_EXCHANGE": EXCHANGE_QUERY_RESULTS,
             "BANKS_EXCHANGE": EXCHANGE_BANK_CATALOG,
+            "SIDE_INPUT_NODE_PREFIX": "bank_mapper_side_input_node_",
             "CONTROL_EXCHANGE": "bank_mapper_control",
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),

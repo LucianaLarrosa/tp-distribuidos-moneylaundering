@@ -86,7 +86,14 @@ class BankMaxAggregator(SentCoordinatedWorker):
         for transaction in transaction_batch:
             from_bank = str(int(transaction.from_bank))
             current = flow_max.get(from_bank)
-            if current is None or transaction.amount > current.amount:
+            if (
+                current is None
+                or transaction.amount > current.amount
+                or (
+                    transaction.amount == current.amount
+                    and transaction.from_account < current.from_account
+                )
+            ):
                 flow_max[from_bank] = BankMaxPartial(
                     from_bank=from_bank,
                     from_account=transaction.from_account,

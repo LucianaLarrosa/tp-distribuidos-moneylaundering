@@ -1,10 +1,10 @@
 import logging
+import hashlib
 
 from common.models.bank import Bank
 from common.protocol import internal
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
-    MessageMiddlewareExchangeFanoutRabbitMQ,
 )
 from common.worker.stateless_worker import StatelessWorker
 from config import Config
@@ -12,9 +12,6 @@ from config import Config
 
 class AccountsFieldMapper(StatelessWorker):
     def __init__(self, config):
-        """
-        Initialize the AccountsFieldMapper worker with the given configuration.
-        """
         super().__init__()
         self.config = config
 
@@ -24,40 +21,50 @@ class AccountsFieldMapper(StatelessWorker):
             routing_keys=[config.input_routing_key],
             queue_name=config.input_queue_name,
         )
-        self._output_exchange = MessageMiddlewareExchangeFanoutRabbitMQ(
+        self._output_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
             exchange_name=config.output_exchange,
+            routing_keys=[self._output_prefix_routing_key(rk) for rk in config.output_routing_keys],
         )
 
     @property
     def _input_middleware(self):
-        """
-        Return the input exchange to consume raw accounts from the gateway.
-        """
         return self._input_exchange
 
     @property
     def _output_middleware(self):
-        """
-        Return the output fanout exchange to broadcast filtered banks downstream.
-        """
         return self._output_exchange
+
+    def _shard_key(self, bank):
+        node_id = (
+            int(hashlib.md5(f"{bank}".encode()).hexdigest(), 16)
+            % self.config.output_node_count
+        )
+        return self._output_prefix_routing_key(node_id)
 
     def _handle_data_message(self, _, client_id, gateway_id, payload):
         """
-        Parse each raw CSV line into a Bank and broadcast the batch to the output exchange.
+        Parse each raw CSV line into a Bank and sent the batch to the corresponding shard.
         """
         banks = [self._parse(raw_acc.raw) for raw_acc in payload]
-        self._output_exchange.send(
-            internal.serialize_msg(
-                internal.MsgType.BANK_BATCH, client_id, gateway_id, banks
+
+        sharded_banks = {self._shard_key(bank.bank_id): [] for bank in banks}
+        for bank in banks:
+            routing_key = self._shard_key(bank.bank_id)
+            sharded_banks[routing_key].append(bank)
+
+        for routing_key, bank_list in sharded_banks.items():
+            self._output_exchange.send(
+                internal.serialize_msg(
+                    internal.MsgType.BANK_BATCH, client_id, gateway_id, bank_list
+                ),
+                routing_key=routing_key,
             )
-        )
+    
+    def _output_prefix_routing_key(self,routing_key):
+        return f"{self.config.output_node_prefix}{routing_key}"
 
     def _parse(self, raw):
-        """
-        Parse a CSV line into a Bank dataclass.
-        """
         fields = raw.split(",")
         return Bank(bank_id=fields[1], name=fields[0])
 

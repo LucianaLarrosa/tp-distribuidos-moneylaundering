@@ -5,8 +5,6 @@ from dataclasses import asdict
 
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
-    MessageMiddlewareExchangeFanoutRabbitMQ,
-    MessageMiddlewareQueueRabbitMQ,
 )
 from common.models.bank_max_partial import BankMaxPartial
 from common.models.query_results import Q2Result
@@ -35,13 +33,15 @@ class BankMapper(SideInputStatelessCoordinatedWorker):
             deserialize=lambda line: [BankMaxPartial(**d) for d in json.loads(line)],
         )
 
-        self._input_queue = MessageMiddlewareQueueRabbitMQ(
+        self._input_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
-            queue_name=config.input_queue,
+            exchange_name=config.input_exchange,
+            routing_keys=[self.config.shard_id],
         )
-        self._input_banks_exchange = MessageMiddlewareExchangeFanoutRabbitMQ(
+        self._input_banks_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
             exchange_name=config.banks_exchange,
+            routing_keys=[self._side_input_prefix_key(config.node_id)],
         )
         self._output_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
@@ -74,7 +74,7 @@ class BankMapper(SideInputStatelessCoordinatedWorker):
 
     @property
     def _input_middleware(self):
-        return self._input_queue
+        return self._input_exchange
 
     @property
     def _output_middleware(self):
@@ -102,6 +102,9 @@ class BankMapper(SideInputStatelessCoordinatedWorker):
 
     def _ring_routing_key(self, node_id):
         return f"{self.config.node_prefix}{node_id}"
+        
+    def _side_input_prefix_key(self, node_id):
+        return f"{self.config.side_input_node_prefix}{node_id}"
 
     def _flow_key(self, client_id, gateway_id):
         return (client_id, gateway_id)
