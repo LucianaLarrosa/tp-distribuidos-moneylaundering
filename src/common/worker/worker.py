@@ -1,6 +1,7 @@
 import logging
 import signal
 from abc import ABC, abstractmethod
+from dataclasses import fields
 
 from common.protocol import internal
 
@@ -41,6 +42,12 @@ class Worker(ABC):
         Handle a data message for the given client_id and gateway_id.
         """
         pass
+
+    def _has_required_fields(self, data_record):
+        return all(
+            getattr(data_record, field.name) is not None
+            for field in fields(data_record)
+        )
 
     def _send_final_eof(self, client_id, gateway_id, eof):
         """

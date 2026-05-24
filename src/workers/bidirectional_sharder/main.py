@@ -103,6 +103,8 @@ class BidirectionalSharder(SentCoordinatedWorker):
         """
         edges_by_routing_key = {}
         for transaction in payload:
+            if not self._has_required_fields(transaction):
+                continue
             for transaction_direction in [
                 (
                     transaction.from_bank,

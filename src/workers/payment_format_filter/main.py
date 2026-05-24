@@ -56,7 +56,8 @@ class PaymentFormatFilter(StatelessWorker):
                 currency=transaction.currency,
             )
             for transaction in payload
-            if transaction.payment_format.lower() in self.config.valid_payment_formats
+            if self._has_required_fields(transaction)
+            and transaction.payment_format.lower() in self.config.valid_payment_formats
         ]
         self._output_queue.send(
             internal.serialize_msg(
