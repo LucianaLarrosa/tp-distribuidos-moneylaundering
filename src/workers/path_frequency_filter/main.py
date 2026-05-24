@@ -8,9 +8,6 @@ from common.protocol import internal
 from common.worker.sent_coordinated_worker import SentCoordinatedWorker
 from config import Config
 
-QUERY_ID = 4
-
-
 class PathFrequencyFilter(SentCoordinatedWorker):
     def __init__(self, config):
         self.config = config
@@ -102,7 +99,7 @@ class PathFrequencyFilter(SentCoordinatedWorker):
                 internal.MsgType.QUERY_END,
                 client_id,
                 gateway_id,
-                QUERY_ID,
+                self.config.query_id,
                 eof.message_count,
             ),
             routing_key=gateway_id,

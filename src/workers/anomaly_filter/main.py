@@ -17,7 +17,6 @@ from common.worker.sent_coordinated_worker import SentCoordinatedWorker
 from common.worker.safe_output_capable import SafeOutputCapable
 from config import Config
 
-QUERY_ID = 3
 DRAIN_BATCH_SIZE = 1000
 
 
@@ -314,7 +313,7 @@ class AnomalyFilter(SentCoordinatedWorker, SafeOutputCapable):
                 internal.MsgType.QUERY_END,
                 client_id,
                 gateway_id,
-                QUERY_ID,
+                self.config.query_id,
                 eof.message_count,
             ),
             routing_key=gateway_id,

@@ -12,8 +12,6 @@ from common.worker.stateless_coordinated_worker import StatelessCoordinatedWorke
 from common.worker.safe_output_capable import SafeOutputCapable
 from config import Config
 
-QUERY_ID = 2
-
 
 class BankMapper(StatelessCoordinatedWorker, SafeOutputCapable):
     def __init__(self, config):
@@ -166,7 +164,7 @@ class BankMapper(StatelessCoordinatedWorker, SafeOutputCapable):
                 internal.MsgType.QUERY_END,
                 client_id,
                 gateway_id,
-                QUERY_ID,
+                self.config.query_id,
                 eof.message_count,
             ),
             routing_key=gateway_id,

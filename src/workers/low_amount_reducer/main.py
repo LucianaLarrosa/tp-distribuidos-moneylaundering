@@ -9,9 +9,6 @@ from common.protocol import internal
 from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
 from config import Config
 
-QUERY_ID = 5
-
-
 class LowAmountReducer(StatefulCoordinatedWorker):
     def __init__(self, config: Config):
         self.config = config
@@ -77,7 +74,7 @@ class LowAmountReducer(StatefulCoordinatedWorker):
                 internal.MsgType.QUERY_END,
                 client_id,
                 gateway_id,
-                QUERY_ID,
+                self.config.query_id,
                 eof.message_count,
             ),
             routing_key=gateway_id,
