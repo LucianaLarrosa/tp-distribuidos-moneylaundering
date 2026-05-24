@@ -124,8 +124,8 @@ def _client(i):
         "environment": {
             "PROXY_HOST": "proxy",
             "PROXY_PORT": "6000",
-            "INPUT_CSV_TRANSACTIONS": "/data/HI-Small_Trans.csv",
-            "INPUT_CSV_ACCOUNTS": "/data/HI-Small_accounts.csv",
+            "INPUT_CSV_TRANSACTIONS": "/data/${TRANSACTIONS_FILE:-HI-Small_Trans.csv}",
+            "INPUT_CSV_ACCOUNTS": "/data/${ACCOUNTS_FILE:-HI-Small_accounts.csv}",
             "BATCH_SIZE": BATCH_SIZE,
             "EXPECTED_QUERY_IDS": "1,2,3,4,5",
             "OUTPUT_DIR": "/output",

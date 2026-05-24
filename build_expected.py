@@ -9,10 +9,14 @@ import requests
 # --- Configuration ---
 
 DATASET_DIR = os.environ.get("DATASET_DIR", "./data")
-EXPECTED_DIR = os.environ.get("EXPECTED_DIR", "./output_expected")
+EXPECTED_DIR = os.environ.get("EXPECTED_DIR", "./expected_output")
 
-TRANSACTIONS_FILE_PATH = os.path.join(DATASET_DIR, "HI-Small_Trans.csv")
-ACCOUNTS_FILE = os.path.join(DATASET_DIR, "HI-Small_accounts.csv")
+TRANSACTIONS_FILE_PATH = os.path.join(
+    DATASET_DIR, os.environ.get("TRANSACTIONS_FILE", "HI-Small_Trans.csv")
+)
+ACCOUNTS_FILE = os.path.join(
+    DATASET_DIR, os.environ.get("ACCOUNTS_FILE", "HI-Small_accounts.csv")
+)
 
 _FRANKFURTER_URL = (
     "https://api.frankfurter.dev/v2/rates?from=2022-09-01&to=2022-09-05&base=USD"
