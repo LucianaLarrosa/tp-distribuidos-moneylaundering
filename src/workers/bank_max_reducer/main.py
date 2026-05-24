@@ -11,8 +11,8 @@ from config import Config
 
 class BankMaxReducer(SentCoordinatedWorker):
     def __init__(self, config):
-        super().__init__()
         self.config = config
+        super().__init__()
         self._global_max = {}  # (client_id, gateway_id) -> {from_bank: BankMaxPartial}
 
         self._input_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
@@ -24,29 +24,6 @@ class BankMaxReducer(SentCoordinatedWorker):
             host=config.rabbitmq_host,
             queue_name=config.output_queue,
         )
-        self._input_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
-            host=config.rabbitmq_host,
-            exchange_name=config.control_exchange,
-            routing_keys=[self._ring_routing_key(config.node_id)],
-        )
-        self._output_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
-            host=config.rabbitmq_host,
-            exchange_name=config.control_exchange,
-            routing_keys=[],
-        )
-        self._control_output_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
-            host=config.rabbitmq_host,
-            exchange_name=config.control_exchange,
-            routing_keys=[],
-        )
-
-    @property
-    def _node_id(self):
-        return self.config.node_id
-
-    @property
-    def _ring_size(self):
-        return self.config.ring_size
 
     @property
     def _input_middleware(self):
@@ -57,19 +34,24 @@ class BankMaxReducer(SentCoordinatedWorker):
         return self._output_queue
 
     @property
-    def _input_control_middleware(self):
-        return self._input_control_exchange
+    def _rabbitmq_host(self):
+        return self.config.rabbitmq_host
 
     @property
-    def _output_control_middleware(self):
-        return self._output_control_exchange
+    def _control_exchange_name(self):
+        return self.config.control_exchange
 
     @property
-    def _control_output_control_middleware(self):
-        return self._control_output_control_exchange
+    def _node_prefix(self):
+        return self.config.node_prefix
 
-    def _ring_routing_key(self, node_id):
-        return f"{self.config.node_prefix}{node_id}"
+    @property
+    def _node_id(self):
+        return self.config.node_id
+
+    @property
+    def _ring_size(self):
+        return self.config.ring_size
 
     def _handle_data_message(self, _, client_id, gateway_id, bank_max_batch):
         super()._handle_data_message(_, client_id, gateway_id, bank_max_batch)

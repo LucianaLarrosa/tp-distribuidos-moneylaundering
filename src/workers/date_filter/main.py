@@ -8,9 +8,6 @@ from config import Config
 
 class DateFilter(StatelessWorker):
     def __init__(self, config):
-        """
-        Initialize the DateFilter worker with the given configuration.
-        """
         super().__init__()
         self.config = config
 
@@ -28,22 +25,13 @@ class DateFilter(StatelessWorker):
 
     @property
     def _input_middleware(self):
-        """
-        Return the input exchange to consume messages from the previous stage.
-        """
         return self._input_exchange
 
     @property
     def _output_middleware(self):
-        """
-        Return the output exchange to forward messages to the next stage.
-        """
         return self._output_exchange
 
     def _send_final_eof(self, client_id, gateway_id, eof):
-        """
-        Send the final EOF message to the next stage's output exchange with the appropriate routing key.
-        """
         self._output_exchange.send(
             internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof),
             routing_key=self.config.output_routing_key_eof,

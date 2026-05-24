@@ -14,16 +14,17 @@ from common.models.query_results import Q3Result
 from common.models.transaction import Transaction
 from common.protocol import internal
 from common.worker.sent_coordinated_worker import SentCoordinatedWorker
+from common.worker.safe_output_capable import SafeOutputCapable
 from config import Config
 
 QUERY_ID = 3
 DRAIN_BATCH_SIZE = 1000
 
 
-class AnomalyFilter(SentCoordinatedWorker):
+class AnomalyFilter(SentCoordinatedWorker, SafeOutputCapable):
     def __init__(self, config):
-        super().__init__()
         self.config = config
+        super().__init__()
 
         self._avgs = {}
         self._avgs_ready = {}
@@ -31,7 +32,6 @@ class AnomalyFilter(SentCoordinatedWorker):
         self._avg_expected_counts = {}
         self._flow_locks = {}
         self._flow_locks_guard = threading.Lock()
-        self._output_lock = threading.Lock()
         self._spill_files = {}
 
         self._avg_thread = None
@@ -53,29 +53,11 @@ class AnomalyFilter(SentCoordinatedWorker):
             exchange_name=config.output_exchange,
             routing_keys=[],
         )
-        self._input_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
+        self._control_output_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
-            exchange_name=config.control_exchange,
-            routing_keys=[self._ring_routing_key(config.node_id)],
-        )
-        self._output_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
-            host=config.rabbitmq_host,
-            exchange_name=config.control_exchange,
+            exchange_name=config.output_exchange,
             routing_keys=[],
         )
-        self._control_output_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
-            host=config.rabbitmq_host,
-            exchange_name=config.control_exchange,
-            routing_keys=[],
-        )
-
-    @property
-    def _node_id(self):
-        return self.config.node_id
-
-    @property
-    def _ring_size(self):
-        return self.config.ring_size
 
     @property
     def _input_middleware(self):
@@ -86,19 +68,28 @@ class AnomalyFilter(SentCoordinatedWorker):
         return self._output_exchange
 
     @property
-    def _input_control_middleware(self):
-        return self._input_control_exchange
+    def _rabbitmq_host(self):
+        return self.config.rabbitmq_host
 
     @property
-    def _output_control_middleware(self):
-        return self._output_control_exchange
+    def _control_exchange_name(self):
+        return self.config.control_exchange
 
     @property
-    def _control_output_control_middleware(self):
-        return self._control_output_control_exchange
+    def _node_prefix(self):
+        return self.config.node_prefix
 
-    def _ring_routing_key(self, node_id):
-        return f"{self.config.node_prefix}{node_id}"
+    @property
+    def _node_id(self):
+        return self.config.node_id
+
+    @property
+    def _ring_size(self):
+        return self.config.ring_size
+
+    @property
+    def _control_output_middleware(self):
+        return self._control_output_exchange
 
     def _flow_key(self, client_id, gateway_id):
         return (client_id, gateway_id)
@@ -121,9 +112,7 @@ class AnomalyFilter(SentCoordinatedWorker):
 
     def _spill_path(self, key):
         client_id, gateway_id = key
-        return os.path.join(
-            self.config.spill_dir, f"{client_id}__{gateway_id}.jsonl"
-        )
+        return os.path.join(self.config.spill_dir, f"{client_id}__{gateway_id}.jsonl")
 
     def _spill_file(self, key):
         f = self._spill_files.get(key)
@@ -186,16 +175,15 @@ class AnomalyFilter(SentCoordinatedWorker):
         )
         if not result_batch:
             return
-        with self._output_lock:
-            self._output_exchange.send(
-                internal.serialize_msg(
-                    internal.MsgType.Q3_RESULT_BATCH,
-                    client_id,
-                    gateway_id,
-                    result_batch,
-                ),
-                routing_key=gateway_id,
-            )
+        self._output_middleware.send(
+            internal.serialize_msg(
+                internal.MsgType.Q3_RESULT_BATCH,
+                client_id,
+                gateway_id,
+                result_batch,
+            ),
+            routing_key=gateway_id,
+        )
         self._increment_sent_count(client_id, gateway_id)
 
     def _drain_spill(self, client_id, gateway_id, avgs):
@@ -321,17 +309,16 @@ class AnomalyFilter(SentCoordinatedWorker):
                     pass
 
     def _send_final_eof(self, client_id, gateway_id, eof):
-        with self._output_lock:
-            self._output_exchange.send(
-                internal.serialize_msg(
-                    internal.MsgType.QUERY_END,
-                    client_id,
-                    gateway_id,
-                    QUERY_ID,
-                    eof.message_count,
-                ),
-                routing_key=gateway_id,
-            )
+        self._control_output_exchange.send(
+            internal.serialize_msg(
+                internal.MsgType.QUERY_END,
+                client_id,
+                gateway_id,
+                QUERY_ID,
+                eof.message_count,
+            ),
+            routing_key=gateway_id,
+        )
 
     def start(self):
         self._avg_thread = threading.Thread(

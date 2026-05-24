@@ -39,9 +39,6 @@ class CurrencyMapper(StatelessWorker):
     _DECIMAL_PLACES = 2
 
     def __init__(self, config: Config):
-        """
-        Initialize the CurrencyMapper worker with the given configuration, fetching the necessary rates from the Frankfurter API.
-        """
         super().__init__()
         self.config = config
         self._rates = self._fetch_rates()
@@ -57,16 +54,10 @@ class CurrencyMapper(StatelessWorker):
 
     @property
     def _input_middleware(self):
-        """
-        Return the input queue to consume messages from the previous stage.
-        """
         return self._input_queue
 
     @property
     def _output_middleware(self):
-        """
-        Return the output queue to forward messages to the next stage.
-        """
         return self._output_queue
 
     def _fetch_rates(self):
@@ -101,6 +92,11 @@ class CurrencyMapper(StatelessWorker):
             else self._DEFAULT_RATE
         )
         return round(float(amount) * (1.0 / rate), self._DECIMAL_PLACES)
+
+    def _send_final_eof(self, client_id, gateway_id, eof):
+        self._output_queue.send(
+            internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof)
+        )
 
     def _handle_data_message(self, _, client_id, gateway_id, payload):
         """

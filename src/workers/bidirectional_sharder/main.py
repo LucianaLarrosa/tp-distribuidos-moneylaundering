@@ -9,15 +9,16 @@ from common.middleware.middleware_rabbitmq import (
 from common.models.account_edge import AccountEdge
 from common.protocol import internal
 from common.worker.sent_coordinated_worker import SentCoordinatedWorker
+from common.worker.safe_output_capable import SafeOutputCapable
 from config import Config
 
 
-class BidirectionalSharder(SentCoordinatedWorker):
+class BidirectionalSharder(SentCoordinatedWorker, SafeOutputCapable):
     NUM_FIELDS_FOR_SHARDING = 2
 
     def __init__(self, config):
-        super().__init__()
         self.config = config
+        super().__init__()
 
         self._input_exchange = MessageMiddlewareExchangeTopicRabbitMQ(
             host=config.rabbitmq_host,
@@ -30,29 +31,11 @@ class BidirectionalSharder(SentCoordinatedWorker):
             exchange_name=config.output_exchange,
             routing_keys=[],
         )
-        self._input_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
+        self._control_output_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
-            exchange_name=config.control_exchange,
-            routing_keys=[self._ring_routing_key(config.node_id)],
-        )
-        self._output_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
-            host=config.rabbitmq_host,
-            exchange_name=config.control_exchange,
+            exchange_name=config.output_exchange,
             routing_keys=[],
         )
-        self._control_output_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
-            host=config.rabbitmq_host,
-            exchange_name=config.control_exchange,
-            routing_keys=[],
-        )
-
-    @property
-    def _node_id(self):
-        return self.config.node_id
-
-    @property
-    def _ring_size(self):
-        return self.config.ring_size
 
     @property
     def _input_middleware(self):
@@ -63,19 +46,28 @@ class BidirectionalSharder(SentCoordinatedWorker):
         return self._output_exchange
 
     @property
-    def _input_control_middleware(self):
-        return self._input_control_exchange
+    def _rabbitmq_host(self):
+        return self.config.rabbitmq_host
 
     @property
-    def _output_control_middleware(self):
-        return self._output_control_exchange
+    def _control_exchange_name(self):
+        return self.config.control_exchange
 
     @property
-    def _control_output_control_middleware(self):
-        return self._control_output_control_exchange
+    def _node_prefix(self):
+        return self.config.node_prefix
 
-    def _ring_routing_key(self, node_id):
-        return f"{self.config.node_prefix}{node_id}"
+    @property
+    def _node_id(self):
+        return self.config.node_id
+
+    @property
+    def _ring_size(self):
+        return self.config.ring_size
+
+    @property
+    def _control_output_middleware(self):
+        return self._control_output_exchange
 
     def _shard_key(self, bank, account):
         node_id = (
@@ -85,14 +77,14 @@ class BidirectionalSharder(SentCoordinatedWorker):
         return f"{self.config.output_node_prefix}{node_id}"
 
     def _flush_data(self, _client_id, _gateway_id):
-        return
+        pass
 
     def _send_final_eof(self, client_id, gateway_id, eof):
         """
         Send the final EOF to a randomly selected output node of the next stage.
         """
         node_id = random.randint(0, self.config.output_node_count - 1)
-        self._output_exchange.send(
+        self._control_output_exchange.send(
             internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof),
             routing_key=f"{self.config.output_node_prefix}{node_id}",
         )

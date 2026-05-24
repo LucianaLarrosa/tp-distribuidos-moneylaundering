@@ -1,6 +1,9 @@
 import threading
 from abc import abstractmethod
 
+from common.middleware.middleware_rabbitmq import (
+    MessageMiddlewareExchangeDirectRabbitMQ,
+)
 from common.worker.worker import Worker
 from common.protocol import internal
 from common.models.eof import EOF, RingEOF
@@ -8,9 +11,6 @@ from common.models.eof import EOF, RingEOF
 
 class RingCoordinatedWorker(Worker):
     def __init__(self) -> None:
-        """
-        Initialize the ring-coordinated worker with a dictionary to track processed counts and a lock to synchronize access to this dictionary. Also initialize a control thread to listen for RING_EOF messages.
-        """
         super().__init__()
         self._processed_counts = (
             {}
@@ -21,78 +21,75 @@ class RingCoordinatedWorker(Worker):
         self._processed_counts_lock = threading.Lock()
         self._control_thread = None
 
+        self._input_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
+            host=self._rabbitmq_host,
+            exchange_name=self._control_exchange_name,
+            routing_keys=[self._get_ring_routing_key(self._node_id)],
+        )
+        self._output_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
+            host=self._rabbitmq_host,
+            exchange_name=self._control_exchange_name,
+            routing_keys=[],
+        )
+        self._control_output_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
+            host=self._rabbitmq_host,
+            exchange_name=self._control_exchange_name,
+            routing_keys=[],
+        )
+
+    @property
+    @abstractmethod
+    def _rabbitmq_host(self):
+        pass
+
+    @property
+    @abstractmethod
+    def _control_exchange_name(self):
+        pass
+
+    @property
+    @abstractmethod
+    def _node_prefix(self):
+        pass
+
     @property
     @abstractmethod
     def _node_id(self):
-        """
-        Return the ID of this node in the ring.
-        """
         pass
 
     @property
     @abstractmethod
     def _ring_size(self):
-        """
-        Return the size of the ring (number of nodes).
-        """
-        pass
-
-    @property
-    @abstractmethod
-    def _input_control_middleware(self):
-        """
-        Return the input middleware to consume control messages.
-        """
-        pass
-
-    @property
-    @abstractmethod
-    def _output_control_middleware(self):
-        """
-        Return the output middleware to send control messages from the main thread.
-        """
-        pass
-
-    @property
-    @abstractmethod
-    def _control_output_control_middleware(self):
-        """
-        Return the output middleware to send control messages from the control thread.
-        """
-        pass
-
-    @abstractmethod
-    def _ring_routing_key(self, node_id):
-        """
-        Return the routing key to send a message to the given node_id in the ring.
-        """
-        pass
-
-    @abstractmethod
-    def _flush_data(self, client_id, gateway_id):
-        """
-        Flush any buffered data.
-        """
         pass
 
     @abstractmethod
     def _get_total_sent_count(self, _client_id, _gateway_id, current_total):
-        """
-        Get the total sent count for the given client_id and gateway_id.
-        """
+        pass
+
+    @abstractmethod
+    def _flush_data(self, client_id, gateway_id):
         pass
 
     @abstractmethod
     def _get_final_eof_count(self, ring_eof):
-        """
-        Get the final EOF count to send to the output middleware when this node is the coordinator.
-        """
         pass
 
+    @property
+    def _input_control_middleware(self):
+        return self._input_control_exchange
+
+    @property
+    def _output_control_middleware(self):
+        return self._output_control_exchange
+
+    @property
+    def _control_output_control_middleware(self):
+        return self._control_output_control_exchange
+
+    def _get_ring_routing_key(self, node_id):
+        return f"{self._node_prefix}{node_id}"
+
     def _get_total_count(self, key, count_dict, partial_dict, lock, current_total):
-        """
-        Get the total count for the given key by summing the count from the count_dict and the current total, and subtracting the partial count from the partial_dict.
-        """
         with lock:
             count = count_dict.get(key, 0)
         partial = partial_dict.get(key, 0)
@@ -100,9 +97,6 @@ class RingCoordinatedWorker(Worker):
         return current_total + count - partial
 
     def _increment_processed_count(self, client_id, gateway_id):
-        """
-        Increment the processed count for the given client_id and gateway_id.
-        """
         with self._processed_counts_lock:
             self._processed_counts[(client_id, gateway_id)] = (
                 self._processed_counts.get((client_id, gateway_id), 0) + 1
@@ -151,13 +145,10 @@ class RingCoordinatedWorker(Worker):
             internal.serialize_msg(
                 internal.MsgType.RING_EOF, client_id, gateway_id, ring_eof
             ),
-            routing_key=self._ring_routing_key(self._get_next_node_id()),
+            routing_key=self._get_ring_routing_key(self._get_next_node_id()),
         )
 
     def _handle_control_message(self, message, ack, nack):
-        """
-        Handle a control message by processing it as a RING_EOF message.
-        """
         try:
             _, client_id, gateway_id, ring_eof = internal.deserialize_msg(message)
             self._handle_control_eof_message(client_id, gateway_id, ring_eof)
@@ -167,9 +158,6 @@ class RingCoordinatedWorker(Worker):
             raise
 
     def _get_next_node_id(self):
-        """
-        Get the ID of the next node in the ring.
-        """
         return (self._node_id + 1) % self._ring_size
 
     def _handle_eof_message(self, client_id, gateway_id, eof):
@@ -196,19 +184,13 @@ class RingCoordinatedWorker(Worker):
                     ),
                 ),
             ),
-            routing_key=self._ring_routing_key(self._get_next_node_id()),
+            routing_key=self._get_ring_routing_key(self._get_next_node_id()),
         )
 
     def _handle_data_message(self, msg_type, client_id, gateway_id, payload):
-        """
-        Handle a data message by processing it and incrementing the processed count for the given client_id and gateway_id.
-        """
         self._increment_processed_count(client_id, gateway_id)
 
     def start(self):
-        """
-        Start the worker and the control thread to listen for RING_EOF messages.
-        """
         self._control_thread = threading.Thread(
             target=self._input_control_middleware.start_consuming,
             args=(self._handle_control_message,),
@@ -218,10 +200,10 @@ class RingCoordinatedWorker(Worker):
         super().start()
 
     def shutdown(self):
-        """
-        Shutdown the worker and stop the control exchange and the control thread.
-        """
         super().shutdown()
-        self._input_control_middleware.stop_consuming_threadsafe()
         if self._control_thread and self._control_thread.is_alive():
+            self._input_control_middleware.stop_consuming_threadsafe()
             self._control_thread.join()
+        self._input_control_exchange.close()
+        self._output_control_exchange.close()
+        self._control_output_control_exchange.close()

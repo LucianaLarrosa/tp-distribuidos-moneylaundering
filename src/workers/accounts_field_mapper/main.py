@@ -43,6 +43,11 @@ class AccountsFieldMapper(StatelessWorker):
         """
         return self._output_exchange
 
+    def _send_final_eof(self, client_id, gateway_id, eof):
+        self._output_exchange.send(
+            internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof)
+        )
+
     def _handle_data_message(self, _, client_id, gateway_id, payload):
         """
         Parse each raw CSV line into a Bank and broadcast the batch to the output exchange.
