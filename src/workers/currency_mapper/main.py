@@ -27,6 +27,14 @@ class CurrencyMapper(StatelessWorker):
         "yen": "JPY",
         "yuan": "CNY",
     }
+    # Bitcoin rates taken from investing.com
+    _BTC_RATES = {
+        "2022-09-01": 1.0 / 19793.1,
+        "2022-09-02": 1.0 / 199999.0,
+        "2022-09-03": 1.0 / 19831.4,
+        "2022-09-04": 1.0 / 19952.7,
+        "2022-09-05": 1.0 / 20126.1,
+    }
     _DEFAULT_RATE = 1.0
     _DECIMAL_PLACES = 2
 
@@ -75,6 +83,8 @@ class CurrencyMapper(StatelessWorker):
             rates.setdefault(entry[self.config.rates_date_field], {})[
                 entry[self.config.rates_quote_field]
             ] = entry[self.config.rates_rate_field]
+        for date_str, btc_rate in self._BTC_RATES.items():
+            rates.setdefault(date_str, {})["BTC"] = btc_rate
         return rates
 
     def _resolve_rate(self, amount, currency, timestamp):
