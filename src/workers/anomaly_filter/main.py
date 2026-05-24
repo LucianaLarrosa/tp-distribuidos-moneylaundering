@@ -13,26 +13,22 @@ from common.models.query_results import Q3Result
 from common.models.transaction import Transaction
 from common.protocol import internal
 from common.utils import BatchSpill
-from common.worker.stateless_coordinated_worker import StatelessCoordinatedWorker
+from common.worker.side_input_stateless_coordinated_worker import (
+    SideInputStatelessCoordinatedWorker,
+)
 from config import Config
 
 QUERY_ID = 3
 
 
-class AnomalyFilter(StatelessCoordinatedWorker):
+class AnomalyFilter(SideInputStatelessCoordinatedWorker):
     def __init__(self, config):
         super().__init__()
         self.config = config
 
         self._avgs = {}
-        self._avgs_ready = {}
-        self._avg_batch_counts = {}
-        self._avg_expected_counts = {}
         self._flow_locks = {}
         self._flow_locks_guard = threading.Lock()
-        self._output_lock = threading.Lock()
-
-        self._avg_thread = None
 
         self._spill = BatchSpill(
             spill_dir=self.config.spill_dir,
@@ -71,9 +67,6 @@ class AnomalyFilter(StatelessCoordinatedWorker):
             routing_keys=[],
         )
 
-    def _has_side_input(self):
-        return True
-
     @property
     def _node_id(self):
         return self.config.node_id
@@ -102,6 +95,14 @@ class AnomalyFilter(StatelessCoordinatedWorker):
     def _control_output_control_middleware(self):
         return self._control_output_control_exchange
 
+    @property
+    def _input_side_middleware(self):
+        return self._input_avg_exchange
+
+    @property
+    def _side_batch_msg_type(self):
+        return internal.MsgType.PAYMENT_FORMAT_AVERAGE_BATCH
+
     def _ring_routing_key(self, node_id):
         return f"{self.config.node_prefix}{node_id}"
 
@@ -115,14 +116,6 @@ class AnomalyFilter(StatelessCoordinatedWorker):
                 lock = threading.Lock()
                 self._flow_locks[key] = lock
             return lock
-
-    def _get_avgs_ready_event(self, key):
-        with self._flow_locks_guard:
-            event = self._avgs_ready.get(key)
-            if event is None:
-                event = threading.Event()
-                self._avgs_ready[key] = event
-            return event
 
     def _serialize_tx(self, tx):
         d = asdict(tx)
@@ -159,107 +152,40 @@ class AnomalyFilter(StatelessCoordinatedWorker):
             len(result_batch),
             list(avgs.keys()) if avgs else [],
         )
-        with self._output_lock:
-            self._output_exchange.send(
-                internal.serialize_msg(
-                    internal.MsgType.Q3_RESULT_BATCH,
-                    client_id,
-                    gateway_id,
-                    result_batch,
-                ),
-                routing_key=gateway_id,
-            )
+        self._output_exchange.send(
+            internal.serialize_msg(
+                internal.MsgType.Q3_RESULT_BATCH,
+                client_id,
+                gateway_id,
+                result_batch,
+            ),
+            routing_key=gateway_id,
+        )
 
     def _handle_data_message(self, _, client_id, gateway_id, batch):
         key = self._flow_key(client_id, gateway_id)
-        event = self._get_avgs_ready_event(key)
         avgs = None
         with self._get_flow_lock(key):
             super()._handle_data_message(_, client_id, gateway_id, batch)
-            if event.is_set():
+            if self._side_input.is_ready(key):
                 avgs = self._avgs.get(key, {})
             else:
                 self._spill.write(key, batch)
                 return
         self._filter_and_emit(client_id, gateway_id, batch, avgs)
 
-    def _handle_avg_message(self, message, ack, nack):
-        try:
-            msg_type, client_id, gateway_id, payload = internal.deserialize_msg(message)
-            if msg_type == internal.MsgType.PAYMENT_FORMAT_AVERAGE_BATCH:
-                self._merge_avgs(client_id, gateway_id, payload)
-                ack()
-                return
-            if msg_type == internal.MsgType.EOF:
-                self._on_avg_eof(client_id, gateway_id, payload)
-                ack()
-                return
-            logging.warning("Unexpected avg message type: %s", msg_type)
-            nack()
-        except Exception as e:
-            logging.error("Error handling avg message: %s", e)
-            nack()
-            raise
-
-    def _merge_avgs(self, client_id, gateway_id, batch):
+    def _process_side_batch(self, client_id, gateway_id, batch):
         key = self._flow_key(client_id, gateway_id)
-        became_ready = False
         with self._get_flow_lock(key):
             table = self._avgs.setdefault(key, {})
             for entry in batch:
                 table[self._payment_format_key(entry.payment_format)] = (
                     entry.average_amount
                 )
-            self._avg_batch_counts[key] = self._avg_batch_counts.get(key, 0) + 1
-            became_ready = self._mark_avgs_ready_if_complete(client_id, gateway_id)
-        if became_ready:
-            self._mark_side_input_ready(client_id, gateway_id)
-
-    def _on_avg_eof(self, client_id, gateway_id, eof):
-        key = self._flow_key(client_id, gateway_id)
-        became_ready = False
-        with self._get_flow_lock(key):
-            self._avg_expected_counts[key] = eof.message_count
-            logging.info(
-                "AVG EOF for %s: received=%s expected=%s avgs=%s",
-                key,
-                self._avg_batch_counts.get(key, 0),
-                eof.message_count,
-                self._avgs.get(key, {}),
-            )
-            became_ready = self._mark_avgs_ready_if_complete(client_id, gateway_id)
-        if became_ready:
-            self._mark_side_input_ready(client_id, gateway_id)
-
-    def _mark_avgs_ready_if_complete(self, client_id, gateway_id):
-        key = self._flow_key(client_id, gateway_id)
-        event = self._get_avgs_ready_event(key)
-        if event.is_set():
-            return False
-
-        expected_count = self._avg_expected_counts.get(key)
-        if expected_count is None:
-            return False
-
-        received_count = self._avg_batch_counts.get(key, 0)
-        if received_count < expected_count:
-            return False
-
-        logging.info(
-            "AVG table ready for %s: received=%s expected=%s avgs=%s",
-            key,
-            received_count,
-            expected_count,
-            self._avgs.get(key, {}),
-        )
-        event.set()
-        return True
 
     def _drop_flow_state(self, key):
         self._avgs.pop(key, None)
-        self._avgs_ready.pop(key, None)
-        self._avg_batch_counts.pop(key, None)
-        self._avg_expected_counts.pop(key, None)
+        self._side_input.drop(key)
         self._flow_locks.pop(key, None)
 
     def _flush_data(self, client_id, gateway_id):
@@ -272,33 +198,19 @@ class AnomalyFilter(StatelessCoordinatedWorker):
             self._drop_flow_state(key)
 
     def _send_final_eof(self, client_id, gateway_id, eof):
-        with self._output_lock:
-            self._output_exchange.send(
-                internal.serialize_msg(
-                    internal.MsgType.QUERY_END,
-                    client_id,
-                    gateway_id,
-                    QUERY_ID,
-                    eof.message_count,
-                ),
-                routing_key=gateway_id,
-            )
-
-    def start(self):
-        self._avg_thread = threading.Thread(
-            target=self._input_avg_exchange.start_consuming,
-            args=(self._handle_avg_message,),
-            daemon=True,
+        self._output_exchange.send(
+            internal.serialize_msg(
+                internal.MsgType.QUERY_END,
+                client_id,
+                gateway_id,
+                QUERY_ID,
+                eof.message_count,
+            ),
+            routing_key=gateway_id,
         )
-        self._avg_thread.start()
-        super().start()
 
     def shutdown(self):
         super().shutdown()
-        if self._avg_thread and self._avg_thread.is_alive():
-            self._input_avg_exchange.stop_consuming_threadsafe()
-            self._avg_thread.join()
-        self._input_avg_exchange.close()
         self._spill.close_all()
 
 

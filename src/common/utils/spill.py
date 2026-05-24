@@ -2,15 +2,6 @@ import os
 
 
 class BatchSpill:
-    """
-    Per-flow on-disk JSONL spill for batches that arrive before a worker is ready to
-    emit them (e.g. side-input not yet complete). One line in the JSONL holds one
-    serialized batch — preserving the 1:1 mapping between input and output batches.
-
-    The owner supplies serialize/deserialize callables that convert a batch (list of
-    domain objects) to/from a single JSON string.
-    """
-
     def __init__(self, spill_dir, serialize, deserialize):
         self._dir = spill_dir
         self._serialize = serialize
