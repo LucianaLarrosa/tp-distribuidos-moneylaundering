@@ -156,7 +156,16 @@ class AnomalyFilter(SideInputStatelessCoordinatedWorker, SafeOutputCapable):
             routing_key=gateway_id,
         )
 
+    def _has_required_anomaly_fields(self, tx):
+        return (
+            tx.payment_format is not None
+            and tx.amount is not None
+            and tx.from_bank is not None
+            and tx.from_account is not None
+        )
+
     def _handle_data_message(self, _, client_id, gateway_id, batch):
+        batch = [tx for tx in batch if self._has_required_anomaly_fields(tx)]
         key = self._flow_key(client_id, gateway_id)
         avgs = None
         with self._get_flow_lock(key):

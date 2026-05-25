@@ -72,10 +72,16 @@ class PaymentFormatAggregator(SentCoordinatedWorker):
             % self.config.num_shards
         )
 
+    def _has_required_fields(self, tx):
+        return tx.payment_format is not None and tx.amount is not None
+
     def _handle_data_message(self, _, client_id, gateway_id, transaction_batch):
         super()._handle_data_message(_, client_id, gateway_id, transaction_batch)
         flow_totals = self._totals.setdefault(self._flow_key(client_id, gateway_id), {})
         for transaction in transaction_batch:
+            if not self._has_required_fields(transaction):
+                continue
+
             payment_format = self._payment_format_key(transaction.payment_format)
             total_amount, count = flow_totals.get(payment_format, (0.0, 0))
             flow_totals[payment_format] = (total_amount + transaction.amount, count + 1)
