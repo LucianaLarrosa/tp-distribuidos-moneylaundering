@@ -38,7 +38,12 @@ def _handle_client_process(sock, client_id, gateway_id, config, results_queue):
         exchange.close()
 
 
+def _worker_init():
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+
+
 def _run_results_consumer(rabbitmq_host, exchange_name, gateway_id, client_queues):
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
     middleware = MessageMiddlewareExchangeDirectRabbitMQ(
         rabbitmq_host, exchange_name, [gateway_id]
     )
@@ -70,7 +75,9 @@ class Gateway:
         self._server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_sock.bind((config.listen_host, config.listen_port))
         self._server_sock.listen()
-        self._pool = multiprocessing.Pool(processes=config.pool_size)
+        self._pool = multiprocessing.Pool(
+            processes=config.pool_size, initializer=_worker_init
+        )
         self._manager = multiprocessing.Manager()
         self._client_queues = self._manager.dict()
         self._results_consumer = multiprocessing.Process(
@@ -131,8 +138,9 @@ class Gateway:
         self._closed = True
         logging.info("Shutdown requested")
         self._server_sock.close()
-        self._results_consumer.terminate()
-        self._results_consumer.join()
+        if self._results_consumer.is_alive():
+            self._results_consumer.terminate()
+            self._results_consumer.join()
         self._pool.terminate()
         self._pool.join()
         self._manager.shutdown()

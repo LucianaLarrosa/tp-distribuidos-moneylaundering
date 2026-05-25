@@ -56,7 +56,7 @@ class Client:
                 f.close()
             self._sender_queue.put(None)
         if not pending:
-            logging.info("All expected query results received")
+            logging.info("Shutdown: All expected query results received")
 
     def _produce_and_wait_acks(self, pending, writers, totals):
         for msg_type, payload in self._messages_to_send():
