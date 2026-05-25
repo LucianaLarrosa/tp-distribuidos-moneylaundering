@@ -9,6 +9,7 @@ from common.protocol import internal
 from common.worker.stateless_worker import StatelessWorker
 from config import Config
 
+
 class AmountFilter(StatelessWorker):
     def __init__(self, config):
         super().__init__()
@@ -37,18 +38,31 @@ class AmountFilter(StatelessWorker):
     def _output_middleware(self):
         return self._output_exchange
 
-    def _handle_data_message(self, _, client_id, gateway_id, payload):
-        filtered = [
-            Q1Result(
-                from_bank=tx.from_bank,
-                from_account=tx.from_account,
-                to_bank=tx.to_bank,
-                to_account=tx.to_account,
-                amount_paid=tx.amount,
-            )
-            for tx in payload
-            if tx.amount < self.config.amount_threshold
+    def _has_required_fields(self, data_record):
+        required_fields = [
+            "from_bank",
+            "from_account",
+            "to_bank",
+            "to_account",
+            "amount",
         ]
+        return all(getattr(data_record, field) is not None for field in required_fields)
+
+    def _handle_data_message(self, _, client_id, gateway_id, payload):
+        filtered = []
+        for tx in payload:
+            if not self._has_required_fields(tx):
+                continue
+            if tx.amount < self.config.amount_threshold:
+                filtered.append(
+                    Q1Result(
+                        from_bank=tx.from_bank,
+                        from_account=tx.from_account,
+                        to_bank=tx.to_bank,
+                        to_account=tx.to_account,
+                        amount_paid=tx.amount,
+                    )
+                )
         self._output_exchange.send(
             internal.serialize_msg(
                 internal.MsgType.Q1_RESULT_BATCH, client_id, gateway_id, filtered
