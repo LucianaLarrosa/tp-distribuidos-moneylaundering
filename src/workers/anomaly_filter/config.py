@@ -11,6 +11,7 @@ class Config:
         self.input_queue_name = os.environ["INPUT_QUEUE_NAME"]
         self.avg_exchange = os.environ["AVG_EXCHANGE"]
         self.output_exchange = os.environ["OUTPUT_EXCHANGE"]
+        self.query_id = int(os.environ["QUERY_ID"])
         self.control_exchange = os.environ["CONTROL_EXCHANGE"]
         self.node_id = int(os.environ["NODE_ID"])
         self.node_prefix = os.environ["NODE_PREFIX"]

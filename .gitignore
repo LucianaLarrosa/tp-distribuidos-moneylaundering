@@ -7,5 +7,6 @@ __pycache__/
 # Testing
 data/
 output/
-output_expected/
+expected_output/
+pandas_expected_output/
 docker-compose.yaml

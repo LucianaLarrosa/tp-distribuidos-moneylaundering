@@ -27,13 +27,18 @@ class CurrencyMapper(StatelessWorker):
         "yen": "JPY",
         "yuan": "CNY",
     }
+    # Bitcoin rates taken from investing.com
+    _BTC_RATES = {
+        "2022-09-01": 1.0 / 19793.1,
+        "2022-09-02": 1.0 / 199999.0,
+        "2022-09-03": 1.0 / 19831.4,
+        "2022-09-04": 1.0 / 19952.7,
+        "2022-09-05": 1.0 / 20126.1,
+    }
     _DEFAULT_RATE = 1.0
     _DECIMAL_PLACES = 2
 
     def __init__(self, config: Config):
-        """
-        Initialize the CurrencyMapper worker with the given configuration, fetching the necessary rates from the Frankfurter API.
-        """
         super().__init__()
         self.config = config
         self._rates = self._fetch_rates()
@@ -49,16 +54,10 @@ class CurrencyMapper(StatelessWorker):
 
     @property
     def _input_middleware(self):
-        """
-        Return the input queue to consume messages from the previous stage.
-        """
         return self._input_queue
 
     @property
     def _output_middleware(self):
-        """
-        Return the output queue to forward messages to the next stage.
-        """
         return self._output_queue
 
     def _fetch_rates(self):
@@ -75,6 +74,8 @@ class CurrencyMapper(StatelessWorker):
             rates.setdefault(entry[self.config.rates_date_field], {})[
                 entry[self.config.rates_quote_field]
             ] = entry[self.config.rates_rate_field]
+        for date_str, btc_rate in self._BTC_RATES.items():
+            rates.setdefault(date_str, {})["BTC"] = btc_rate
         return rates
 
     def _resolve_rate(self, amount, currency, timestamp):
@@ -91,6 +92,11 @@ class CurrencyMapper(StatelessWorker):
             else self._DEFAULT_RATE
         )
         return round(float(amount) * (1.0 / rate), self._DECIMAL_PLACES)
+
+    def _send_final_eof(self, client_id, gateway_id, eof):
+        self._output_queue.send(
+            internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof)
+        )
 
     def _handle_data_message(self, _, client_id, gateway_id, payload):
         """

@@ -24,7 +24,9 @@ class AccountsFieldMapper(StatelessWorker):
         self._output_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
             exchange_name=config.output_exchange,
-            routing_keys=[self._output_prefix_routing_key(rk) for rk in config.output_routing_keys],
+            routing_keys=[
+                self._output_prefix_routing_key(rk) for rk in config.output_routing_keys
+            ],
         )
 
     @property
@@ -34,6 +36,11 @@ class AccountsFieldMapper(StatelessWorker):
     @property
     def _output_middleware(self):
         return self._output_exchange
+
+    def _send_final_eof(self, client_id, gateway_id, eof):
+        self._output_exchange.send(
+            internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof)
+        )
 
     def _shard_key(self, bank):
         node_id = (
@@ -60,8 +67,8 @@ class AccountsFieldMapper(StatelessWorker):
                 ),
                 routing_key=routing_key,
             )
-    
-    def _output_prefix_routing_key(self,routing_key):
+
+    def _output_prefix_routing_key(self, routing_key):
         return f"{self.config.output_node_prefix}{routing_key}"
 
     def _parse(self, raw):

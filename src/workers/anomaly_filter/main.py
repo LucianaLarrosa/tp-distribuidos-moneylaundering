@@ -16,15 +16,14 @@ from common.utils import BatchSpill
 from common.worker.side_input_stateless_coordinated_worker import (
     SideInputStatelessCoordinatedWorker,
 )
+from common.worker.safe_output_capable import SafeOutputCapable
 from config import Config
 
-QUERY_ID = 3
 
-
-class AnomalyFilter(SideInputStatelessCoordinatedWorker):
+class AnomalyFilter(SideInputStatelessCoordinatedWorker, SafeOutputCapable):
     def __init__(self, config):
-        super().__init__()
         self.config = config
+        super().__init__()
 
         self._avgs = {}
         self._flow_locks = {}
@@ -32,8 +31,12 @@ class AnomalyFilter(SideInputStatelessCoordinatedWorker):
 
         self._spill = BatchSpill(
             spill_dir=self.config.spill_dir,
-            serialize=lambda batch: json.dumps([self._serialize_tx(tx) for tx in batch]),
-            deserialize=lambda line: [self._deserialize_tx(d) for d in json.loads(line)],
+            serialize=lambda batch: json.dumps(
+                [self._serialize_tx(tx) for tx in batch]
+            ),
+            deserialize=lambda line: [
+                self._deserialize_tx(d) for d in json.loads(line)
+            ],
         )
 
         self._input_topic = MessageMiddlewareExchangeTopicRabbitMQ(
@@ -51,29 +54,11 @@ class AnomalyFilter(SideInputStatelessCoordinatedWorker):
             exchange_name=config.output_exchange,
             routing_keys=[],
         )
-        self._input_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
+        self._control_output_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
-            exchange_name=config.control_exchange,
-            routing_keys=[self._ring_routing_key(config.node_id)],
-        )
-        self._output_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
-            host=config.rabbitmq_host,
-            exchange_name=config.control_exchange,
+            exchange_name=config.output_exchange,
             routing_keys=[],
         )
-        self._control_output_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
-            host=config.rabbitmq_host,
-            exchange_name=config.control_exchange,
-            routing_keys=[],
-        )
-
-    @property
-    def _node_id(self):
-        return self.config.node_id
-
-    @property
-    def _ring_size(self):
-        return self.config.ring_size
 
     @property
     def _input_middleware(self):
@@ -84,16 +69,24 @@ class AnomalyFilter(SideInputStatelessCoordinatedWorker):
         return self._output_exchange
 
     @property
-    def _input_control_middleware(self):
-        return self._input_control_exchange
+    def _rabbitmq_host(self):
+        return self.config.rabbitmq_host
 
     @property
-    def _output_control_middleware(self):
-        return self._output_control_exchange
+    def _control_exchange_name(self):
+        return self.config.control_exchange
 
     @property
-    def _control_output_control_middleware(self):
-        return self._control_output_control_exchange
+    def _node_prefix(self):
+        return self.config.node_prefix
+
+    @property
+    def _node_id(self):
+        return self.config.node_id
+
+    @property
+    def _ring_size(self):
+        return self.config.ring_size
 
     @property
     def _input_side_middleware(self):
@@ -103,8 +96,9 @@ class AnomalyFilter(SideInputStatelessCoordinatedWorker):
     def _side_batch_msg_type(self):
         return internal.MsgType.PAYMENT_FORMAT_AVERAGE_BATCH
 
-    def _ring_routing_key(self, node_id):
-        return f"{self.config.node_prefix}{node_id}"
+    @property
+    def _control_output_middleware(self):
+        return self._control_output_exchange
 
     def _flow_key(self, client_id, gateway_id):
         return (client_id, gateway_id)
@@ -198,12 +192,12 @@ class AnomalyFilter(SideInputStatelessCoordinatedWorker):
             self._drop_flow_state(key)
 
     def _send_final_eof(self, client_id, gateway_id, eof):
-        self._output_exchange.send(
+        self._control_output_exchange.send(
             internal.serialize_msg(
                 internal.MsgType.QUERY_END,
                 client_id,
                 gateway_id,
-                QUERY_ID,
+                self.config.query_id,
                 eof.message_count,
             ),
             routing_key=gateway_id,

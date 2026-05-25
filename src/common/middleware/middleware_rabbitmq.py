@@ -11,6 +11,7 @@ from .middleware import (
 
 
 class MessageMiddlewareRabbitMQBase:
+    _HEARTBEAT_INTERVAL = 1200
 
     def start_consuming(self, on_message_callback):
         """
@@ -92,7 +93,9 @@ class MessageMiddlewareQueueRabbitMQ(
         """
         self.queue_name = queue_name
 
-        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=host))
+        self.connection = pika.BlockingConnection(
+            pika.ConnectionParameters(host=host, heartbeat=self._HEARTBEAT_INTERVAL)
+        )
         try:
             self.channel = self.connection.channel()
             self.channel.confirm_delivery()
@@ -139,7 +142,9 @@ class MessageMiddlewareExchangeDirectRabbitMQ(
         self.exchange_name = exchange_name
         self.routing_keys = routing_keys
 
-        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=host))
+        self.connection = pika.BlockingConnection(
+            pika.ConnectionParameters(host=host, heartbeat=self._HEARTBEAT_INTERVAL)
+        )
         try:
             self.channel = self.connection.channel()
             self.channel.confirm_delivery()
@@ -199,7 +204,9 @@ class MessageMiddlewareExchangeFanoutRabbitMQ(
         and binds a temporary queue to the exchange."""
         self.exchange_name = exchange_name
 
-        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=host))
+        self.connection = pika.BlockingConnection(
+            pika.ConnectionParameters(host=host, heartbeat=self._HEARTBEAT_INTERVAL)
+        )
         try:
             self.channel = self.connection.channel()
             self.channel.confirm_delivery()
@@ -257,7 +264,9 @@ class MessageMiddlewareExchangeTopicRabbitMQ(
         self.exchange_name = exchange_name
         self.binding_patterns = binding_patterns
 
-        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=host))
+        self.connection = pika.BlockingConnection(
+            pika.ConnectionParameters(host=host, heartbeat=self._HEARTBEAT_INTERVAL)
+        )
         try:
             self.channel = self.connection.channel()
             self.channel.confirm_delivery()

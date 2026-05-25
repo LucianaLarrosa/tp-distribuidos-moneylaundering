@@ -28,6 +28,14 @@ QUEUE_CURRENCY_MAPPER_OUTPUT = "currency_mapper_output"
 QUEUE_LOW_AMOUNT_AGGREGATOR_OUTPUT = "low_amount_aggregator_output"
 QUEUE_BANK_MAX_RESULTS = "bank_max_results"
 
+# --- Query IDs ---
+
+QUERY_1_ID = 1
+QUERY_2_ID = 2
+QUERY_3_ID = 3
+QUERY_4_ID = 4
+QUERY_5_ID = 5
+
 # --- Constants ---
 
 NODE_PREFIX = "node."
@@ -92,6 +100,7 @@ def _gateway(i, transactions_field_mappers, accounts_field_mappers):
             "TRANSACTION_ROUTING_KEY": ROUTING_KEY_TRANSACTION,
             "ACCOUNT_ROUTING_KEY": ROUTING_KEY_ACCOUNT,
             "QUERY_RESULTS_EXCHANGE": EXCHANGE_QUERY_RESULTS,
+            "EXPECTED_QUERY_IDS": f"{QUERY_1_ID},{QUERY_2_ID},{QUERY_3_ID},{QUERY_4_ID},{QUERY_5_ID}",
         },
     }
 
@@ -127,11 +136,11 @@ def _client(i):
         "environment": {
             "PROXY_HOST": "proxy",
             "PROXY_PORT": "6000",
-            "INPUT_CSV_TRANSACTIONS": "/data/HI-Small_Trans.csv",
-            "INPUT_CSV_ACCOUNTS": "/data/HI-Small_accounts.csv",
+            "INPUT_CSV_TRANSACTIONS": "/data/${TRANSACTIONS_FILE:-HI-Small_Trans.csv}",
+            "INPUT_CSV_ACCOUNTS": "/data/${ACCOUNTS_FILE:-HI-Small_accounts.csv}",
             "TRANSACTIONS_BATCH_SIZE": TRANSACTIONS_BATCH_SIZE,
             "ACCOUNTS_BATCH_SIZE": ACCOUNTS_BATCH_SIZE,
-            "EXPECTED_QUERY_IDS": "1,2,3,4,5",
+            "EXPECTED_QUERY_IDS": f"{QUERY_1_ID},{QUERY_2_ID},{QUERY_3_ID},{QUERY_4_ID},{QUERY_5_ID}",
             "OUTPUT_DIR": "/output",
             "CLIENT_ID": str(i),
         },
@@ -317,6 +326,7 @@ def _low_amount_reducer(i, low_amount_reducers):
             "RABBITMQ_HOST": "rabbitmq",
             "INPUT_QUEUE": QUEUE_LOW_AMOUNT_AGGREGATOR_OUTPUT,
             "OUTPUT_EXCHANGE": EXCHANGE_QUERY_RESULTS,
+            "QUERY_ID": str(QUERY_5_ID),
             "CONTROL_EXCHANGE": "low_amount_reducer_control",
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
@@ -427,6 +437,7 @@ def _amount_filter(i):
             "INPUT_EOF_ROUTING_KEY": ROUTING_KEYS_EOF,
             "INPUT_QUEUE_NAME": "amount_filter_input",
             "OUTPUT_EXCHANGE": EXCHANGE_QUERY_RESULTS,
+            "QUERY_ID": str(QUERY_1_ID),
             "AMOUNT_THRESHOLD": "50.0",
         },
     }
@@ -443,6 +454,7 @@ def _bank_mapper(i, bank_mappers):
             "INPUT_EXCHANGE": EXCHANGE_BANK_MAX_SHARDED,
             "SHARD_ID": str(i),
             "OUTPUT_EXCHANGE": EXCHANGE_QUERY_RESULTS,
+            "QUERY_ID": str(QUERY_2_ID),
             "BANKS_EXCHANGE": EXCHANGE_BANK_CATALOG,
             "SIDE_INPUT_NODE_PREFIX": "bank_mapper_side_input_node_",
             "CONTROL_EXCHANGE": "bank_mapper_control",
@@ -527,6 +539,7 @@ def _anomaly_filter(i, anomaly_filters):
             "INPUT_QUEUE_NAME": "anomaly_filter_input",
             "AVG_EXCHANGE": EXCHANGE_PAYMENT_FORMAT_AVERAGES,
             "OUTPUT_EXCHANGE": EXCHANGE_QUERY_RESULTS,
+            "QUERY_ID": str(QUERY_3_ID),
             "CONTROL_EXCHANGE": "anomaly_filter_control",
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
@@ -638,6 +651,7 @@ def _path_frequency_filter(i, path_frequency_filters):
             "RABBITMQ_HOST": "rabbitmq",
             "INPUT_EXCHANGE": EXCHANGE_PATH_MAPPER_OUTPUT,
             "OUTPUT_EXCHANGE": EXCHANGE_QUERY_RESULTS,
+            "QUERY_ID": str(QUERY_4_ID),
             "CONTROL_EXCHANGE": "path_freq_filter_control",
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),

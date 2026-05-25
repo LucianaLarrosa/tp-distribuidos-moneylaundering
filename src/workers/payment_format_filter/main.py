@@ -14,9 +14,6 @@ from config import Config
 
 class PaymentFormatFilter(StatelessWorker):
     def __init__(self, config):
-        """
-        Initialize the PaymentFormatFilter worker with the given configuration.
-        """
         super().__init__()
         self.config = config
 
@@ -33,17 +30,16 @@ class PaymentFormatFilter(StatelessWorker):
 
     @property
     def _input_middleware(self):
-        """
-        Return the input exchange to consume messages from the previous stage.
-        """
         return self._input_exchange
 
     @property
     def _output_middleware(self):
-        """
-        Return the output queue to forward messages to the next stage.
-        """
         return self._output_queue
+
+    def _send_final_eof(self, client_id, gateway_id, eof):
+        self._output_queue.send(
+            internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof)
+        )
 
     def _handle_data_message(self, _, client_id, gateway_id, payload):
         """
@@ -56,7 +52,8 @@ class PaymentFormatFilter(StatelessWorker):
                 currency=transaction.currency,
             )
             for transaction in payload
-            if transaction.payment_format.lower() in self.config.valid_payment_formats
+            if self._has_required_fields(transaction)
+            and transaction.payment_format.lower() in self.config.valid_payment_formats
         ]
         self._output_queue.send(
             internal.serialize_msg(

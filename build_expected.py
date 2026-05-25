@@ -9,10 +9,14 @@ import requests
 # --- Configuration ---
 
 DATASET_DIR = os.environ.get("DATASET_DIR", "./data")
-EXPECTED_DIR = os.environ.get("EXPECTED_DIR", "./output_expected")
+EXPECTED_DIR = os.environ.get("EXPECTED_DIR", "./expected_output")
 
-TRANSACTIONS_FILE_PATH = os.path.join(DATASET_DIR, "HI-Small_Trans.csv")
-ACCOUNTS_FILE = os.path.join(DATASET_DIR, "HI-Small_accounts.csv")
+TRANSACTIONS_FILE_PATH = os.path.join(
+    DATASET_DIR, os.environ.get("TRANSACTIONS_FILE", "HI-Small_Trans.csv")
+)
+ACCOUNTS_FILE = os.path.join(
+    DATASET_DIR, os.environ.get("ACCOUNTS_FILE", "HI-Small_accounts.csv")
+)
 
 _FRANKFURTER_URL = (
     "https://api.frankfurter.dev/v2/rates?from=2022-09-01&to=2022-09-05&base=USD"
@@ -44,6 +48,14 @@ _CURRENCY_NAME_TO_ISO = {
     "uk pound": "GBP",
     "yen": "JPY",
     "yuan": "CNY",
+}
+# Bitcoin rates taken from investing.com
+_BTC_RATES = {
+    "2022-09-01": 1.0 / 19793.1,
+    "2022-09-02": 1.0 / 199999.0,
+    "2022-09-03": 1.0 / 19831.4,
+    "2022-09-04": 1.0 / 19952.7,
+    "2022-09-05": 1.0 / 20126.1,
 }
 _DEFAULT_RATE = 1.0
 _RATES_DATE_FORMAT = "%Y-%m-%d"
@@ -81,10 +93,12 @@ def _fetch_rates():
             rates.setdefault(entry[_RATES_DATE_FIELD], {})[
                 entry[_RATES_QUOTE_FIELD]
             ] = entry[_RATES_RATE_FIELD]
+        for date_str, btc_rate in _BTC_RATES.items():
+            rates.setdefault(date_str, {})["BTC"] = btc_rate
         return rates
     except Exception as exc:
         logging.warning("Could not fetch Frankfurter rates (%s); using rate=1.0", exc)
-        return {}
+        return dict(_BTC_RATES)
 
 
 _RATES = _fetch_rates()
