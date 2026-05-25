@@ -207,6 +207,7 @@ class Client:
             self._receiver_queue.put(None)
 
     def _read_batches(self, csv_path, data_class_type):
+        batch_size = self._config.transactions_batch_size if data_class_type == RawTransaction else self._config.accounts_batch_size
         batch = []
         with open(csv_path) as f:
             next(f)
@@ -215,7 +216,7 @@ class Client:
                 if not line:
                     continue
                 batch.append(data_class_type(raw=line))
-                if len(batch) >= self._config.batch_size:
+                if len(batch) >= batch_size:
                     yield batch
                     batch = []
         if batch:

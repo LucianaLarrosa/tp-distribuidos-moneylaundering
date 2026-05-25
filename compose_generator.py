@@ -33,6 +33,8 @@ QUEUE_BANK_MAX_RESULTS = "bank_max_results"
 NODE_PREFIX = "node."
 MIN_REQUIRED_ACCOUNTS = "5"
 BATCH_SIZE = "1000"
+TRANSACTIONS_BATCH_SIZE = "424"
+ACCOUNTS_BATCH_SIZE = "840"
 TRANSACTION_DATE_FORMAT = "%Y/%m/%d %H:%M"
 DATE_FROM_1 = "2022/09/01 00:00"
 DATE_TO_1 = "2022/09/05 23:59"
@@ -127,7 +129,8 @@ def _client(i):
             "PROXY_PORT": "6000",
             "INPUT_CSV_TRANSACTIONS": "/data/HI-Small_Trans.csv",
             "INPUT_CSV_ACCOUNTS": "/data/HI-Small_accounts.csv",
-            "BATCH_SIZE": BATCH_SIZE,
+            "TRANSACTIONS_BATCH_SIZE": TRANSACTIONS_BATCH_SIZE,
+            "ACCOUNTS_BATCH_SIZE": ACCOUNTS_BATCH_SIZE,
             "EXPECTED_QUERY_IDS": "1,2,3,4,5",
             "OUTPUT_DIR": "/output",
             "CLIENT_ID": str(i),
