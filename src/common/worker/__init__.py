@@ -6,3 +6,4 @@ from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
 from common.worker.side_input_stateless_coordinated_worker import (
     SideInputStatelessCoordinatedWorker,
 )
+from common.worker.safe_output_capable import SafeOutputCapable

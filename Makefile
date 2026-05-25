@@ -29,10 +29,15 @@ PATH_FREQUENCY_FILTERS     ?= $(REPLICAS)
 
 COMPOSE_FILE ?= docker-compose.yaml
 
-DATASET_DIR ?= ./data
-EXPECTED_DIR ?= ./output_expected
-OUTPUT_DIR   ?= ./output
-SLEEP_TIME   ?= 30
+DATASET_DIR       ?= ./data
+TRANSACTIONS_FILE ?= HI-Small_Trans.csv
+ACCOUNTS_FILE     ?= HI-Small_accounts.csv
+
+EXPECTED_DIR        ?= ./expected_output
+PANDAS_EXPECTED_DIR ?= ./pandas_expected_output
+OUTPUT_DIR          ?= ./output
+
+SLEEP_TIME ?= 30
 
 COMPOSE_ARGS = \
 	--clients                     $(N_CLIENTS) \
@@ -57,18 +62,20 @@ COMPOSE_ARGS = \
 	--path-frequency-filters      $(PATH_FREQUENCY_FILTERS) \
 	--output-file                 $(COMPOSE_FILE)
 
-.PHONY: all compose build up down logs clean wait-clients build-expected diff-output output-test exit-test test
+.PHONY: compose build up down logs remove-output clean clean-all build-expected verify-output output-test up-and-stop verify-shutdown verify-exit-codes exit-test
 
-all: build test
+all: compose build
+	$(MAKE) output-test
+	$(MAKE) exit-test
 
 compose:
 	python3 compose_generator.py $(COMPOSE_ARGS)
 
-build: compose
+build:
 	docker compose -f $(COMPOSE_FILE) build
 
-up: compose
-	DATASET_DIR=$(DATASET_DIR) OUTPUT_DIR=$(OUTPUT_DIR) docker compose -f $(COMPOSE_FILE) up -d
+up:
+	DATASET_DIR=$(DATASET_DIR) OUTPUT_DIR=$(OUTPUT_DIR) TRANSACTIONS_FILE=$(TRANSACTIONS_FILE) ACCOUNTS_FILE=$(ACCOUNTS_FILE) docker compose -f $(COMPOSE_FILE) up -d
 
 down:
 	docker compose -f $(COMPOSE_FILE) down -v
@@ -76,10 +83,18 @@ down:
 logs:
 	docker compose -f $(COMPOSE_FILE) logs -f
 
+remove-output:
+	rm -f $(COMPOSE_FILE)
+	rm -rf $(OUTPUT_DIR) $(EXPECTED_DIR) $(PANDAS_EXPECTED_DIR)
+
 clean:
 	docker compose -f $(COMPOSE_FILE) down -v --rmi local
-	rm -f $(COMPOSE_FILE)
-	rm -rf $(OUTPUT_DIR) $(EXPECTED_DIR)
+	$(MAKE) remove-output
+
+clean-all:
+	docker compose -f $(COMPOSE_FILE) down -v --rmi local --remove-orphans
+	docker system prune -f
+	$(MAKE) remove-output
 
 wait-clients:
 	@client_names=""; \
@@ -87,9 +102,9 @@ wait-clients:
 	docker container wait $$client_names
 
 build-expected:
-	DATASET_DIR=$(DATASET_DIR) EXPECTED_DIR=$(EXPECTED_DIR) python3 build_expected.py
+	DATASET_DIR=$(DATASET_DIR) EXPECTED_DIR=$(EXPECTED_DIR) TRANSACTIONS_FILE=$(TRANSACTIONS_FILE) ACCOUNTS_FILE=$(ACCOUNTS_FILE) python3 build_expected.py
 
-diff-output:
+verify-output:
 	@mismatch=0; \
 	for query_number in 1 2 3 4 5; do \
 		for i in $$(seq 1 $(N_CLIENTS)); do \
@@ -111,17 +126,17 @@ diff-output:
 	fi; \
 	[ $$mismatch -eq 0 ]
 
-output-test: build up wait-clients build-expected diff-output down
+output-test: up wait-clients build-expected verify-output down
 
-exit-test: up
+up-and-stop: up
 	sleep $(SLEEP_TIME)
-	@docker compose -f $(COMPOSE_FILE) stop --timeout 10; \
-	all_shutdown=0; \
-	has_successful_exit=1; \
+	docker compose -f $(COMPOSE_FILE) stop --timeout 10
+
+verify-shutdown:
+	@all_shutdown=0; \
 	for name in $$(docker compose -f $(COMPOSE_FILE) ps --all --format '{{.Name}}'); do \
-		code=$$(docker inspect $$name --format='{{.State.ExitCode}}'); \
-		logs=$$(docker logs $$name 2>&1); \
 		if [ "$$name" != "rabbitmq" ]; then \
+			logs=$$(docker logs $$name 2>&1); \
 			if echo "$$logs" | grep -Eq "Shutting down|Shutdown"; then \
 				printf "$(LIME)✓ %-45s shutdown detected$(RESET)\n" "$$name"; \
 			else \
@@ -129,6 +144,13 @@ exit-test: up
 				all_shutdown=1; \
 			fi; \
 		fi; \
+	done; \
+	[ $$all_shutdown -eq 0 ]
+
+verify-exit-codes:
+	@has_successful_exit=1; \
+	for name in $$(docker compose -f $(COMPOSE_FILE) ps --all --format '{{.Name}}'); do \
+		code=$$(docker inspect $$name --format='{{.State.ExitCode}}'); \
 		if [ "$$code" = "0" ]; then \
 			printf "$(LIME)✓ %-45s exit code 0$(RESET)\n" "$$name"; \
 			has_successful_exit=0; \
@@ -136,6 +158,11 @@ exit-test: up
 			printf "$(RED)✗ %-45s exit code $$code$(RESET)\n" "$$name"; \
 		fi; \
 	done; \
+	[ $$has_successful_exit -eq 0 ]
+
+exit-test: up-and-stop
+	@$(MAKE) verify-shutdown; all_shutdown=$$?; \
+	$(MAKE) verify-exit-codes; has_successful_exit=$$?; \
 	if [ $$all_shutdown -eq 0 ] && [ $$has_successful_exit -eq 0 ]; then \
 		printf "$(LIME)Graceful shutdown test passed$(RESET)\n"; \
 	else \
@@ -143,7 +170,3 @@ exit-test: up
 	fi; \
 	$(MAKE) down; \
 	[ $$all_shutdown -eq 0 ] && [ $$has_successful_exit -eq 0 ]
-
-test:
-	$(MAKE) output-test
-	$(MAKE) exit-test

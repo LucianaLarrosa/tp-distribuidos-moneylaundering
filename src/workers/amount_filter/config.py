@@ -10,6 +10,7 @@ class Config:
     input_eof_routing_key: str
     input_queue_name: str
     output_exchange: str
+    query_id: int
     amount_threshold: float
 
     @classmethod
@@ -21,5 +22,6 @@ class Config:
             input_eof_routing_key=os.environ.get("INPUT_EOF_ROUTING_KEY", "eof"),
             input_queue_name=os.environ.get("INPUT_QUEUE_NAME", "amount_filter_input"),
             output_exchange=os.environ.get("OUTPUT_EXCHANGE", "query_results"),
+            query_id=int(os.environ["QUERY_ID"]),
             amount_threshold=float(os.environ.get("AMOUNT_THRESHOLD", 50.0)),
         )

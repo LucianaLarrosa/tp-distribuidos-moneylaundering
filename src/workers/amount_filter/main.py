@@ -9,9 +9,6 @@ from common.protocol import internal
 from common.worker.stateless_worker import StatelessWorker
 from config import Config
 
-QUERY_ID = 1
-
-
 class AmountFilter(StatelessWorker):
     def __init__(self, config):
         super().__init__()
@@ -65,7 +62,7 @@ class AmountFilter(StatelessWorker):
                 internal.MsgType.QUERY_END,
                 client_id,
                 gateway_id,
-                QUERY_ID,
+                self.config.query_id,
                 eof.message_count,
             ),
             routing_key=gateway_id,

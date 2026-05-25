@@ -5,9 +5,6 @@ from common.worker.ring_coordinated_worker import RingCoordinatedWorker
 
 class SentCoordinatedWorker(RingCoordinatedWorker):
     def __init__(self):
-        """
-        Initialize the sent-coordinated worker with a dictionary to track sent counts and a lock to synchronize access to this dictionary.
-        """
         super().__init__()
         self._sent_count = (
             {}
@@ -36,9 +33,6 @@ class SentCoordinatedWorker(RingCoordinatedWorker):
         return ring_eof.total_sent_count
 
     def _increment_sent_count(self, client_id, gateway_id):
-        """
-        Increment the sent count for the given client_id and gateway_id.
-        """
         with self._sent_count_lock:
             self._sent_count[(client_id, gateway_id)] = (
                 self._sent_count.get((client_id, gateway_id), 0) + 1

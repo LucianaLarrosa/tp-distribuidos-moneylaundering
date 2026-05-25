@@ -9,16 +9,10 @@ from common.protocol import internal
 from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
 from config import Config
 
-QUERY_ID = 5
-
-
 class LowAmountReducer(StatefulCoordinatedWorker):
     def __init__(self, config: Config):
-        """
-        Initialize the LowAmountReducer with the given configuration, setting up the counter dictionary.
-        """
-        super().__init__()
         self.config = config
+        super().__init__()
         self._counts = {}  # (client_id, gateway_id) -> accumulated count
 
         self._input_queue = MessageMiddlewareQueueRabbitMQ(
@@ -30,21 +24,26 @@ class LowAmountReducer(StatefulCoordinatedWorker):
             exchange_name=config.output_exchange,
             routing_keys=[],
         )
-        self._input_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
-            host=config.rabbitmq_host,
-            exchange_name=config.control_exchange,
-            routing_keys=[self._ring_routing_key(config.node_id)],
-        )
-        self._output_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
-            host=config.rabbitmq_host,
-            exchange_name=config.control_exchange,
-            routing_keys=[],
-        )
-        self._control_output_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
-            host=config.rabbitmq_host,
-            exchange_name=config.control_exchange,
-            routing_keys=[],
-        )
+
+    @property
+    def _input_middleware(self):
+        return self._input_queue
+
+    @property
+    def _output_middleware(self):
+        return self._output_exchange
+
+    @property
+    def _rabbitmq_host(self):
+        return self.config.rabbitmq_host
+
+    @property
+    def _control_exchange_name(self):
+        return self.config.control_exchange
+
+    @property
+    def _node_prefix(self):
+        return self.config.node_prefix
 
     @property
     def _node_id(self):
@@ -53,44 +52,6 @@ class LowAmountReducer(StatefulCoordinatedWorker):
     @property
     def _ring_size(self):
         return self.config.ring_size
-
-    @property
-    def _input_middleware(self):
-        """
-        Return the input queue to consume messages from the previous stage.
-        """
-        return self._input_queue
-
-    @property
-    def _output_middleware(self):
-        """
-        Return the output exchange to forward messages to the next stage.
-        """
-        return self._output_exchange
-
-    @property
-    def _input_control_middleware(self):
-        """
-        Return the input control exchange to consume control messages.
-        """
-        return self._input_control_exchange
-
-    @property
-    def _output_control_middleware(self):
-        """
-        Return the output control exchange to send control messages from the main thread.
-        """
-        return self._output_control_exchange
-
-    @property
-    def _control_output_control_middleware(self):
-        """
-        Return the output control exchange to send control messages from the control thread.
-        """
-        return self._control_output_control_exchange
-
-    def _ring_routing_key(self, node_id):
-        return f"{self.config.node_prefix}{node_id}"
 
     def _flush_data(self, client_id, gateway_id):
         """
@@ -108,15 +69,12 @@ class LowAmountReducer(StatefulCoordinatedWorker):
         )
 
     def _send_final_eof(self, client_id, gateway_id, eof):
-        """
-        Signal end of Q5 to the gateway with the count of result batches that were emitted.
-        """
         self._output_exchange.send(
             internal.serialize_msg(
                 internal.MsgType.QUERY_END,
                 client_id,
                 gateway_id,
-                QUERY_ID,
+                self.config.query_id,
                 eof.message_count,
             ),
             routing_key=gateway_id,
