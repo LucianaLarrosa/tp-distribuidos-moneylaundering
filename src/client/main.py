@@ -7,7 +7,7 @@ import queue
 from dataclasses import asdict
 
 from client.config import Config
-from common.socket.safe_socket import SafeSocket
+from common.socket.safe_socket import SafeSocket, IncompleteReadError
 from common.models.raw_transaction import RawTransaction
 from common.models.raw_account import RawAccount
 from common.protocol import external
@@ -55,7 +55,7 @@ class Client:
             for f in files.values():
                 f.close()
             self._sender_queue.put(None)
-        if not self._aborted.is_set() and not self._closed:
+        if not pending:
             logging.info("All expected query results received")
 
     def _produce_and_wait_acks(self, pending, writers, totals):
@@ -79,13 +79,10 @@ class Client:
         yield MsgType.EOF_ACCOUNTS, None
 
     def _wait_ack(self, pending, writers, totals):
-        while not self._aborted.is_set() and not self._closed:
-            try:
-                item = self._receiver_queue.get()
-            except queue.Empty:
-                continue
+        while not self._closed:
+            item = self._receiver_queue.get()
             if item is None:
-                continue
+                return
             msg_type, payload = item
             if msg_type == MsgType.ACK:
                 return
@@ -97,13 +94,10 @@ class Client:
                 logging.warning("Unexpected msg_type=%s in orchestrator", msg_type)
 
     def _consume_remaining(self, pending, writers, totals):
-        while pending and not self._aborted.is_set() and not self._closed:
-            try:
-                item = self._receiver_queue.get()
-            except queue.Empty:
-                continue
+        while pending and not self._closed:
+            item = self._receiver_queue.get()
             if item is None:
-                continue
+                return
             msg_type, payload = item
             if msg_type == MsgType.QUERY_RESULT:
                 self._handle_query_result(payload, writers, totals)
@@ -173,12 +167,21 @@ class Client:
         while True:
             try:
                 msg_type, payload = external.recv_msg(self._sock)
+            except IncompleteReadError as e:
+                if e.partial == b"":
+                    logging.info("Receiver stopped: remote closed connection")
+                else:
+                    logging.error("Error receiving data: %s", e)
+                self._aborted.set()
+                self._receiver_queue.put(None)
+                self._sender_queue.put(None)
+                return
             except Exception as e:
                 if self._closed:
                     logging.info("Receiver stopped: socket closed")
                 else:
                     logging.error("Error receiving data: %s", e)
-                    self._aborted.set()
+                self._aborted.set()
                 self._receiver_queue.put(None)
                 self._sender_queue.put(None)
                 return
@@ -219,13 +222,13 @@ class Client:
             yield batch
 
     def _disconnect(self):
+        self._closed = True
         if self._proxy_sock is not None:
             self._proxy_sock.close()
             self._proxy_sock = None
         if self._sock is not None:
             self._sock.close()
             self._sock = None
-        self._closed = True
         self._sender_queue.put(None)
         self._receiver_queue.put(None)
 
