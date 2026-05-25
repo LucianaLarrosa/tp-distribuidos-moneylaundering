@@ -1,5 +1,6 @@
 import logging
 import threading
+import queue
 
 from common.protocol import external
 from common.protocol import internal
@@ -45,23 +46,27 @@ class ClientHandler:
                 self._router.forward_raw_transactions(
                     self._client_id, self._gateway_id, payload
                 )
+                self._results_queue.put(("ack",))
                 self._tx_batch_count += 1
             elif msg_type == MsgType.ACCOUNT_BATCH:
                 self._router.forward_raw_accounts(
                     self._client_id, self._gateway_id, payload
                 )
+                self._results_queue.put(("ack",))
                 self._acc_batch_count += 1
             elif msg_type == MsgType.EOF_TRANSACTIONS:
                 logging.info("[%s] EOF_TRANSACTIONS received", self._client_id)
                 self._router.forward_eof_transactions(
                     self._client_id, self._gateway_id, self._tx_batch_count
                 )
+                self._results_queue.put(("ack",))
                 got_eof_tx = True
             elif msg_type == MsgType.EOF_ACCOUNTS:
                 logging.info("[%s] EOF_ACCOUNTS received", self._client_id)
                 self._router.forward_eof_accounts(
                     self._client_id, self._gateway_id, self._acc_batch_count
                 )
+                self._results_queue.put(("ack",))
                 got_eof_acc = True
             else:
                 logging.warning(
@@ -76,6 +81,9 @@ class ClientHandler:
             item = self._results_queue.get()
             if item == _SENDER_STOP:
                 return
+            if item == ("ack",):
+                self._send_to_client(MsgType.ACK)
+                continue
             msg_type, payload = item
 
             if msg_type in EXPECTED_QUERY_IDS:
@@ -101,6 +109,14 @@ class ClientHandler:
                     self._client_id,
                     msg_type,
                 )
+
+        while True:
+            try:
+                item = self._results_queue.get_nowait()
+                if item == ("ack",):
+                    self._send_to_client(MsgType.ACK)
+            except queue.Empty:
+                break
 
     def _finalize_query(self, query_id):
         self._send_to_client(MsgType.QUERY_END, query_id)

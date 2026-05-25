@@ -3,6 +3,7 @@ import logging
 import os
 import signal
 import threading
+import queue
 from dataclasses import asdict
 
 from client.config import Config
@@ -17,7 +18,12 @@ class Client:
     def __init__(self, config):
         self._config = config
         self._sock = None
+        self._proxy_sock = None
         self._receiver_thread = None
+        self._receiver_queue = queue.Queue()
+        self._sender_thread = None
+        self._sender_queue = queue.Queue()
+        self._aborted = threading.Event()
         self._closed = False
 
     def run(self):
@@ -25,79 +31,92 @@ class Client:
         logging.info("Connecting to gateway %s:%s", gateway_host, gateway_port)
         self._sock = SafeSocket.connect(gateway_host, gateway_port)
 
-        self._receiver_thread = threading.Thread(
-            target=self._wait_for_query_results, daemon=True
-        )
+        self._receiver_thread = threading.Thread(target=self._receive_data, daemon=True)
+        self._sender_thread = threading.Thread(target=self._send_data, daemon=True)
         self._receiver_thread.start()
+        self._sender_thread.start()
 
         try:
-            self._send_transactions()
-            self._send_eof(MsgType.EOF_TRANSACTIONS)
-            self._send_accounts()
-            self._send_eof(MsgType.EOF_ACCOUNTS)
-            self._receiver_thread.join()
+            self._orchestrate()
         finally:
             self._disconnect()
+            if self._receiver_thread is not None:
+                self._receiver_thread.join()
+            if self._sender_thread is not None:
+                self._sender_thread.join()
 
-    def _resolve_gateway(self):
-        logging.info("Connecting to proxy")
-        proxy_sock = SafeSocket.connect(
-            self._config.proxy_host, self._config.proxy_port
-        )
-        
-        try:
-            msg_type, payload = external.recv_msg(proxy_sock)
-            if msg_type != MsgType.REDIRECT:
-                raise RuntimeError(
-                    f"Expected REDIRECT from proxy, got msg_type={msg_type}"
-                )
-            host, port = payload
-            return host, port
-        finally:
-            proxy_sock.close()
-
-    def _send_accounts(self):
-        total = self._send_batches(
-            self._config.input_csv_accounts, MsgType.ACCOUNT_BATCH, RawAccount
-        )
-        logging.info("Sent %s accounts", total)
-
-    def _send_transactions(self):
-        total = self._send_batches(
-            self._config.input_csv_transactions,
-            MsgType.TRANSACTION_BATCH,
-            RawTransaction,
-        )
-        logging.info("Sent %s transactions", total)
-
-    def _send_batches(self, csv_path, msg_type, data_class_type):
-        batch = []
-        total = 0
-
-        with open(csv_path) as f:
-            next(f)
-
-            for line in f:
-                line = line.rstrip("\n")
-                if not line:
-                    continue
-                batch.append(data_class_type(raw=line))
-                if len(batch) >= self._config.batch_size:
-                    external.send_msg(self._sock, msg_type, batch)
-                    total += len(batch)
-                    batch = []
-        if batch:
-            external.send_msg(self._sock, msg_type, batch)
-            total += len(batch)
-        return total
-
-    def _send_eof(self, eof_msg_type):
-        external.send_msg(self._sock, eof_msg_type)
-
-    def _wait_for_query_results(self):
+    def _orchestrate(self):
         pending = set(self._config.expected_query_ids)
-        if not pending:
-            return
+        writers, totals, files = self._open_result_files(pending)
+        try:
+            self._produce_and_wait_acks(pending, writers, totals)
+            self._consume_remaining(pending, writers, totals)
+        finally:
+            for f in files.values():
+                f.close()
+            self._sender_queue.put(None)
+        if not self._aborted.is_set() and not self._closed:
+            logging.info("All expected query results received")
+
+    def _produce_and_wait_acks(self, pending, writers, totals):
+        for msg_type, payload in self._messages_to_send():
+            if self._aborted.is_set() or self._closed:
+                return
+            if payload is None:
+                self._sender_queue.put((msg_type,))
+            else:
+                self._sender_queue.put((msg_type, payload))
+            self._wait_ack(pending, writers, totals)
+
+    def _messages_to_send(self):
+        for batch in self._read_batches(
+            self._config.input_csv_transactions, RawTransaction
+        ):
+            yield MsgType.TRANSACTION_BATCH, batch
+        yield MsgType.EOF_TRANSACTIONS, None
+        for batch in self._read_batches(self._config.input_csv_accounts, RawAccount):
+            yield MsgType.ACCOUNT_BATCH, batch
+        yield MsgType.EOF_ACCOUNTS, None
+
+    def _wait_ack(self, pending, writers, totals):
+        while not self._aborted.is_set() and not self._closed:
+            try:
+                item = self._receiver_queue.get()
+            except queue.Empty:
+                continue
+            if item is None:
+                continue
+            msg_type, payload = item
+            if msg_type == MsgType.ACK:
+                return
+            elif msg_type == MsgType.QUERY_RESULT:
+                self._handle_query_result(payload, writers, totals)
+            elif msg_type == MsgType.QUERY_END:
+                self._handle_query_end(payload, pending, totals)
+            else:
+                logging.warning("Unexpected msg_type=%s in orchestrator", msg_type)
+
+    def _consume_remaining(self, pending, writers, totals):
+        while pending and not self._aborted.is_set() and not self._closed:
+            try:
+                item = self._receiver_queue.get()
+            except queue.Empty:
+                continue
+            if item is None:
+                continue
+            msg_type, payload = item
+            if msg_type == MsgType.QUERY_RESULT:
+                self._handle_query_result(payload, writers, totals)
+            elif msg_type == MsgType.QUERY_END:
+                self._handle_query_end(payload, pending, totals)
+            elif msg_type == MsgType.ACK:
+                logging.warning("Unexpected ACK after all sends completed")
+            else:
+                logging.warning("Unexpected msg_type=%s in orchestrator", msg_type)
+
+    def _open_result_files(self, query_ids):
+        if not query_ids:
+            return {}, {}, {}
         os.makedirs(self._config.output_dir, exist_ok=True)
         files = {
             qid: open(
@@ -108,47 +127,107 @@ class Client:
                 "w",
                 newline="",
             )
-            for qid in pending
+            for qid in query_ids
         }
         writers = {qid: csv.writer(f) for qid, f in files.items()}
-        totals = {qid: 0 for qid in pending}
+        totals = {qid: 0 for qid in query_ids}
+        return writers, totals, files
+
+    def _handle_query_result(self, payload, writers, totals):
+        query_id, records = payload
+        for record in records:
+            writers[query_id].writerow(asdict(record).values())
+        totals[query_id] += len(records)
+        logging.info(
+            "Q%s: received %s record(s) (total so far: %s)",
+            query_id,
+            len(records),
+            totals[query_id],
+        )
+
+    def _handle_query_end(self, payload, pending, totals):
+        query_id = payload
+        pending.discard(query_id)
+        logging.info("Q%s ended (%s records total)", query_id, totals[query_id])
+
+    def _resolve_gateway(self):
+        logging.info("Connecting to proxy")
+        self._proxy_sock = SafeSocket.connect(
+            self._config.proxy_host, self._config.proxy_port
+        )
+
         try:
-            while pending:
-                msg_type, payload = external.recv_msg(self._sock)
-                if msg_type == MsgType.QUERY_RESULT:
-                    query_id, records = payload
-                    for record in records:
-                        writers[query_id].writerow(asdict(record).values())
-                    totals[query_id] += len(records)
-                    logging.info(
-                        "Q%s: received %s record(s) (total so far: %s)",
-                        query_id,
-                        len(records),
-                        totals[query_id],
-                    )
-                elif msg_type == MsgType.QUERY_END:
-                    query_id = payload
-                    pending.discard(query_id)
-                    logging.info(
-                        "Q%s ended (%s records total)",
-                        query_id,
-                        totals[query_id],
-                    )
-                else:
-                    logging.warning(
-                        "Unexpected msg_type=%s while waiting for results",
-                        msg_type,
-                    )
+            msg_type, payload = external.recv_msg(self._proxy_sock)
+            if msg_type != MsgType.REDIRECT:
+                raise RuntimeError(
+                    f"Expected REDIRECT from proxy, got msg_type={msg_type}"
+                )
+            host, port = payload
+            return host, port
         finally:
-            for f in files.values():
-                f.close()
-        logging.info("All expected query results received")
+            if self._proxy_sock is not None:
+                self._proxy_sock.close()
+                self._proxy_sock = None
+
+    def _receive_data(self):
+        while True:
+            try:
+                msg_type, payload = external.recv_msg(self._sock)
+            except Exception as e:
+                if self._closed:
+                    logging.info("Receiver stopped: socket closed")
+                else:
+                    logging.error("Error receiving data: %s", e)
+                    self._aborted.set()
+                self._receiver_queue.put(None)
+                self._sender_queue.put(None)
+                return
+            if msg_type in (MsgType.QUERY_RESULT, MsgType.ACK, MsgType.QUERY_END):
+                self._receiver_queue.put((msg_type, payload))
+            else:
+                logging.warning(
+                    "Unexpected msg_type=%s received from gateway",
+                    msg_type,
+                )
+
+    def _send_data(self):
+        try:
+            while True:
+                item = self._sender_queue.get()
+                if item is None:
+                    return
+                external.send_msg(self._sock, *item)
+        except Exception as e:
+            logging.error("Error sending data: %s", e)
+            self._disconnect()
+        finally:
+            self._receiver_queue.put(None)
+
+    def _read_batches(self, csv_path, data_class_type):
+        batch = []
+        with open(csv_path) as f:
+            next(f)
+            for line in f:
+                line = line.rstrip("\n")
+                if not line:
+                    continue
+                batch.append(data_class_type(raw=line))
+                if len(batch) >= self._config.batch_size:
+                    yield batch
+                    batch = []
+        if batch:
+            yield batch
 
     def _disconnect(self):
+        if self._proxy_sock is not None:
+            self._proxy_sock.close()
+            self._proxy_sock = None
         if self._sock is not None:
             self._sock.close()
             self._sock = None
         self._closed = True
+        self._sender_queue.put(None)
+        self._receiver_queue.put(None)
 
     def shutdown(self, signum=None, frame=None):
         logging.info("Shutdown requested")

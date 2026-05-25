@@ -19,6 +19,10 @@ class SafeSocket:
         return cls(sock)
 
     def close(self):
+        try:
+            self._sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
         self._sock.close()
 
     def send_all(self, data):
