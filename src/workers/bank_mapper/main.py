@@ -136,7 +136,7 @@ class BankMapper(SideInputStatelessCoordinatedWorker, SafeOutputCapable):
         for bank_max in bank_max_batch:
             bank_id = str(int(bank_max.from_bank))
             with self._bank_names_lock:
-                bank_name = self._bank_names[key][bank_id]
+                bank_name = self._bank_names.get(key, {}).get(bank_id, "Unknown")
             mapped_batch.append(
                 Q2Result(
                     bank_name=bank_name,
