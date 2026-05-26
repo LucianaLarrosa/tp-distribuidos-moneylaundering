@@ -32,10 +32,10 @@ COMPOSE_FILE ?= docker-compose.yaml
 DATASET_DIR       ?= ./data
 TRANSACTIONS_FILE ?= HI-Small_Trans.csv
 ACCOUNTS_FILE     ?= HI-Small_accounts.csv
+OUTPUT_DIR        ?= ./output
 
 EXPECTED_DIR        ?= ./expected_output
 PANDAS_EXPECTED_DIR ?= ./pandas_expected_output
-OUTPUT_DIR          ?= ./output
 
 SLEEP_TIME ?= 30
 
