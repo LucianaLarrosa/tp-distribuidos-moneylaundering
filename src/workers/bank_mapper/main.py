@@ -130,13 +130,13 @@ class BankMapper(SideInputStatelessCoordinatedWorker, SafeOutputCapable):
             for bank in batch:
                 self._store_bank_unlocked(key, bank, client_id, gateway_id)
 
-    def _map_and_emit(self, client_id, gateway_id, bank_max_batch):
+    def _map_and_emit(self, client_id, gateway_id, bank_max_batch, exchange):
         key = self._flow_key(client_id, gateway_id)
         mapped_batch = []
         for bank_max in bank_max_batch:
             bank_id = str(int(bank_max.from_bank))
             with self._bank_names_lock:
-                bank_name = self._bank_names[key][bank_id]
+                bank_name = self._bank_names.get(key, {}).get(bank_id, "Unknown")
             mapped_batch.append(
                 Q2Result(
                     bank_name=bank_name,
@@ -144,7 +144,7 @@ class BankMapper(SideInputStatelessCoordinatedWorker, SafeOutputCapable):
                     amount_paid=bank_max.amount,
                 )
             )
-        self._output_exchange.send(
+        exchange.send(
             internal.serialize_msg(
                 internal.MsgType.Q2_RESULT_BATCH,
                 client_id,
@@ -161,12 +161,15 @@ class BankMapper(SideInputStatelessCoordinatedWorker, SafeOutputCapable):
             if not self._side_input.is_ready(key):
                 self._spill.write(key, bank_max_batch)
                 return
-        self._map_and_emit(client_id, gateway_id, bank_max_batch)
+        self._map_and_emit(client_id, gateway_id, bank_max_batch, self._output_exchange)
 
     def _flush_data(self, client_id, gateway_id):
         key = self._flow_key(client_id, gateway_id)
         self._spill.drain(
-            key, lambda batch: self._map_and_emit(client_id, gateway_id, batch)
+            key,
+            lambda batch: self._map_and_emit(
+                client_id, gateway_id, batch, self._control_output_exchange
+            ),
         )
         with self._bank_names_lock:
             self._bank_names.pop(key, None)

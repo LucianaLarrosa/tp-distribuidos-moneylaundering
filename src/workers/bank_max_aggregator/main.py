@@ -62,10 +62,20 @@ class BankMaxAggregator(SentCoordinatedWorker):
     def _shard_routing_key(self, shard_id):
         return str(shard_id)
 
+    def __has_required_anomaly_fields(self, tx):
+        return (
+            tx.amount is not None
+            and tx.from_bank is not None
+            and tx.from_account is not None
+        )
+
     def _handle_data_message(self, _, client_id, gateway_id, transaction_batch):
         super()._handle_data_message(_, client_id, gateway_id, transaction_batch)
         flow_max = self._local_max.setdefault((client_id, gateway_id), {})
         for transaction in transaction_batch:
+            if not self.__has_required_anomaly_fields(transaction):
+                continue
+
             from_bank = str(int(transaction.from_bank))
             current = flow_max.get(from_bank)
             if (

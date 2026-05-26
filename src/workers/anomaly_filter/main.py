@@ -129,7 +129,7 @@ class AnomalyFilter(SideInputStatelessCoordinatedWorker, SafeOutputCapable):
     def _payment_format_key(self, payment_format):
         return payment_format.strip().lower()
 
-    def _filter_and_emit(self, client_id, gateway_id, transactions, avgs):
+    def _filter_and_emit(self, client_id, gateway_id, transactions, avgs, exchange):
         result_batch = []
         for tx in transactions:
             if self._is_anomalous(tx, avgs):
@@ -146,7 +146,7 @@ class AnomalyFilter(SideInputStatelessCoordinatedWorker, SafeOutputCapable):
             len(result_batch),
             list(avgs.keys()) if avgs else [],
         )
-        self._output_exchange.send(
+        exchange.send(
             internal.serialize_msg(
                 internal.MsgType.Q3_RESULT_BATCH,
                 client_id,
@@ -156,7 +156,16 @@ class AnomalyFilter(SideInputStatelessCoordinatedWorker, SafeOutputCapable):
             routing_key=gateway_id,
         )
 
+    def _has_required_anomaly_fields(self, tx):
+        return (
+            tx.payment_format is not None
+            and tx.amount is not None
+            and tx.from_bank is not None
+            and tx.from_account is not None
+        )
+
     def _handle_data_message(self, _, client_id, gateway_id, batch):
+        batch = [tx for tx in batch if self._has_required_anomaly_fields(tx)]
         key = self._flow_key(client_id, gateway_id)
         avgs = None
         with self._get_flow_lock(key):
@@ -166,7 +175,7 @@ class AnomalyFilter(SideInputStatelessCoordinatedWorker, SafeOutputCapable):
             else:
                 self._spill.write(key, batch)
                 return
-        self._filter_and_emit(client_id, gateway_id, batch, avgs)
+        self._filter_and_emit(client_id, gateway_id, batch, avgs, self._output_exchange)
 
     def _process_side_batch(self, client_id, gateway_id, batch):
         key = self._flow_key(client_id, gateway_id)
@@ -186,7 +195,10 @@ class AnomalyFilter(SideInputStatelessCoordinatedWorker, SafeOutputCapable):
         key = self._flow_key(client_id, gateway_id)
         avgs = self._avgs.get(key, {})
         self._spill.drain(
-            key, lambda batch: self._filter_and_emit(client_id, gateway_id, batch, avgs)
+            key,
+            lambda batch: self._filter_and_emit(
+                client_id, gateway_id, batch, avgs, self._control_output_exchange
+            ),
         )
         with self._get_flow_lock(key):
             self._drop_flow_state(key)
