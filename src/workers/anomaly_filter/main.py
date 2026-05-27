@@ -140,12 +140,6 @@ class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
                         amount_paid=tx.amount,
                     )
                 )
-        logging.info(
-            "filter_and_emit: in=%d anomalous=%d avgs_keys=%s",
-            len(transactions),
-            len(result_batch),
-            list(avgs.keys()) if avgs else [],
-        )
         exchange.send(
             internal.serialize_msg(
                 internal.MsgType.Q3_RESULT_BATCH,
