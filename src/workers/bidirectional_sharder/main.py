@@ -13,7 +13,7 @@ from common.worker.safe_output_capable import SafeOutputCapable
 from config import Config
 
 
-class BidirectionalSharder(SentCoordinatedWorker, SafeOutputCapable):
+class BidirectionalSharder(SafeOutputCapable, SentCoordinatedWorker):
     NUM_FIELDS_FOR_SHARDING = 2
 
     def __init__(self, config):

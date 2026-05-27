@@ -17,7 +17,7 @@ from common.worker.safe_output_capable import SafeOutputCapable
 from config import Config
 
 
-class BankMapper(SideInputStatelessCoordinatedWorker, SafeOutputCapable):
+class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
     def __init__(self, config):
         self.config = config
         super().__init__()

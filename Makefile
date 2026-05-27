@@ -37,6 +37,9 @@ OUTPUT_DIR        ?= ./output
 EXPECTED_DIR        ?= ./expected_output
 PANDAS_EXPECTED_DIR ?= ./pandas_expected_output
 
+# Adjust this to ensure the containers have:
+# 1. Enough time to fully start before the tests run
+# 2. Enough time to gracefully stop running processes when interrupted
 SLEEP_TIME ?= 30
 
 COMPOSE_ARGS = \

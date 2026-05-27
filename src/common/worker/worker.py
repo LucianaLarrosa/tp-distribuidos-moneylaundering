@@ -7,6 +7,7 @@ from common.protocol import internal
 
 class Worker(ABC):
     def __init__(self):
+        self._closed = False
         signal.signal(signal.SIGTERM, lambda *_: self.shutdown())
 
     @property
@@ -52,6 +53,9 @@ class Worker(ABC):
         self._input_middleware.start_consuming(self._handle_message)
 
     def shutdown(self):
+        if self._closed:
+            return
+        self._closed = True
         logging.info("Shutting down worker...")
         self._input_middleware.stop_consuming()
         self._input_middleware.close()

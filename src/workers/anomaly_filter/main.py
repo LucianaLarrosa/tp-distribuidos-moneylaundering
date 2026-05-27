@@ -20,7 +20,7 @@ from common.worker.safe_output_capable import SafeOutputCapable
 from config import Config
 
 
-class AnomalyFilter(SideInputStatelessCoordinatedWorker, SafeOutputCapable):
+class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
     def __init__(self, config):
         self.config = config
         super().__init__()
