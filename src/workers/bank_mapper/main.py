@@ -165,17 +165,18 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
 
     def _flush_data(self, client_id, gateway_id):
         key = self._flow_key(client_id, gateway_id)
-        self._spill.drain(
-            key,
-            lambda batch: self._map_and_emit(
-                client_id, gateway_id, batch, self._control_output_exchange
-            ),
-        )
-        with self._bank_names_lock:
-            self._bank_names.pop(key, None)
-        self._side_input.drop(key)
-        with self._flow_locks_guard:
-            self._flow_locks.pop(key, None)
+        with self._get_flow_lock(key):
+            self._spill.drain(
+                key,
+                lambda batch: self._map_and_emit(
+                    client_id, gateway_id, batch, self._control_output_exchange
+                ),
+            )
+            with self._bank_names_lock:
+                self._bank_names.pop(key, None)
+            self._side_input.drop(key)
+            with self._flow_locks_guard:
+                self._flow_locks.pop(key, None)
 
     def _send_final_eof(self, client_id, gateway_id, eof):
         self._control_output_exchange.send(

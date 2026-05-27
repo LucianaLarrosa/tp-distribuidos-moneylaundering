@@ -92,8 +92,8 @@ class RingCoordinatedWorker(Worker):
     def _get_total_count(self, key, count_dict, partial_dict, lock, current_total):
         with lock:
             count = count_dict.get(key, 0)
-        partial = partial_dict.get(key, 0)
-        partial_dict[key] = count
+            partial = partial_dict.get(key, 0)
+            partial_dict[key] = count
         return current_total + count - partial
 
     def _increment_processed_count(self, client_id, gateway_id):
