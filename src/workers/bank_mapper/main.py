@@ -161,7 +161,9 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
             if not self._side_input.is_ready(key):
                 self._spill.write(key, bank_max_batch)
                 return
-        self._map_and_emit(client_id, gateway_id, bank_max_batch, self._output_exchange)
+            self._map_and_emit(
+                client_id, gateway_id, bank_max_batch, self._output_exchange
+            )
 
     def _flush_data(self, client_id, gateway_id):
         key = self._flow_key(client_id, gateway_id)
