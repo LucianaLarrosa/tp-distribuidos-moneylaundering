@@ -72,6 +72,10 @@ def _rabbitmq():
         "build": "./src/rabbitmq",
         "container_name": "rabbitmq",
         "ports": ["5672:5672", "15672:15672"],
+        "environment": {
+            "RABBITMQ_DEFAULT_USER": "guest",
+            "RABBITMQ_DEFAULT_PASS": "guest",
+        },
         "healthcheck": {
             "test": ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"],
             "interval": "5s",
