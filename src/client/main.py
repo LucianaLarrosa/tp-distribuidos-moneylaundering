@@ -132,12 +132,6 @@ class Client:
         for record in records:
             writers[query_id].writerow(asdict(record).values())
         totals[query_id] += len(records)
-        logging.info(
-            "Q%s: received %s record(s) (total so far: %s)",
-            query_id,
-            len(records),
-            totals[query_id],
-        )
 
     def _handle_query_end(self, payload, pending, totals):
         query_id = payload
