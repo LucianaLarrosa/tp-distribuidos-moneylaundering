@@ -46,6 +46,7 @@ class Client:
                 self._sender_thread.join()
 
     def _orchestrate(self):
+        logging.info("Starting data transmission")
         pending = set(self._config.expected_query_ids)
         writers, totals, files = self._open_result_files(pending)
         try:
