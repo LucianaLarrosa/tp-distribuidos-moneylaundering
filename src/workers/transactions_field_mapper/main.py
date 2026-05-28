@@ -13,9 +13,6 @@ from config import Config
 
 class TransactionsFieldMapper(StatelessWorker):
     def __init__(self, config):
-        """
-        Initialize the TransactionsFieldMapper worker with the given configuration.
-        """
         super().__init__()
         self.config = config
 
@@ -33,22 +30,13 @@ class TransactionsFieldMapper(StatelessWorker):
 
     @property
     def _input_middleware(self):
-        """
-        Return the input exchange to consume raw transactions from the gateway.
-        """
         return self._input_exchange
 
     @property
     def _output_middleware(self):
-        """
-        Return the output topic exchange to forward filtered transactions downstream.
-        """
         return self._output_exchange
 
     def _send_final_eof(self, client_id, gateway_id, eof):
-        """
-        Send the EOF to both output routing keys so all downstream consumers see it.
-        """
         msg = internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof)
         self._output_exchange.send(msg, routing_key=self.config.output_routing_key_eof)
 
@@ -84,9 +72,6 @@ class TransactionsFieldMapper(StatelessWorker):
         )
 
     def _parse(self, raw):
-        """
-        Parse a CSV line into a Transaction dataclass.
-        """
         fields = raw.split(",")
         return Transaction(
             timestamp=datetime.strptime(fields[0], "%Y/%m/%d %H:%M"),

@@ -93,7 +93,11 @@ El diagrama muestra el único actor del sistema, el **Cliente**, y su interacci�
 
 #### DAG
 
-A continuación se presenta el DAG del sistema, que representa el flujo general de procesamiento de los datos. Desde `Data source` las transacciones se distribuyen por dos ramas principales: la rama `usd`, que filtra por moneda de origen, y la rama `*`, que recibe todas las transacciones independientemente de su moneda. Los datos van pasando por distintos nodos de procesamiento, filtrado, agregación, mapeo, entre otros; cuyos colores en el diagrama indican el tipo de operación que realizan. Cabe destacar que algunos nodos son compartidos entre múltiples queries, como el `DateFilter`, utilizado por Q3, Q4 y Q5. Finalmente, los resultados de cada consulta llegan a su reducer correspondiente.
+A continuación se presenta el DAG del sistema, que representa el flujo general de procesamiento de los datos. Desde `Data source` las transacciones y cuentas pasan primero por los workers `Transactions field mapper` y `Accounts field mapper` respectivamente, para normalizar los campos relevantes antes de distribuirlos al resto del sistema. 
+
+A partir de ahí, las transacciones se distribuyen por dos ramas principales: la rama `usd`, que filtra por moneda de origen, y la rama `*`, que recibe todas las transacciones independientemente de su moneda. Las cuentas, en cambio, se envían directamente al `Bank Mapper`, que las utiliza para obtener el nombre del banco en **Q2**.
+
+Los datos van pasando por distintos nodos de procesamiento, filtrado, agregación, mapeo, entre otros; cuyos colores en el diagrama indican el tipo de operación que realizan. Cabe destacar que algunos nodos son compartidos entre múltiples queries, como el `Date Filter`, utilizado por **Q3**, **Q4** y **Q5**. En el caso particular de **Q5**, ya no se separan las transacciones en ramas según moneda: todas pasan por el `Currency Mapper`, que se encarga de convertir los montos a USD antes de continuar con el procesamiento. Finalmente, los resultados de cada consulta son enviados al `Gateway` correspondiente.
 
 ![DAG](diagramas/dag.png)
 
@@ -137,11 +141,13 @@ El paquete **worker** representa de manera unificada a todos los nodos de proces
 
 #### Diagrama de Robustez
 
-El diagrama que se encuentra a continuación muestra los componentes principales del sistema y sus interacciones. El **Client** envía las transacciones al sistema y recibe los resultados al finalizar el procesamiento. Las transacciones ingresan a través del **Load Balancer**, que las redirige a uno de los nodos **Gateway** disponibles, siendo estos los encargados de distribuirlas hacia el procesamiento de cada query.
+El diagrama que se encuentra a continuación muestra los componentes principales del sistema y sus interacciones. El **Cliente** se conecta primero al **Proxy**, que se encarga de indicarle a qué **Gateway** debe conectarse, ya que existen múltiples instancias disponibles. El **Proxy** cuenta con un único nodo que aplica *Round-Robin* para distribuir equitativamente los clientes entre los gateways.
 
-Para balancear la carga entre múltiples instancias del **Gateway** se planea emplear **HAProxy** como implementación del **Load Balancer**. Este componente cuenta con un único nodo, lo que introduce un punto único de falla. Si bien esto representa una limitación en términos de disponibilidad, se optó por esta simplicidad dado el alcance del sistema. 
+Una vez que el **Cliente** obtiene el **Gateway** asignado, se conecta directamente a él y envía primero las **transacciones** en batches y luego las **cuentas**, también en batches. El **Gateway** distribuye estos datos a través de un exchange hacia los workers `Transactions Field Mapper` y `Accounts Field Mapper`, encargados de normalizar los datos antes de enviarlos al resto del sistema.
 
-Los nodos del sistema (filtros, aggregators, mappers, entre otros) se comunican entre sí a través de **exchanges y queues**, donde los exchanges permiten enrutar cada mensaje al nodo correspondiente según corresponda. Un caso particular es el **AnomalyFilter**, que requiere almacenamiento temporario en disco para retener las transacciones del período posterior mientras se calcula el promedio del período base, necesario para la Query 3. Finalmente, los **reducers** consolidan los resultados de cada query y los publican en el exchange para que lleguen al Gateway correspondiente.
+Los nodos del sistema (filtros, aggregators, mappers, entre otros) se comunican entre sí a través de **exchanges y queues**, donde los exchanges permiten enrutar cada mensaje al nodo correspondiente según corresponda. Algunos nodos requieren almacenamiento temporario en disco: el `AnomalyFilter`, para retener las transacciones del período posterior mientras se calcula el promedio del período base necesario para la Query 3; y el `BankMapper`, que también persiste las transacciones mientras espera la llegada de todas las cuentas para poder comenzar el mapeo de los nombres.
+
+A diferencia de la versión anterior, el sistema ya no cuenta con reducers como nodo final: el último worker de cada query envía los resultados directamente al **Gateway** a medida que se van generando, de forma continua, en lugar de esperar a tener el resultado consolidado. El **Gateway**, a su vez, los reenvía al **Cliente**.
 
 ![Diagrama de robustez](diagramas/diagrama_robustez.png)
 
