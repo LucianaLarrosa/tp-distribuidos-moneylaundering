@@ -163,7 +163,7 @@ Los nodos de procesamiento se agrupan por rol funcional (**Filter Node**, **Shar
 
 ![Diagrama de despliegue](diagramas/diagrama_despliegue.png)
 
-### Workers y Manejo del End Of File
+### Workers y manejo del end of file
 
 Ante un EOF, un worker puede clasificarse en una de tres categorías principales según su comportamiento:
 
@@ -173,7 +173,7 @@ Ante un EOF, un worker puede clasificarse en una de tres categorías principales
     - `SentCoordinatedWorker`: La cantidad de mensajes que cada nodo envía al siguiente stage varía según si realiza batching o sharding, ya que ambos alteran la cantidad de mensajes en circulación. El EOF final debe reflejar el total real enviado, así que cada nodo acumula su `sent_count` adjuntándolo al `RING_EOF`.
     ![Comportamiento del RingCoordinatedWorker](diagramas/diagrama_ring_eof.png)
 
-Como caso especial dentro de los workers coordinados en anillo existe `SideInputStatelessCoordinatedWorker`, que incorpora una segunda fuente de datos (una "tabla de lookup") que debe estar completamente cargada antes de poder procesar el stream principal. Hasta que el side input está listo, cualquier EOF que llegue, tanto del stream principal como del control ring, se agrega en `deferred_*_eofs` y se procesa en el momento en que `_mark_side_input_ready` los libera.
+Como caso especial dentro de los workers coordinados en anillo existe `SideInputStatelessCoordinatedWorker`, que incorpora una segunda fuente de datos que debe estar completamente cargada antes de poder procesar el stream principal.
 
 En el siguiente gráfico se ilustran los tipos de workers presentes en el pipeline:
 
@@ -203,7 +203,7 @@ Para el cálculo se consideraron únicamente los mensajes del protocolo interno,
 
 La metadata fija de cada mensaje ocupa **129 B**, dejando **130943 B** disponibles para el payload:
 
-```json
+```
 {"type":<int>,"client_id":"<uuid4>","gateway_id":"<uuid4>","payload":[...]}
 ```
 
