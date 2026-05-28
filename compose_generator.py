@@ -40,9 +40,6 @@ QUERY_5_ID = 5
 
 NODE_PREFIX = "node."
 MIN_REQUIRED_ACCOUNTS = "5"
-BATCH_SIZE = "1000"
-TRANSACTIONS_BATCH_SIZE = "424"
-ACCOUNTS_BATCH_SIZE = "840"
 TRANSACTION_DATE_FORMAT = "%Y/%m/%d %H:%M"
 DATE_FROM_1 = "2022/09/01 00:00"
 DATE_TO_1 = "2022/09/05 23:59"
@@ -57,6 +54,16 @@ ROUTING_KEY_PERIOD_2 = "period2"
 ROUTING_KEY_TRANSACTION = "transaction"
 ROUTING_KEY_ACCOUNT = "account"
 
+# --- Batch Size ---
+
+TRANSACTIONS_BATCH_SIZE = "592"
+ACCOUNTS_BATCH_SIZE = "1234"
+BANK_MAX_PARTIAL_BATCH_SIZE = "1505"
+PAYMENT_FORMAT_PARTIAL_BATCH_SIZE = "1271"
+ACCOUNT_EDGE_BATCH_SIZE = "808"
+PATH_BATCH_SIZE = "671"
+Q4_RESULT_BATCH_SIZE = "2112"
+
 # --- Containers ---
 
 
@@ -65,6 +72,10 @@ def _rabbitmq():
         "build": "./src/rabbitmq",
         "container_name": "rabbitmq",
         "ports": ["5672:5672", "15672:15672"],
+        "environment": {
+            "RABBITMQ_DEFAULT_USER": "guest",
+            "RABBITMQ_DEFAULT_PASS": "guest",
+        },
         "healthcheck": {
             "test": ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"],
             "interval": "5s",
@@ -386,7 +397,7 @@ def _bank_max_aggregator(i, bank_max_aggregators, bank_max_reducers):
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
             "RING_SIZE": str(bank_max_aggregators),
-            "BATCH_SIZE": "5",
+            "BATCH_SIZE": BANK_MAX_PARTIAL_BATCH_SIZE,
             "NUM_SHARDS": str(bank_max_reducers),
         },
     }
@@ -417,7 +428,7 @@ def _bank_max_reducer(i, bank_max_reducers, bank_mappers):
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
             "RING_SIZE": str(bank_max_reducers),
-            "BATCH_SIZE": "20",
+            "BATCH_SIZE": BANK_MAX_PARTIAL_BATCH_SIZE,
         },
     }
 
@@ -490,7 +501,7 @@ def _payment_format_aggregator(i, payment_format_aggregators, payment_format_red
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
             "RING_SIZE": str(payment_format_aggregators),
-            "BATCH_SIZE": "20",
+            "BATCH_SIZE": PAYMENT_FORMAT_PARTIAL_BATCH_SIZE,
             "NUM_SHARDS": str(payment_format_reducers),
         },
     }
@@ -605,7 +616,7 @@ def _account_frequency_filter(i, account_frequency_filters, path_mappers):
             "OUTPUT_NODE_COUNT": str(path_mappers),
             "OUTPUT_NODE_PREFIX": NODE_PREFIX,
             "MIN_REQUIRED_ACCOUNTS": MIN_REQUIRED_ACCOUNTS,
-            "BATCH_SIZE": BATCH_SIZE,
+            "BATCH_SIZE": ACCOUNT_EDGE_BATCH_SIZE,
         },
     }
 
@@ -634,7 +645,7 @@ def _path_mapper(i, path_mappers, path_frequency_filters):
             "RING_SIZE": str(path_mappers),
             "OUTPUT_NODE_COUNT": str(path_frequency_filters),
             "OUTPUT_NODE_PREFIX": NODE_PREFIX,
-            "BATCH_SIZE": BATCH_SIZE,
+            "BATCH_SIZE": PATH_BATCH_SIZE,
         },
     }
 
@@ -657,7 +668,7 @@ def _path_frequency_filter(i, path_frequency_filters):
             "NODE_ID": str(i),
             "RING_SIZE": str(path_frequency_filters),
             "MIN_REQUIRED_ACCOUNTS": MIN_REQUIRED_ACCOUNTS,
-            "BATCH_SIZE": BATCH_SIZE,
+            "BATCH_SIZE": Q4_RESULT_BATCH_SIZE,
         },
     }
 

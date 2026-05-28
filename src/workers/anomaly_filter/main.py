@@ -140,12 +140,6 @@ class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
                         amount_paid=tx.amount,
                     )
                 )
-        logging.info(
-            "filter_and_emit: in=%d anomalous=%d avgs_keys=%s",
-            len(transactions),
-            len(result_batch),
-            list(avgs.keys()) if avgs else [],
-        )
         exchange.send(
             internal.serialize_msg(
                 internal.MsgType.Q3_RESULT_BATCH,
@@ -189,18 +183,19 @@ class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
     def _drop_flow_state(self, key):
         self._avgs.pop(key, None)
         self._side_input.drop(key)
-        self._flow_locks.pop(key, None)
+        with self._flow_locks_guard:
+            self._flow_locks.pop(key, None)
 
     def _flush_data(self, client_id, gateway_id):
         key = self._flow_key(client_id, gateway_id)
-        avgs = self._avgs.get(key, {})
-        self._spill.drain(
-            key,
-            lambda batch: self._filter_and_emit(
-                client_id, gateway_id, batch, avgs, self._control_output_exchange
-            ),
-        )
         with self._get_flow_lock(key):
+            avgs = self._avgs.get(key, {})
+            self._spill.drain(
+                key,
+                lambda batch: self._filter_and_emit(
+                    client_id, gateway_id, batch, avgs, self._control_output_exchange
+                ),
+            )
             self._drop_flow_state(key)
 
     def _send_final_eof(self, client_id, gateway_id, eof):
