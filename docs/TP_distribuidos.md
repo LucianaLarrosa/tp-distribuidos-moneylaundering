@@ -135,6 +135,8 @@ El diagrama de paquetes muestra la organización modular de los componentes del 
 
 El paquete **worker** representa de manera unificada a todos los nodos de procesamiento del pipeline (filtros, sharders, mappers, aggregators y reducers). Aunque cada uno tiene su lógica propia, comparten una misma estructura base (entrada desde el broker, procesamiento, salida al broker) por lo que se modelan como un único paquete para mantener el diagrama legible.
 
+Esa estructura compartida vive en el paquete **base worker**, que agrupa las abstracciones comunes (manejo de EOFs, coordinación en anillo, ciclo de vida, etc.) sobre las que se construye cada worker concreto.
+
 ![Diagrama de paquetes](diagramas/diagrama_paquetes.png)
 
 ### Vista Física
@@ -178,6 +180,20 @@ En el siguiente gráfico se ilustran los tipos de workers presentes en el pipeli
 ![Workers según el manejo del EOF](diagramas/diagrama_workers_eof.png)
 
 El color de cada nodo indica su categoría: rojo para `StatelessWorker`, amarillo para `StatefulCoordinatedWorker`, azul para `SentCoordinatedWorker` y verde para `SideInputStatelessCoordinatedWorker`.
+
+### Workers y el manejo de múltiples entradas
+
+Dentro de las queries 2 y 3, tenemos dos workers que van a recibir información de dos workers al mismo tiempo. De parte de la query 2, el BankMapper va a recibir información para mapear el nombre del banco a partir del id y también va a recibir los máximos por cuenta de cada banco. Por parte de la query 3, el AnomalyFilter va a recibir por un lado el promedio de transacciones de cada medio de pago y también las transacciones a filtrar.
+
+Ambos workers están implementados sobre `SideInputStatelessCoordinatedWorker` (los nodos verdes del diagrama anterior), la variante de `RingCoordinatedWorker` mencionada arriba que suma el manejo de una segunda entrada al protocolo de anillo.
+
+Las soluciones provistas para manejar la conexión sirven para una entrada, no para dos, por lo que se le agregó un comportamiento extra a los workers previamente mencionados. Se implementó el `SideInputTracker`, el cual va a hacer un seguimiento de la segunda entrada, en nuestros casos, los promedios y la información de los bancos. Esta información se va a recibir mediante otros exchanges y cada réplica va a recibir su propio EOF, a diferencia del ring, donde uno lo recibe y se comunican entre sí.
+
+Es importante aclarar que el worker necesita de esta segunda entrada para poder procesar lo que recibe, por lo que si recibe entradas para procesar y no está la información completa, se guardarán en disco para ser procesadas posteriormente. Si la información ya está, se procesarán normalmente.
+
+El spill (`BatchSpill`) almacena los batches por cliente, batch por batch, de modo de no perder el conteo que el ring necesita. Al hacer `_flush_data` se drena el archivo y se emiten los resultados pendientes por el exchange.
+
+Como el worker necesita la segunda entrada para procesar, el comienzo de la coordinación del ring también se posterga: tanto el `EOF` del flujo principal como cualquier `RING_EOF` que llegue antes del cierre del side input quedan diferidos hasta que `SideInputTracker` marca el flujo como `ready`.
 
 ### Batches y Batch Size
 
