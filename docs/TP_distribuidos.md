@@ -1,4 +1,4 @@
-# TP Diseño: Money Laundering Analysis
+# TP Escalabilidad: Money Laundering Analysis
 
 ## Introducción
 
@@ -101,7 +101,7 @@ A continuación se presenta el DAG del sistema, que representa el flujo general 
 
 #### Diagramas de Actividades
 
-A continuación se presentan los diagramas de actividades que modelan el flujo de ejecución para cada una de las cinco consultas. Estos esquemas ilustran de manera secuencial cómo transitan los mensajes a través de la topología del sistema distribuido. En ellos se detallan las distintas etapas del pipeline de procesamiento de datos, mostrando la interacción entre los nodos encargados de filtrar, rutear, transformar y agregar la información hasta llegar a la consolidación y envío del resultado final.
+A continuación se presentan los diagramas de actividad correspondientes a cada una de las cinco consultas. Cada diagrama modela el flujo de procesamiento y consolidación de resultados para su consulta, ilustrando cómo transitan los datos a través de la topología del sistema distribuido, pasando por distintas etapas de filtrado, ruteo, transformación y agregación, hasta la consolidación y el envío de los resultados finales.
 
 ![Diagrama de Actividades_Q1](diagramas/diagrama_actividades_q1.png)
 
@@ -113,15 +113,13 @@ A continuación se presentan los diagramas de actividades que modelan el flujo d
 
 ![Diagrama de Actividades_Q5](diagramas/diagrama_actividades_q5.png)
 
-### Diagrama de Flujo de Finalización (EOF/FIN)
-
-El siguiente diagrama ilustra el protocolo de sincronización y cierre de procesamiento dentro del sistema distribuido. Detalla la lógica general que ejecuta cualquier nodo de la topología al recibir un mensaje que indica el fin de un flujo de datos (EOF/FIN). El esquema diferencia el comportamiento entre los nodos que mantienen estado interno (*stateful*) y aquellos sin estado (*stateless*). De esta manera, se visualiza cómo se coordinan las barreras de sincronización establecidas a partir de la contabilización exacta de los mensajes procesados y esperados para garantizar la correcta consolidación del resultado, lo que permite realizar el flush de los datos acumulados de forma segura y propagar en cascada la señal de finalización a lo largo del pipeline.
-
-![Diagrama de Flujo de Finalización](diagramas/diagrama_flujo.png)
-
 ### Diagrama de Secuencia
 
-El siguiente diagrama de secuencia expone la interacción general entre el cliente y los componentes de entrada y procesamiento del sistema distribuido. Se detalla el flujo de ingesta de datos, donde las transacciones son enviadas en lotes (*batches*) hacia un balanceador de carga que las rutea al `Gateway` correspondiente. Asimismo, ilustra la delegación de las transacciones individuales hacia los `Workers` para su procesamiento parcial, culminando con la inyección de la señal de fin de transmisión (EOF). Esta señal marca el inicio de la etapa de procesamiento final y consolidación, permitiendo el retorno de los resultados calculados a través de la topología de vuelta hacia el cliente.
+El siguiente diagrama de secuencia expone la interacción general entre el cliente y los componentes de entrada y procesamiento del sistema distribuido. Se detalla el flujo de conexión inicial, donde el cliente envía una solicitud al **Proxy**, que se encarga de determinar el `Gateway` correspondiente y redirigir al cliente hacia él.
+
+Una vez establecida la conexión con el `Gateway`, los datos son enviados en *batches*: primero las transacciones, confirmadas con un `ack` y delegadas internamente hacia los `WorkersByQuery`, hasta señalizar el fin de su transmisión. Luego, de forma análoga, se envían los batches de cuentas, también delegados a los workers, finalizando con su señal de fin de transmisión correspondiente.
+
+Una vez recibidas ambas señales, el sistema completa la etapa de procesamiento y consolidación, retornando los resultados calculados seguidos de la señal de cierre, que se propagan desde los `WorkersByQuery` a través del `Gateway` de vuelta hacia el cliente.
 
 ![Diagrama de Secuencia](diagramas/diagrama_secuencia.png)
 
@@ -157,7 +155,50 @@ Los nodos de procesamiento se agrupan por rol funcional (**Filter Node**, **Shar
 
 ![Diagrama de despliegue](diagramas/diagrama_despliegue.png)
 
-## División tentativa de tareas
+### Workers y Manejo del End Of File
+
+Ante un EOF, un worker puede clasificarse en una de tres categorías principales según su comportamiento:
+
+- `StatelessWorker` es trivial, al recibir un EOF simplemente lo reenvía al siguiente stage sin modificarlo. No necesita coordinarse con nadie porque su semántica de procesamiento es 1-a-1.
+- `RingCoordinatedWorker` es el núcleo del sistema distribuido. Cuando llega un EOF, el nodo no lo reenvía directamente sino que lanza un mensaje `RING_EOF` que circula por un anillo lógico de nodos. Cada nodo acumula su `processed_count` al total del `RING_EOF` antes de reenviarlo, el primero en descubrir que el acumulado alcanza el `expected_count` del EOF original se auto-designa coordinador. A partir de ahí, el `RING_EOF` da una vuelta más para que todos los nodos ejecuten `_flush_data()` (vaciar buffers, emitir resultados pendientes). Cuando el mensaje vuelve al coordinador, éste emite el EOF final al siguiente stage. Las subclases concretas difieren únicamente en cómo calculan el `expected_count` del EOF final:
+    - `StatefulCoordinatedWorker`: Cada nodo produce exactamente un resultado por cliente, por lo que el EOF final siempre tiene `count = ring_size`. No necesita trackear cuántos mensajes envió.
+    - `SentCoordinatedWorker`: La cantidad de mensajes que cada nodo envía al siguiente stage varía según si realiza batching o sharding, ya que ambos alteran la cantidad de mensajes en circulación. El EOF final debe reflejar el total real enviado, así que cada nodo acumula su `sent_count` adjuntándolo al `RING_EOF`.
+    ![Comportamiento del RingCoordinatedWorker](diagramas/diagrama_ring_eof.png)
+
+Como caso especial dentro de los workers coordinados en anillo existe `SideInputStatelessCoordinatedWorker`, que incorpora una segunda fuente de datos (una "tabla de lookup") que debe estar completamente cargada antes de poder procesar el stream principal. Hasta que el side input está listo, cualquier EOF que llegue, tanto del stream principal como del control ring, se agrega en `deferred_*_eofs` y se procesa en el momento en que `_mark_side_input_ready` los libera.
+
+En el siguiente gráfico se ilustran los tipos de workers presentes en el pipeline:
+
+![Workers según el manejo del EOF](diagramas/diagrama_workers_eof.png)
+
+El color de cada nodo indica su categoría: rojo para `StatelessWorker`, amarillo para `StatefulCoordinatedWorker`, azul para `SentCoordinatedWorker` y verde para `SideInputStatelessCoordinatedWorker`.
+
+### Batches y Batch Size
+
+A lo largo de todo el pipeline, la información se transporta mediante batches. Estos pueden variar en tamaño a lo largo del mismo, en especial al encontrarse con workers que agregan información, ya que no pueden despacharla de una vez. Es por esto que se analiza el tamaño de cada batch en función de la información que contiene, respetando el tamaño máximo de frame de RabbitMQ, **128 kB**.
+
+Para el cálculo se consideraron únicamente los mensajes del protocolo interno, ya que al viajar serializados en JSON tienen mayor overhead que otros formatos. Los máximos de chars por campo fueron obtenidos con `df[col].astype(str).str.len().max()`, representando el peor caso real del dataset.
+
+La metadata fija de cada mensaje ocupa **129 B**, dejando **130943 B** disponibles para el payload:
+
+```json
+{"type":<int>,"client_id":"<uuid4>","gateway_id":"<uuid4>","payload":[...]}
+```
+
+La cantidad de items por batch se calcula como $\left\lfloor \frac{\texttt{bytes disponibles}}{\texttt{bytes por item}} \right\rfloor$, ajustando por los corchetes del array y la coma del último item.
+
+| Dataclass | B/item | Items en 128 kB |
+|---|---|---|
+| `RawTransaction` | 138 | **948** |
+| `Transaction` | 221 | **592** |
+| `RawAccount` | 106 | **1234** |
+| `BankMaxPartial` | 87 | **1505** |
+| `PaymentFormatPartial` | 103 | **1271** |
+| `AccountEdge` | 162 | **808** |
+| `Path` | 195 | **671** |
+| `Q4Result` | 62 | **2112** |
+
+## División de tareas
 
 | Tarea | Integrante |
 |---|---|
