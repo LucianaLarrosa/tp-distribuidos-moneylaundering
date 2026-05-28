@@ -95,7 +95,7 @@ El diagrama muestra el único actor del sistema, el **Cliente**, y su interacci�
 
 A continuación se presenta el DAG del sistema, que representa el flujo general de procesamiento de los datos. Desde `Data source` las transacciones y cuentas pasan primero por los workers `Transactions field mapper` y `Accounts field mapper` respectivamente, para normalizar los campos relevantes antes de distribuirlos al resto del sistema. 
 
-A partir de ahí, las transacciones se distribuyen por dos ramas principales: la rama `usd`, que filtra por moneda de origen, y la rama `*`, que recibe todas las transacciones independientemente de su moneda. Las cuentas, en cambio, se envían directamente al `Bank Mapper`, que las utiliza para obtener el nombre del banco en **Q2**.
+A partir de ahí, las transacciones se distribuyen por dos ramas principales: la rama `usd`, que filtra por moneda de origen, y la rama `all`, que recibe todas las transacciones independientemente de su moneda. Las cuentas, en cambio, se envían directamente al `Bank Mapper`, que las utiliza para obtener el nombre del banco en **Q2**.
 
 Los datos van pasando por distintos nodos de procesamiento, filtrado, agregación, mapeo, entre otros; cuyos colores en el diagrama indican el tipo de operación que realizan. Cabe destacar que algunos nodos son compartidos entre múltiples queries, como el `Date Filter`, utilizado por **Q3**, **Q4** y **Q5**. En el caso particular de **Q5**, ya no se separan las transacciones en ramas según moneda: todas pasan por el `Currency Mapper`, que se encarga de convertir los montos a USD antes de continuar con el procesamiento. Finalmente, los resultados de cada consulta son enviados al `Gateway` correspondiente.
 
