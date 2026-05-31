@@ -80,6 +80,8 @@ class PathMapper(SentCoordinatedWorker):
                 continue
             for from_bank, from_account in in_accounts:
                 for to_bank, to_account in out_accounts:
+                    if (from_bank, from_account) == (to_bank, to_account):
+                        continue
                     paths_by_routing_key.setdefault(
                         self._shard_key(from_bank, from_account, to_bank, to_account),
                         [],

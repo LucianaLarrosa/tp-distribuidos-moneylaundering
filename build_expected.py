@@ -297,6 +297,7 @@ def _build_query_4():
         from_account = (transaction[FROM_BANK_INDEX], transaction[FROM_ACCOUNT_INDEX])
         if (
             from_account in intermediate_to_scatter
+            and transaction[PAYMENT_CURRENCY_INDEX] == _USD_CURRENCY
             and _PERIOD_1_START_DATE
             <= _parse_date(transaction[TIMESTAMP_INDEX])
             <= _PERIOD_1_END_DATE
@@ -311,7 +312,10 @@ def _build_query_4():
             gather_destination_account,
             intermediate_accounts,
         ) in gather_destination_map.items():
-            if len(intermediate_accounts) >= _MIN_REQUIRED_ACCOUNTS:
+            if (
+                len(intermediate_accounts) >= _MIN_REQUIRED_ACCOUNTS
+                and scatter_source_account != gather_destination_account
+            ):
                 result.append((scatter_source_account, gather_destination_account))
 
     query_4_output_path = os.path.join(EXPECTED_DIR, "q4_expected.csv")
