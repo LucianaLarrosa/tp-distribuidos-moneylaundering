@@ -19,7 +19,7 @@ def _handle_client_process(sock, client_id, gateway_id, config, results_queue):
         exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             config.rabbitmq_host,
             config.raw_data_exchange,
-            [config.transaction_routing_key, config.account_routing_key],
+            [],
         )
     except Exception:
         logging.exception("[%s] failed to connect to RabbitMQ exchange", client_id)

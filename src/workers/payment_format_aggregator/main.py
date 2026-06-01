@@ -26,7 +26,7 @@ class PaymentFormatAggregator(SentCoordinatedWorker):
         self._output_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
             exchange_name=config.output_exchange,
-            routing_keys=[self._shard_routing_key(s) for s in range(config.num_shards)],
+            routing_keys=[],
         )
 
     @property

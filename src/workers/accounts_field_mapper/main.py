@@ -24,9 +24,7 @@ class AccountsFieldMapper(StatelessWorker):
         self._output_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
             exchange_name=config.output_exchange,
-            routing_keys=[
-                self._output_prefix_routing_key(rk) for rk in config.output_routing_keys
-            ],
+            routing_keys=[],
         )
 
     @property
@@ -38,9 +36,11 @@ class AccountsFieldMapper(StatelessWorker):
         return self._output_exchange
 
     def _send_final_eof(self, client_id, gateway_id, eof):
-        self._output_exchange.send(
-            internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof)
-        )
+        for rk in self.config.output_routing_keys:
+            self._output_exchange.send(
+                internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof),
+                routing_key=self._output_prefix_routing_key(rk),
+            )
 
     def _shard_key(self, bank):
         node_id = (
@@ -51,11 +51,14 @@ class AccountsFieldMapper(StatelessWorker):
 
     def _handle_data_message(self, _, client_id, gateway_id, payload):
         """
-        Parse each raw CSV line into a Bank and sent the batch to the corresponding shard.
+        Parse each raw CSV line into a Bank and send one batch to every shard.
         """
         banks = [self._parse(raw_acc.raw) for raw_acc in payload]
 
-        sharded_banks = {self._shard_key(bank.bank_id): [] for bank in banks}
+        sharded_banks = {
+            self._output_prefix_routing_key(node_id): []
+            for node_id in range(self.config.output_node_count)
+        }
         for bank in banks:
             routing_key = self._shard_key(bank.bank_id)
             sharded_banks[routing_key].append(bank)

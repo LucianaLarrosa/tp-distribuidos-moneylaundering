@@ -24,7 +24,7 @@ class BankMaxReducer(SentCoordinatedWorker):
         self._output_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
             exchange_name=config.output_exchange,
-            routing_keys=["1"],
+            routing_keys=[],
         )
 
     @property
@@ -105,7 +105,8 @@ class BankMaxReducer(SentCoordinatedWorker):
 
     def _send_final_eof(self, client_id, gateway_id, eof):
         self._output_exchange.send(
-            internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof)
+            internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof),
+            routing_key="1"
         )
 
 def main():
