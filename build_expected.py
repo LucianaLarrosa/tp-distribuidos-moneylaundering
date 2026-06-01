@@ -306,7 +306,7 @@ def _build_query_4():
             for scatter_source_account in intermediate_to_scatter[from_account]:
                 scatter_gather_map[scatter_source_account][to_account].add(from_account)
 
-    result = []
+    unique_accounts = set()
     for scatter_source_account, gather_destination_map in scatter_gather_map.items():
         for (
             gather_destination_account,
@@ -316,17 +316,14 @@ def _build_query_4():
                 len(intermediate_accounts) >= _MIN_REQUIRED_ACCOUNTS
                 and scatter_source_account != gather_destination_account
             ):
-                result.append((scatter_source_account, gather_destination_account))
+                unique_accounts.add(scatter_source_account)
+                unique_accounts.add(gather_destination_account)
 
     query_4_output_path = os.path.join(EXPECTED_DIR, "q4_expected.csv")
     with open(query_4_output_path, "w", newline="", encoding="utf-8") as output_file:
         csv_writer = csv.writer(output_file)
-        for (source_bank, source_account), (
-            destination_bank,
-            destination_account,
-        ) in result:
-            csv_writer.writerow([source_bank, source_account])
-            csv_writer.writerow([destination_bank, destination_account])
+        for bank, account in unique_accounts:
+            csv_writer.writerow([bank, account])
 
 
 def _build_query_5():

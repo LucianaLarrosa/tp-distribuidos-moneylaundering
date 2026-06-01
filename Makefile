@@ -26,6 +26,7 @@ BIDIRECTIONAL_SHARDERS     ?= $(REPLICAS)
 ACCOUNT_FREQUENCY_FILTERS  ?= $(REPLICAS)
 PATH_MAPPERS               ?= $(REPLICAS)
 PATH_FREQUENCY_FILTERS     ?= $(REPLICAS)
+DUPLICATE_ACCOUNT_FILTERS  ?= $(REPLICAS)
 
 COMPOSE_FILE ?= docker-compose.yaml
 
@@ -63,6 +64,7 @@ COMPOSE_ARGS = \
 	--account-frequency-filters   $(ACCOUNT_FREQUENCY_FILTERS) \
 	--path-mappers                $(PATH_MAPPERS) \
 	--path-frequency-filters      $(PATH_FREQUENCY_FILTERS) \
+	--duplicate-account-filters   $(DUPLICATE_ACCOUNT_FILTERS) \
 	--output-file                 $(COMPOSE_FILE)
 
 .PHONY: compose build up down logs remove-output clean clean-all build-expected verify-output output-test up-and-stop verify-shutdown verify-exit-codes exit-test
