@@ -1,6 +1,6 @@
-import json
-from dataclasses import asdict
 from datetime import datetime
+
+from . import internal_pb2 as pb
 
 from common.models.raw_transaction import RawTransaction
 from common.models.raw_account import RawAccount
@@ -47,202 +47,216 @@ class MsgType:
 
 
 def serialize_msg(msg_type, client_id, gateway_id, *args):
-    handler = SERIALIZERS[msg_type]
-    payload = handler(*args)
-    return json.dumps(
-        {
-            "type": msg_type,
-            "client_id": client_id,
-            "gateway_id": gateway_id,
-            "payload": payload,
-        }
-    ).encode("utf-8")
+    env = pb.Envelope(client_id=client_id, gateway_id=gateway_id)
+    SERIALIZERS[msg_type](env, *args)
+    return env.SerializeToString()
 
 
 def deserialize_msg(data):
-    obj = json.loads(data.decode("utf-8"))
-    msg_type = obj["type"]
-    client_id = obj["client_id"]
-    gateway_id = obj["gateway_id"]
-    handler = DESERIALIZERS[msg_type]
-    payload = handler(obj.get("payload"))
-    return msg_type, client_id, gateway_id, payload
+    env = pb.Envelope()
+    env.ParseFromString(data)
+    payload_type = TYPES[env.WhichOneof("payload")]
+    payload = DESERIALIZERS[payload_type](env)
+    return payload_type, env.client_id, env.gateway_id, payload
 
 
-# ---------- handlers serialize / deserialize por tipo de mensaje ----------
+# ---------- traducción de batches ----------
+
+BATCH_DATA = {
+    MsgType.RAW_TRANSACTION_BATCH: (RawTransaction, "raw_transaction_batch", ["raw"]),
+    MsgType.RAW_ACCOUNT_BATCH: (RawAccount, "raw_account_batch", ["raw"]),
+    MsgType.BANK_BATCH: (Bank, "bank_batch", ["bank_id", "name"]),
+    MsgType.CURRENCY_CONVERSION_BATCH: (
+        TransactionForCurrencyConversion,
+        "currency_conversion_batch",
+        ["timestamp", "amount", "currency"],
+    ),
+    MsgType.AMOUNT_TRANSACTION_BATCH: (
+        TransactionAmount,
+        "amount_transaction_batch",
+        ["amount"],
+    ),
+    MsgType.BANK_MAX_PARTIAL_BATCH: (
+        BankMaxPartial,
+        "bank_max_partial_batch",
+        ["from_bank", "from_account", "amount"],
+    ),
+    MsgType.PAYMENT_FORMAT_PARTIAL_BATCH: (
+        PaymentFormatPartial,
+        "payment_format_partial_batch",
+        ["payment_format", "total_amount", "count"],
+    ),
+    MsgType.PAYMENT_FORMAT_AVERAGE_BATCH: (
+        PaymentFormatAverage,
+        "payment_format_average_batch",
+        ["payment_format", "average_amount"],
+    ),
+    MsgType.ACCOUNT_EDGE_BATCH: (
+        AccountEdge,
+        "account_edge_batch",
+        ["bank", "account", "other_bank", "other_account", "is_sender"],
+    ),
+    MsgType.PATH_BATCH: (
+        Path,
+        "path_batch",
+        [
+            "from_bank",
+            "from_account",
+            "mid_bank",
+            "mid_account",
+            "to_bank",
+            "to_account",
+        ],
+    ),
+    MsgType.Q1_RESULT_BATCH: (
+        Q1Result,
+        "q1_result_batch",
+        ["from_bank", "from_account", "to_bank", "to_account", "amount_paid"],
+    ),
+    MsgType.Q2_RESULT_BATCH: (
+        Q2Result,
+        "q2_result_batch",
+        ["bank_name", "from_account", "amount_paid"],
+    ),
+    MsgType.Q3_RESULT_BATCH: (
+        Q3Result,
+        "q3_result_batch",
+        ["from_bank", "from_account", "amount_paid"],
+    ),
+    MsgType.Q4_RESULT_BATCH: (Q4Result, "q4_result_batch", ["bank", "account"]),
+    MsgType.Q5_RESULT_BATCH: (Q5Result, "q5_result_batch", ["count"]),
+}
 
 
-def _serialize_batch(items):
-    return [asdict(item) for item in items]
+def _serialize_batch(data, env, batch):
+    _, field_name, fields = data
+    payload = getattr(env, field_name)
+    payload.SetInParent()
+    for elem in batch:
+        item = payload.items.add()
+        for field in fields:
+            setattr(item, field, getattr(elem, field))
 
 
-def _serialize_transaction_batch(transactions):
+def _deserialize_batch(data, env):
+    msg_type_class, field_name, fields = data
+    payload = getattr(env, field_name)
     return [
-        {**asdict(tx), "timestamp": tx.timestamp.isoformat()} for tx in transactions
+        msg_type_class(**{field: getattr(item, field) for field in fields})
+        for item in payload.items
     ]
 
 
-def _serialize_eof(eof):
-    return asdict(eof)
+# ---------- casos especiales ----------
 
 
-def _serialize_ring_eof(ring_eof):
-    return asdict(ring_eof)
+def _serialize_transaction_batch(env, transactions):
+    env.transaction_batch.SetInParent()
+    for tx in transactions:
+        item = env.transaction_batch.items.add()
+        item.timestamp = tx.timestamp.isoformat()
+        item.from_bank = tx.from_bank
+        item.from_account = tx.from_account
+        item.to_bank = tx.to_bank
+        item.to_account = tx.to_account
+        item.amount = tx.amount
+        item.currency = tx.currency
+        item.payment_format = tx.payment_format
 
 
-def _serialize_currency_conversion_batch(transactions):
-    return [asdict(tx) for tx in transactions]
-
-
-def _serialize_amount_transaction_batch(transactions):
-    return [asdict(tx) for tx in transactions]
-
-
-def _serialize_count(count):
-    return asdict(count)
-
-
-def _serialize_query_end(query_id, message_count):
-    return {"query_id": query_id, "message_count": message_count}
-
-
-def _serialize_account_edge_batch(batch):
-    return [asdict(x) for x in batch]
-
-
-def _serialize_path_batch(batch):
-    return [asdict(x) for x in batch]
-
-
-def _deserialize_batch(cls, payload):
-    return [cls(**item) for item in payload]
-
-
-def _deserialize_raw_transaction_batch(payload):
-    return _deserialize_batch(RawTransaction, payload)
-
-
-def _deserialize_raw_account_batch(payload):
-    return _deserialize_batch(RawAccount, payload)
-
-
-def _deserialize_bank_batch(payload):
-    return _deserialize_batch(Bank, payload)
-
-
-def _deserialize_bank_max_partial_batch(payload):
-    return _deserialize_batch(BankMaxPartial, payload)
-
-
-def _deserialize_payment_format_partial_batch(payload):
-    return _deserialize_batch(PaymentFormatPartial, payload)
-
-
-def _deserialize_payment_format_average_batch(payload):
-    return _deserialize_batch(PaymentFormatAverage, payload)
-
-
-def _deserialize_q1_result_batch(payload):
-    return _deserialize_batch(Q1Result, payload)
-
-
-def _deserialize_q2_result_batch(payload):
-    return _deserialize_batch(Q2Result, payload)
-
-
-def _deserialize_q3_result_batch(payload):
-    return _deserialize_batch(Q3Result, payload)
-
-
-def _deserialize_q4_result_batch(payload):
-    return _deserialize_batch(Q4Result, payload)
-
-
-def _deserialize_q5_result_batch(payload):
-    return _deserialize_batch(Q5Result, payload)
-
-
-def _deserialize_transaction_batch(payload):
+def _deserialize_transaction_batch(env):
     return [
-        Transaction(**{**tx, "timestamp": datetime.fromisoformat(tx["timestamp"])})
-        for tx in payload
+        Transaction(
+            timestamp=datetime.fromisoformat(item.timestamp),
+            from_bank=item.from_bank,
+            from_account=item.from_account,
+            to_bank=item.to_bank,
+            to_account=item.to_account,
+            amount=item.amount,
+            currency=item.currency,
+            payment_format=item.payment_format,
+        )
+        for item in env.transaction_batch.items
     ]
 
 
-def _deserialize_currency_conversion_batch(payload):
-    return [TransactionForCurrencyConversion(**tx) for tx in payload]
+def _serialize_count(env, count):
+    env.count.count = count.count
 
 
-def _deserialize_amount_transaction_batch(payload):
-    return [TransactionAmount(**tx) for tx in payload]
+def _deserialize_count(env):
+    return Count(count=env.count.count)
 
 
-def _deserialize_count(payload):
-    return Count(**payload)
+def _serialize_eof(env, eof):
+    env.eof.message_count = eof.message_count
 
 
-def _deserialize_query_end(payload):
-    return payload["query_id"], payload["message_count"]
+def _deserialize_eof(env):
+    return EOF(message_count=env.eof.message_count)
 
 
-def _deserialize_eof(payload):
-    return EOF(**payload)
+def _serialize_ring_eof(env, ring_eof):
+    r = env.ring_eof
+    r.expected_count = ring_eof.expected_count
+    r.total_processed_count = ring_eof.total_processed_count
+    if ring_eof.coordinator_id is not None:
+        r.coordinator_id = ring_eof.coordinator_id
+    if ring_eof.total_sent_count is not None:
+        r.total_sent_count = ring_eof.total_sent_count
 
 
-def _deserialize_ring_eof(payload):
-    return RingEOF(**payload)
+def _deserialize_ring_eof(env):
+    r = env.ring_eof
+    return RingEOF(
+        expected_count=r.expected_count,
+        total_processed_count=r.total_processed_count,
+        coordinator_id=r.coordinator_id if r.HasField("coordinator_id") else None,
+        total_sent_count=r.total_sent_count if r.HasField("total_sent_count") else None,
+    )
 
 
-def _deserialize_account_edge_batch(payload):
-    return [AccountEdge(**x) for x in payload]
+def _serialize_query_end(env, query_id, message_count):
+    env.query_end.query_id = query_id
+    env.query_end.message_count = message_count
 
 
-def _deserialize_path_batch(payload):
-    return [Path(**x) for x in payload]
+def _deserialize_query_end(env):
+    return env.query_end.query_id, env.query_end.message_count
 
+
+# ---------- tablas para mapear ----------
 
 SERIALIZERS = {
-    MsgType.RAW_TRANSACTION_BATCH: _serialize_batch,
-    MsgType.RAW_ACCOUNT_BATCH: _serialize_batch,
     MsgType.TRANSACTION_BATCH: _serialize_transaction_batch,
-    MsgType.BANK_BATCH: _serialize_batch,
-    MsgType.Q1_RESULT_BATCH: _serialize_batch,
-    MsgType.Q2_RESULT_BATCH: _serialize_batch,
-    MsgType.Q3_RESULT_BATCH: _serialize_batch,
-    MsgType.Q4_RESULT_BATCH: _serialize_batch,
-    MsgType.Q5_RESULT_BATCH: _serialize_batch,
-    MsgType.QUERY_END: _serialize_query_end,
-    MsgType.CURRENCY_CONVERSION_BATCH: _serialize_currency_conversion_batch,
-    MsgType.AMOUNT_TRANSACTION_BATCH: _serialize_amount_transaction_batch,
     MsgType.COUNT: _serialize_count,
-    MsgType.BANK_MAX_PARTIAL_BATCH: _serialize_batch,
-    MsgType.PAYMENT_FORMAT_PARTIAL_BATCH: _serialize_batch,
-    MsgType.PAYMENT_FORMAT_AVERAGE_BATCH: _serialize_batch,
     MsgType.EOF: _serialize_eof,
     MsgType.RING_EOF: _serialize_ring_eof,
-    MsgType.ACCOUNT_EDGE_BATCH: _serialize_account_edge_batch,
-    MsgType.PATH_BATCH: _serialize_path_batch,
+    MsgType.QUERY_END: _serialize_query_end,
 }
 
 DESERIALIZERS = {
-    MsgType.RAW_TRANSACTION_BATCH: _deserialize_raw_transaction_batch,
-    MsgType.RAW_ACCOUNT_BATCH: _deserialize_raw_account_batch,
     MsgType.TRANSACTION_BATCH: _deserialize_transaction_batch,
-    MsgType.BANK_BATCH: _deserialize_bank_batch,
-    MsgType.Q1_RESULT_BATCH: _deserialize_q1_result_batch,
-    MsgType.Q2_RESULT_BATCH: _deserialize_q2_result_batch,
-    MsgType.Q3_RESULT_BATCH: _deserialize_q3_result_batch,
-    MsgType.Q4_RESULT_BATCH: _deserialize_q4_result_batch,
-    MsgType.Q5_RESULT_BATCH: _deserialize_q5_result_batch,
-    MsgType.QUERY_END: _deserialize_query_end,
-    MsgType.CURRENCY_CONVERSION_BATCH: _deserialize_currency_conversion_batch,
-    MsgType.AMOUNT_TRANSACTION_BATCH: _deserialize_amount_transaction_batch,
     MsgType.COUNT: _deserialize_count,
-    MsgType.BANK_MAX_PARTIAL_BATCH: _deserialize_bank_max_partial_batch,
-    MsgType.PAYMENT_FORMAT_PARTIAL_BATCH: _deserialize_payment_format_partial_batch,
-    MsgType.PAYMENT_FORMAT_AVERAGE_BATCH: _deserialize_payment_format_average_batch,
     MsgType.EOF: _deserialize_eof,
     MsgType.RING_EOF: _deserialize_ring_eof,
-    MsgType.ACCOUNT_EDGE_BATCH: _deserialize_account_edge_batch,
-    MsgType.PATH_BATCH: _deserialize_path_batch,
+    MsgType.QUERY_END: _deserialize_query_end,
 }
+
+TYPES = {
+    "transaction_batch": MsgType.TRANSACTION_BATCH,
+    "count": MsgType.COUNT,
+    "eof": MsgType.EOF,
+    "ring_eof": MsgType.RING_EOF,
+    "query_end": MsgType.QUERY_END,
+}
+
+for msg_type, batch_data in BATCH_DATA.items():
+    batch_field = batch_data[1]
+    SERIALIZERS[msg_type] = lambda env, batch, batch_data=batch_data: _serialize_batch(
+        batch_data, env, batch
+    )
+    DESERIALIZERS[msg_type] = lambda env, batch_data=batch_data: _deserialize_batch(
+        batch_data, env
+    )
+    TYPES[batch_field] = msg_type
