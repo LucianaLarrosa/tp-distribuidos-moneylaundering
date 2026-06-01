@@ -67,6 +67,10 @@ COMPOSE_ARGS = \
 
 .PHONY: compose build up down logs remove-output clean clean-all build-expected verify-output output-test up-and-stop verify-shutdown verify-exit-codes exit-test
 
+all: compose build
+	$(MAKE) output-test
+	$(MAKE) exit-test
+
 proto:
 	docker run --rm -v $(PWD):/w -w /w python:3.11-slim sh -c "\
 		pip install grpcio-tools==1.80.0 -q && \
@@ -74,10 +78,6 @@ proto:
 			-I src/common/protocol \
 			--python_out=src/common/protocol \
 			src/common/protocol/internal.proto"
-
-all: compose build
-	$(MAKE) output-test
-	$(MAKE) exit-test
 
 compose:
 	python3 compose_generator.py $(COMPOSE_ARGS)
