@@ -5,8 +5,8 @@ import threading
 
 from proxy.config import Config
 from common.socket.safe_socket import SafeSocket
-from common.protocol import external
-from common.protocol.external import MsgType
+from common.protocol.external import external
+from common.protocol.external.external import MsgType
 
 
 class Proxy:

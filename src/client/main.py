@@ -10,8 +10,8 @@ from client.config import Config
 from common.socket.safe_socket import SafeSocket, IncompleteReadError
 from common.models.raw_transaction import RawTransaction
 from common.models.raw_account import RawAccount
-from common.protocol import external
-from common.protocol.external import MsgType
+from common.protocol.external import external
+from common.protocol.external.external import MsgType
 
 
 class Client:

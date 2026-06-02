@@ -2,7 +2,7 @@ import logging
 import signal
 from abc import ABC, abstractmethod
 
-from common.protocol import internal
+from common.protocol.internal import internal
 
 
 class Worker(ABC):

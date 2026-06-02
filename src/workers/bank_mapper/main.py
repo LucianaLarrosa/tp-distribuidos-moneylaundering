@@ -8,7 +8,7 @@ from common.middleware.middleware_rabbitmq import (
 )
 from common.models.bank_max_partial import BankMaxPartial
 from common.models.query_results import Q2Result
-from common.protocol import internal
+from common.protocol.internal import internal
 from common.utils import BatchSpill
 from common.worker.side_input_stateless_coordinated_worker import (
     SideInputStatelessCoordinatedWorker,

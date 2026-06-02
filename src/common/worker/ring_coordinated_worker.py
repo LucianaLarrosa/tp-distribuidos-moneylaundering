@@ -5,7 +5,7 @@ from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
 from common.worker.worker import Worker
-from common.protocol import internal
+from common.protocol.internal import internal
 from common.models.eof import EOF, RingEOF
 
 

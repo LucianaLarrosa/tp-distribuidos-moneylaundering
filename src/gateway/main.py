@@ -10,7 +10,7 @@ from gateway.internal.internal_router import InternalRouter
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
-from common.protocol import internal
+from common.protocol.internal import internal
 from common.socket.safe_socket import SafeSocket
 
 

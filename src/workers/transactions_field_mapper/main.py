@@ -2,7 +2,7 @@ import logging
 from datetime import datetime
 
 from common.models.transaction import Transaction
-from common.protocol import internal
+from common.protocol.internal import internal
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
     MessageMiddlewareExchangeTopicRabbitMQ,

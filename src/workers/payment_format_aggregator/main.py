@@ -6,7 +6,7 @@ from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeTopicRabbitMQ,
 )
 from common.models.payment_format_partial import PaymentFormatPartial
-from common.protocol import internal
+from common.protocol.internal import internal
 from common.worker.sent_coordinated_worker import SentCoordinatedWorker
 from config import Config
 

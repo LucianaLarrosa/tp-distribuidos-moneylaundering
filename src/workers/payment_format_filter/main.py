@@ -7,7 +7,7 @@ from common.middleware.middleware_rabbitmq import (
 from common.models.transaction_for_currency_conversion import (
     TransactionForCurrencyConversion,
 )
-from common.protocol import internal
+from common.protocol.internal import internal
 from common.worker.stateless_worker import StatelessWorker
 from config import Config
 

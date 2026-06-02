@@ -77,7 +77,8 @@ proto:
 		python -m grpc_tools.protoc \
 			-I src/common/protocol \
 			--python_out=src/common/protocol \
-			src/common/protocol/internal.proto"
+			src/common/protocol/internal/internal.proto \
+			src/common/protocol/external/external.proto"
 
 compose:
 	python3 compose_generator.py $(COMPOSE_ARGS)

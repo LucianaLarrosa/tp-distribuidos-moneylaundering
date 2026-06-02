@@ -2,7 +2,7 @@ import logging
 import threading
 from abc import abstractmethod
 
-from common.protocol import internal
+from common.protocol.internal import internal
 from common.utils import SideInputTracker
 from common.worker.ring_coordinated_worker import RingCoordinatedWorker
 

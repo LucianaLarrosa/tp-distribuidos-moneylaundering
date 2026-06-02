@@ -2,7 +2,7 @@ import logging
 import hashlib
 
 from common.models.bank import Bank
-from common.protocol import internal
+from common.protocol.internal import internal
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )

@@ -6,7 +6,7 @@ from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeTopicRabbitMQ,
 )
 from common.models.bank_max_partial import BankMaxPartial
-from common.protocol import internal
+from common.protocol.internal import internal
 from common.worker.sent_coordinated_worker import SentCoordinatedWorker
 from config import Config
 

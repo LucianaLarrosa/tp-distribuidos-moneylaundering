@@ -11,7 +11,7 @@ from common.middleware.middleware_rabbitmq import (
 )
 from common.models.query_results import Q3Result
 from common.models.transaction import Transaction
-from common.protocol import internal
+from common.protocol.internal import internal
 from common.utils import BatchSpill
 from common.worker.side_input_stateless_coordinated_worker import (
     SideInputStatelessCoordinatedWorker,

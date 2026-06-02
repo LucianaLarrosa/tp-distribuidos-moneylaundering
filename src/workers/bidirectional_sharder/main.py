@@ -7,7 +7,7 @@ from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeTopicRabbitMQ,
 )
 from common.models.account_edge import AccountEdge
-from common.protocol import internal
+from common.protocol.internal import internal
 from common.worker.sent_coordinated_worker import SentCoordinatedWorker
 from common.worker.safe_output_capable import SafeOutputCapable
 from config import Config
