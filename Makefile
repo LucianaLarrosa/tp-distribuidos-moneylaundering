@@ -37,6 +37,11 @@ OUTPUT_DIR        ?= ./output
 EXPECTED_DIR        ?= ./expected_output
 PANDAS_EXPECTED_DIR ?= ./pandas_expected_output
 
+# Dataset size (Small/Medium/Large) derived from TRANSACTIONS_FILE (e.g. HI-Medium_Trans.csv -> Medium).
+# Expected outputs are cached per size under $(EXPECTED_DIR)/$(SIZE).
+SIZE              := $(patsubst HI-%_Trans.csv,%,$(TRANSACTIONS_FILE))
+EXPECTED_SIZE_DIR := $(EXPECTED_DIR)/$(SIZE)
+
 # Adjust this to ensure the containers have:
 # 1. Enough time to fully start before the tests run
 # 2. Enough time to gracefully stop running processes when interrupted
@@ -114,14 +119,23 @@ wait-clients:
 	docker container wait $$client_names
 
 build-expected:
-	DATASET_DIR=$(DATASET_DIR) EXPECTED_DIR=$(EXPECTED_DIR) TRANSACTIONS_FILE=$(TRANSACTIONS_FILE) ACCOUNTS_FILE=$(ACCOUNTS_FILE) python3 build_expected.py
+	@if [ -f "$(EXPECTED_SIZE_DIR)/q1_expected.csv" ] \
+		&& [ -f "$(EXPECTED_SIZE_DIR)/q2_expected.csv" ] \
+		&& [ -f "$(EXPECTED_SIZE_DIR)/q3_expected.csv" ] \
+		&& [ -f "$(EXPECTED_SIZE_DIR)/q4_expected.csv" ] \
+		&& [ -f "$(EXPECTED_SIZE_DIR)/q5_expected.csv" ]; then \
+		printf "$(LIME)Using cached expected output for size '$(SIZE)' ($(EXPECTED_SIZE_DIR))$(RESET)\n"; \
+	else \
+		printf "$(LIME)Building expected output for size '$(SIZE)' -> $(EXPECTED_SIZE_DIR)$(RESET)\n"; \
+		DATASET_DIR=$(DATASET_DIR) EXPECTED_DIR=$(EXPECTED_SIZE_DIR) TRANSACTIONS_FILE=$(TRANSACTIONS_FILE) ACCOUNTS_FILE=$(ACCOUNTS_FILE) python3 build_expected.py; \
+	fi
 
 verify-output:
 	@mismatch=0; \
 	for query_number in 1 2 3 4 5; do \
 		for i in $$(seq 1 $(N_CLIENTS)); do \
 			output_file="$(OUTPUT_DIR)/q$${query_number}_client_$${i}.csv"; \
-			expected_file="$(EXPECTED_DIR)/q$${query_number}_expected.csv"; \
+			expected_file="$(EXPECTED_SIZE_DIR)/q$${query_number}_expected.csv"; \
 			if diff <(LC_ALL=C sort "$$output_file") <(LC_ALL=C sort "$$expected_file") > /dev/null 2>&1; then \
 				printf "$(LIME)✓ Q%s client %s: OK$(RESET)\n" "$$query_number" "$$i"; \
 			else \
