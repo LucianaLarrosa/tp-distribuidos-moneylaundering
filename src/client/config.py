@@ -9,7 +9,8 @@ class Config:
     proxy_port: int
     input_csv_transactions: str
     input_csv_accounts: str
-    batch_size: int
+    transactions_batch_size: int
+    accounts_batch_size: int
     expected_query_ids: List[int]
     output_dir: str
     client_id: str
@@ -25,7 +26,8 @@ class Config:
             proxy_port=int(os.environ["PROXY_PORT"]),
             input_csv_transactions=os.environ["INPUT_CSV_TRANSACTIONS"],
             input_csv_accounts=os.environ["INPUT_CSV_ACCOUNTS"],
-            batch_size=int(os.environ.get("BATCH_SIZE", 1000)),
+            transactions_batch_size=int(os.environ.get("TRANSACTIONS_BATCH_SIZE", 424)),
+            accounts_batch_size=int(os.environ.get("ACCOUNTS_BATCH_SIZE", 840)),
             expected_query_ids=expected_query_ids,
             output_dir=os.environ.get("OUTPUT_DIR", "results"),
             client_id=os.environ.get("CLIENT_ID", "1"),

@@ -5,7 +5,7 @@ from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeFanoutRabbitMQ,
 )
 from common.models.payment_format_average import PaymentFormatAverage
-from common.protocol import internal
+from common.protocol.internal import internal
 from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
 from config import Config
 

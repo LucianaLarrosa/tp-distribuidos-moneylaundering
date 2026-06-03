@@ -1,13 +1,13 @@
 import logging
 import signal
 from abc import ABC, abstractmethod
-from dataclasses import fields
 
-from common.protocol import internal
+from common.protocol.internal import internal
 
 
 class Worker(ABC):
     def __init__(self):
+        self._closed = False
         signal.signal(signal.SIGTERM, lambda *_: self.shutdown())
 
     @property
@@ -32,12 +32,6 @@ class Worker(ABC):
     def _send_final_eof(self, client_id, gateway_id, eof):
         pass
 
-    def _has_required_fields(self, data_record):
-        return all(
-            getattr(data_record, field.name) is not None
-            for field in fields(data_record)
-        )
-
     def _handle_message(self, message, ack, nack):
         """
         Handle incoming messages from the input middleware accordingly.
@@ -59,6 +53,9 @@ class Worker(ABC):
         self._input_middleware.start_consuming(self._handle_message)
 
     def shutdown(self):
+        if self._closed:
+            return
+        self._closed = True
         logging.info("Shutting down worker...")
         self._input_middleware.stop_consuming()
         self._input_middleware.close()

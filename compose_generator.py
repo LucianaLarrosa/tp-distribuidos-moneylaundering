@@ -22,6 +22,7 @@ EXCHANGE_PAYMENT_FORMAT_AVERAGES = "payment_format_averages"
 EXCHANGE_BIDIRECTIONAL_SHARDER_OUTPUT = "bidirectional_sharder_output"
 EXCHANGE_ACCOUNT_FREQ_FILTER_OUTPUT = "account_freq_filter_output"
 EXCHANGE_PATH_MAPPER_OUTPUT = "path_mapper_output"
+EXCHANGE_PATH_FREQ_FILTER_OUTPUT = "path_freq_filter_output"
 EXCHANGE_QUERY_RESULTS = "query_results"
 QUEUE_CURRENCY_MAPPER_INPUT = "currency_mapper_input"
 QUEUE_CURRENCY_MAPPER_OUTPUT = "currency_mapper_output"
@@ -40,7 +41,6 @@ QUERY_5_ID = 5
 
 NODE_PREFIX = "node."
 MIN_REQUIRED_ACCOUNTS = "5"
-BATCH_SIZE = "1000"
 TRANSACTION_DATE_FORMAT = "%Y/%m/%d %H:%M"
 DATE_FROM_1 = "2022/09/01 00:00"
 DATE_TO_1 = "2022/09/05 23:59"
@@ -55,6 +55,16 @@ ROUTING_KEY_PERIOD_2 = "period2"
 ROUTING_KEY_TRANSACTION = "transaction"
 ROUTING_KEY_ACCOUNT = "account"
 
+# --- Batch Size ---
+
+TRANSACTIONS_BATCH_SIZE = "1215"
+ACCOUNTS_BATCH_SIZE = "1340"
+BANK_MAX_PARTIAL_BATCH_SIZE = "3800"
+PAYMENT_FORMAT_PARTIAL_BATCH_SIZE = "4200"
+ACCOUNT_EDGE_BATCH_SIZE = "2680"
+PATH_BATCH_SIZE = "1900"
+Q4_RESULT_BATCH_SIZE = "5360"
+
 # --- Containers ---
 
 
@@ -63,6 +73,10 @@ def _rabbitmq():
         "build": "./src/rabbitmq",
         "container_name": "rabbitmq",
         "ports": ["5672:5672", "15672:15672"],
+        "environment": {
+            "RABBITMQ_DEFAULT_USER": "guest",
+            "RABBITMQ_DEFAULT_PASS": "guest",
+        },
         "healthcheck": {
             "test": ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"],
             "interval": "5s",
@@ -136,7 +150,8 @@ def _client(i):
             "PROXY_PORT": "6000",
             "INPUT_CSV_TRANSACTIONS": "/data/${TRANSACTIONS_FILE:-HI-Small_Trans.csv}",
             "INPUT_CSV_ACCOUNTS": "/data/${ACCOUNTS_FILE:-HI-Small_accounts.csv}",
-            "BATCH_SIZE": BATCH_SIZE,
+            "TRANSACTIONS_BATCH_SIZE": TRANSACTIONS_BATCH_SIZE,
+            "ACCOUNTS_BATCH_SIZE": ACCOUNTS_BATCH_SIZE,
             "EXPECTED_QUERY_IDS": f"{QUERY_1_ID},{QUERY_2_ID},{QUERY_3_ID},{QUERY_4_ID},{QUERY_5_ID}",
             "OUTPUT_DIR": "/output",
             "CLIENT_ID": str(i),
@@ -383,7 +398,7 @@ def _bank_max_aggregator(i, bank_max_aggregators, bank_max_reducers):
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
             "RING_SIZE": str(bank_max_aggregators),
-            "BATCH_SIZE": "5",
+            "BATCH_SIZE": BANK_MAX_PARTIAL_BATCH_SIZE,
             "NUM_SHARDS": str(bank_max_reducers),
         },
     }
@@ -414,7 +429,7 @@ def _bank_max_reducer(i, bank_max_reducers, bank_mappers):
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
             "RING_SIZE": str(bank_max_reducers),
-            "BATCH_SIZE": "20",
+            "BATCH_SIZE": BANK_MAX_PARTIAL_BATCH_SIZE,
         },
     }
 
@@ -487,7 +502,7 @@ def _payment_format_aggregator(i, payment_format_aggregators, payment_format_red
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
             "RING_SIZE": str(payment_format_aggregators),
-            "BATCH_SIZE": "20",
+            "BATCH_SIZE": PAYMENT_FORMAT_PARTIAL_BATCH_SIZE,
             "NUM_SHARDS": str(payment_format_reducers),
         },
     }
@@ -602,7 +617,7 @@ def _account_frequency_filter(i, account_frequency_filters, path_mappers):
             "OUTPUT_NODE_COUNT": str(path_mappers),
             "OUTPUT_NODE_PREFIX": NODE_PREFIX,
             "MIN_REQUIRED_ACCOUNTS": MIN_REQUIRED_ACCOUNTS,
-            "BATCH_SIZE": BATCH_SIZE,
+            "BATCH_SIZE": ACCOUNT_EDGE_BATCH_SIZE,
         },
     }
 
@@ -631,30 +646,59 @@ def _path_mapper(i, path_mappers, path_frequency_filters):
             "RING_SIZE": str(path_mappers),
             "OUTPUT_NODE_COUNT": str(path_frequency_filters),
             "OUTPUT_NODE_PREFIX": NODE_PREFIX,
-            "BATCH_SIZE": BATCH_SIZE,
+            "BATCH_SIZE": PATH_BATCH_SIZE,
         },
     }
 
 
-def _path_frequency_filter(i, path_frequency_filters):
+def _path_frequency_filter(i, path_frequency_filters, duplicate_account_filters):
     return {
         "build": {
             "context": ".",
             "dockerfile": "src/workers/path_frequency_filter/Dockerfile",
         },
         "container_name": f"path_frequency_filter_{i}",
-        "depends_on": {"rabbitmq": {"condition": "service_healthy"}},
+        "depends_on": {
+            "rabbitmq": {"condition": "service_healthy"},
+            **{
+                f"duplicate_account_filter_{j}": {"condition": "service_started"}
+                for j in range(duplicate_account_filters)
+            },
+        },
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
             "INPUT_EXCHANGE": EXCHANGE_PATH_MAPPER_OUTPUT,
-            "OUTPUT_EXCHANGE": EXCHANGE_QUERY_RESULTS,
-            "QUERY_ID": str(QUERY_4_ID),
+            "OUTPUT_EXCHANGE": EXCHANGE_PATH_FREQ_FILTER_OUTPUT,
             "CONTROL_EXCHANGE": "path_freq_filter_control",
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
             "RING_SIZE": str(path_frequency_filters),
+            "OUTPUT_NODE_COUNT": str(duplicate_account_filters),
+            "OUTPUT_NODE_PREFIX": NODE_PREFIX,
             "MIN_REQUIRED_ACCOUNTS": MIN_REQUIRED_ACCOUNTS,
-            "BATCH_SIZE": BATCH_SIZE,
+            "BATCH_SIZE": Q4_RESULT_BATCH_SIZE,
+        },
+    }
+
+
+def _duplicate_account_filter(i, duplicate_account_filters):
+    return {
+        "build": {
+            "context": ".",
+            "dockerfile": "src/workers/duplicate_account_filter/Dockerfile",
+        },
+        "container_name": f"duplicate_account_filter_{i}",
+        "depends_on": {"rabbitmq": {"condition": "service_healthy"}},
+        "environment": {
+            "RABBITMQ_HOST": "rabbitmq",
+            "INPUT_EXCHANGE": EXCHANGE_PATH_FREQ_FILTER_OUTPUT,
+            "OUTPUT_EXCHANGE": EXCHANGE_QUERY_RESULTS,
+            "QUERY_ID": str(QUERY_4_ID),
+            "CONTROL_EXCHANGE": "duplicate_account_filter_control",
+            "NODE_PREFIX": NODE_PREFIX,
+            "NODE_ID": str(i),
+            "RING_SIZE": str(duplicate_account_filters),
+            "BATCH_SIZE": Q4_RESULT_BATCH_SIZE,
         },
     }
 
@@ -683,6 +727,7 @@ def build_compose(
     account_frequency_filters,
     path_mappers,
     path_frequency_filters,
+    duplicate_account_filters,
 ):
     services = {}
     services["rabbitmq"] = _rabbitmq()
@@ -717,9 +762,13 @@ def build_compose(
         services[f"path_mapper_{i}"] = _path_mapper(
             i, path_mappers, path_frequency_filters
         )
+    for i in range(duplicate_account_filters):
+        services[f"duplicate_account_filter_{i}"] = _duplicate_account_filter(
+            i, duplicate_account_filters
+        )
     for i in range(path_frequency_filters):
         services[f"path_frequency_filter_{i}"] = _path_frequency_filter(
-            i, path_frequency_filters
+            i, path_frequency_filters, duplicate_account_filters
         )
     for i in range(payment_format_filters):
         services[f"payment_format_filter_{i}"] = _payment_format_filter(
@@ -812,6 +861,9 @@ def main():
     )
     parser.add_argument("--path-mappers", type=int, default=DEFAULT_REPLICAS)
     parser.add_argument("--path-frequency-filters", type=int, default=DEFAULT_REPLICAS)
+    parser.add_argument(
+        "--duplicate-account-filters", type=int, default=DEFAULT_REPLICAS
+    )
     parser.add_argument("--output-file", required=True)
     args = parser.parse_args()
 
@@ -836,6 +888,7 @@ def main():
         ("--account-frequency-filters", args.account_frequency_filters),
         ("--path-mappers", args.path_mappers),
         ("--path-frequency-filters", args.path_frequency_filters),
+        ("--duplicate-account-filters", args.duplicate_account_filters),
     ]
     for flag, value in counts:
         if value < 1:
@@ -862,6 +915,7 @@ def main():
         account_frequency_filters=args.account_frequency_filters,
         path_mappers=args.path_mappers,
         path_frequency_filters=args.path_frequency_filters,
+        duplicate_account_filters=args.duplicate_account_filters,
     )
 
     output = yaml.safe_dump(compose, sort_keys=False, default_flow_style=False)

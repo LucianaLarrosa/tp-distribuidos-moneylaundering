@@ -5,7 +5,13 @@ class IncompleteReadError(Exception):
     def __init__(self, partial: bytes, expected: int):
         self.partial = partial
         self.expected = expected
-        super().__init__(f"Expected {expected} bytes, got {len(partial)}")
+        super().__init__(partial, expected)
+
+    def __str__(self):
+        return f"Expected {self.expected} bytes, got {len(self.partial)}"
+
+    def __reduce__(self):
+        return (self.__class__, (self.partial, self.expected))
 
 
 class SafeSocket:
@@ -19,6 +25,10 @@ class SafeSocket:
         return cls(sock)
 
     def close(self):
+        try:
+            self._sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
         self._sock.close()
 
     def send_all(self, data):

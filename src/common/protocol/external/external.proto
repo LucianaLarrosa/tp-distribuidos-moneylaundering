@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package external;
+
+import "common/protocol/common_protobuf/common_protobuf.proto";
+
+
+message EofTransactions {}
+message EofAccounts {}
+message Ack {}
+
+message QueryResult {
+  uint32 query_id = 1;
+  oneof results {
+    common_protobuf.Q1ResultBatch q1 = 2;
+    common_protobuf.Q2ResultBatch q2 = 3;
+    common_protobuf.Q3ResultBatch q3 = 4;
+    common_protobuf.Q4ResultBatch q4 = 5;
+    common_protobuf.Q5ResultBatch q5 = 6;
+  }
+}
+
+message QueryEnd {
+  uint32 query_id = 1;
+}
+
+message Redirect {
+  string host = 1;
+  uint32 port = 2;
+}
+
+message Envelope {
+  oneof payload {
+    common_protobuf.RawTransactionBatch transaction_batch = 1;
+    common_protobuf.RawAccountBatch     account_batch     = 2;
+    EofTransactions                     eof_transactions  = 3;
+    EofAccounts                         eof_accounts      = 4;
+    QueryResult                         query_result      = 5;
+    QueryEnd                            query_end         = 6;
+    Redirect                            redirect          = 7;
+    Ack                                 ack               = 8;
+  }
+}

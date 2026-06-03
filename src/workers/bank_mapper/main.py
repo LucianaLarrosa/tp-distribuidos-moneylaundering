@@ -8,7 +8,7 @@ from common.middleware.middleware_rabbitmq import (
 )
 from common.models.bank_max_partial import BankMaxPartial
 from common.models.query_results import Q2Result
-from common.protocol import internal
+from common.protocol.internal import internal
 from common.utils import BatchSpill
 from common.worker.side_input_stateless_coordinated_worker import (
     SideInputStatelessCoordinatedWorker,
@@ -17,7 +17,7 @@ from common.worker.safe_output_capable import SafeOutputCapable
 from config import Config
 
 
-class BankMapper(SideInputStatelessCoordinatedWorker, SafeOutputCapable):
+class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
     def __init__(self, config):
         self.config = config
         super().__init__()
@@ -166,7 +166,9 @@ class BankMapper(SideInputStatelessCoordinatedWorker, SafeOutputCapable):
             if not self._side_input.is_ready(key):
                 self._spill.write(key, bank_max_batch)
                 return
-        self._map_and_emit(client_id, gateway_id, bank_max_batch, self._output_exchange)
+            self._map_and_emit(
+                client_id, gateway_id, bank_max_batch, self._output_exchange
+            )
 
     def _on_side_input_ready(self, client_id, gateway_id):
         key = self._flow_key(client_id, gateway_id)

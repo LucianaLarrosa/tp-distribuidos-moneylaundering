@@ -5,7 +5,7 @@ from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareQueueRabbitMQ,
 )
 from common.models.count import Count
-from common.protocol import internal
+from common.protocol.internal import internal
 from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
 from config import Config
 

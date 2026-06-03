@@ -1,0 +1,124 @@
+syntax = "proto3";
+
+package internal;
+
+import "common/protocol/common_protobuf/common_protobuf.proto";
+
+
+message Transaction {
+  string timestamp      = 1;
+  string from_bank      = 2;
+  string from_account   = 3;
+  string to_bank        = 4;
+  string to_account     = 5;
+  double amount         = 6;
+  string currency       = 7;
+  string payment_format = 8;
+}
+
+message Bank {
+  string bank_id = 1;
+  string name    = 2;
+}
+
+message TransactionForCurrencyConversion {
+  string timestamp = 1;
+  double amount    = 2;
+  string currency  = 3;
+}
+
+message TransactionAmount {
+  double amount = 1;
+}
+
+message Count {
+  uint32 count = 1;
+}
+
+message BankMaxPartial {
+  string from_bank    = 1;
+  string from_account = 2;
+  double amount       = 3;
+}
+
+message PaymentFormatPartial {
+  string payment_format = 1;
+  double total_amount   = 2;
+  uint32 count          = 3;
+}
+
+message PaymentFormatAverage {
+  string payment_format = 1;
+  double average_amount = 2;
+}
+
+message AccountEdge {
+  string bank          = 1;
+  string account       = 2;
+  string other_bank    = 3;
+  string other_account = 4;
+  bool   is_sender     = 5;
+}
+
+message Path {
+  string from_bank    = 1;
+  string from_account = 2;
+  string mid_bank     = 3;
+  string mid_account  = 4;
+  string to_bank      = 5;
+  string to_account   = 6;
+}
+
+message EOF {
+  uint32 message_count = 1;
+}
+
+message RingEOF {
+  uint32          expected_count        = 1;
+  uint32          total_processed_count = 2;
+  optional uint32 coordinator_id        = 3;
+  optional uint32 total_sent_count      = 4;
+}
+
+message QueryEnd {
+  uint32 query_id      = 1;
+  uint32 message_count = 2;
+}
+
+message TransactionBatch           { repeated Transaction                      items = 1; }
+message BankBatch                  { repeated Bank                             items = 1; }
+message CurrencyConversionBatch    { repeated TransactionForCurrencyConversion items = 1; }
+message AmountTransactionBatch     { repeated TransactionAmount                items = 1; }
+message BankMaxPartialBatch        { repeated BankMaxPartial                   items = 1; }
+message PaymentFormatPartialBatch  { repeated PaymentFormatPartial             items = 1; }
+message PaymentFormatAverageBatch  { repeated PaymentFormatAverage             items = 1; }
+message AccountEdgeBatch           { repeated AccountEdge                      items = 1; }
+message PathBatch                  { repeated Path                             items = 1; }
+
+message Envelope {
+  string client_id  = 1;
+  string gateway_id = 2;
+
+  oneof payload {
+    common_protobuf.RawTransactionBatch raw_transaction_batch        = 3;
+    common_protobuf.RawAccountBatch     raw_account_batch            = 4;
+    TransactionBatch                    transaction_batch            = 5;
+    BankBatch                           bank_batch                   = 6;
+    CurrencyConversionBatch             currency_conversion_batch    = 7;
+    AmountTransactionBatch              amount_transaction_batch     = 8;
+    BankMaxPartialBatch                 bank_max_partial_batch       = 9;
+    PaymentFormatPartialBatch           payment_format_partial_batch = 10;
+    PaymentFormatAverageBatch           payment_format_average_batch = 11;
+    AccountEdgeBatch                    account_edge_batch           = 12;
+    PathBatch                           path_batch                   = 13;
+    common_protobuf.Q1ResultBatch       q1_result_batch              = 14;
+    common_protobuf.Q2ResultBatch       q2_result_batch              = 15;
+    common_protobuf.Q3ResultBatch       q3_result_batch              = 16;
+    common_protobuf.Q4ResultBatch       q4_result_batch              = 17;
+    common_protobuf.Q5ResultBatch       q5_result_batch              = 18;
+    Count                               count                        = 19;
+    EOF                                 eof                          = 20;
+    RingEOF                             ring_eof                     = 21;
+    QueryEnd                            query_end                    = 22;
+  }
+}

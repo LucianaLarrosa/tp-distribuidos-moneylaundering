@@ -1,12 +1,15 @@
+import hashlib
 import logging
+import random
 
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
 from common.models.query_results import Q4Result
-from common.protocol import internal
+from common.protocol.internal import internal
 from common.worker.sent_coordinated_worker import SentCoordinatedWorker
 from config import Config
+
 
 class PathFrequencyFilter(SentCoordinatedWorker):
     def __init__(self, config):
@@ -55,11 +58,18 @@ class PathFrequencyFilter(SentCoordinatedWorker):
     def _ring_size(self):
         return self.config.ring_size
 
-    def _create_result(self, paths):
+    def _shard_key(self, bank, account):
+        node_id = (
+            int(hashlib.md5(f"{bank}.{account}".encode()).hexdigest(), 16)
+            % self.config.output_node_count
+        )
+        return f"{self.config.output_node_prefix}{node_id}"
+
+    def _create_result_by_routing_key(self, paths):
         """
-        Create a list of Q4Result, filtering out those that do not meet the frequency threshold.
+        Create Q4Results by routing key, filtering paths below frequency threshold.
         """
-        result = []
+        result_by_routing_key = {}
         for (
             from_bank,
             from_account,
@@ -68,9 +78,11 @@ class PathFrequencyFilter(SentCoordinatedWorker):
         ), mid_accounts in paths.items():
             if len(mid_accounts) < self.config.min_required_accounts:
                 continue
-            result.append(Q4Result(from_bank, from_account))
-            result.append(Q4Result(to_bank, to_account))
-        return result
+            for bank, account in [(from_bank, from_account), (to_bank, to_account)]:
+                result_by_routing_key.setdefault(
+                    self._shard_key(bank, account), []
+                ).append(Q4Result(bank, account))
+        return result_by_routing_key
 
     def _flush_data_in_batches(self, client_id, gateway_id, routing_key, result):
         """
@@ -84,25 +96,21 @@ class PathFrequencyFilter(SentCoordinatedWorker):
                     gateway_id,
                     result[i : i + self.config.batch_size],
                 ),
-                routing_key=gateway_id,
+                routing_key=routing_key,
             )
             self._increment_sent_count(client_id, gateway_id)
 
     def _flush_data(self, client_id, gateway_id):
         paths = self._paths.pop((client_id, gateway_id), {})
-        result = self._create_result(paths)
-        self._flush_data_in_batches(client_id, gateway_id, gateway_id, result)
+        result_by_routing_key = self._create_result_by_routing_key(paths)
+        for routing_key, result in result_by_routing_key.items():
+            self._flush_data_in_batches(client_id, gateway_id, routing_key, result)
 
     def _send_final_eof(self, client_id, gateway_id, eof):
+        node_id = random.randint(0, self.config.output_node_count - 1)
         self._output_exchange.send(
-            internal.serialize_msg(
-                internal.MsgType.QUERY_END,
-                client_id,
-                gateway_id,
-                self.config.query_id,
-                eof.message_count,
-            ),
-            routing_key=gateway_id,
+            internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof),
+            routing_key=f"{self.config.output_node_prefix}{node_id}",
         )
 
     def _update_paths(self, client_id, gateway_id, path):

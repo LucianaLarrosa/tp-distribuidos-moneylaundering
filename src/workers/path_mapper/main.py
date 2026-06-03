@@ -6,7 +6,7 @@ from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
 from common.models.path import Path
-from common.protocol import internal
+from common.protocol.internal import internal
 from common.worker.sent_coordinated_worker import SentCoordinatedWorker
 from config import Config
 
@@ -80,6 +80,8 @@ class PathMapper(SentCoordinatedWorker):
                 continue
             for from_bank, from_account in in_accounts:
                 for to_bank, to_account in out_accounts:
+                    if (from_bank, from_account) == (to_bank, to_account):
+                        continue
                     paths_by_routing_key.setdefault(
                         self._shard_key(from_bank, from_account, to_bank, to_account),
                         [],

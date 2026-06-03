@@ -11,7 +11,7 @@ from common.middleware.middleware_rabbitmq import (
 )
 from common.models.query_results import Q3Result
 from common.models.transaction import Transaction
-from common.protocol import internal
+from common.protocol.internal import internal
 from common.utils import BatchSpill
 from common.worker.side_input_stateless_coordinated_worker import (
     SideInputStatelessCoordinatedWorker,
@@ -20,7 +20,7 @@ from common.worker.safe_output_capable import SafeOutputCapable
 from config import Config
 
 
-class AnomalyFilter(SideInputStatelessCoordinatedWorker, SafeOutputCapable):
+class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
     def __init__(self, config):
         self.config = config
         super().__init__()
@@ -145,12 +145,6 @@ class AnomalyFilter(SideInputStatelessCoordinatedWorker, SafeOutputCapable):
                         amount_paid=tx.amount,
                     )
                 )
-        logging.info(
-            "filter_and_emit: in=%d anomalous=%d avgs_keys=%s",
-            len(transactions),
-            len(result_batch),
-            list(avgs.keys()) if avgs else [],
-        )
         exchange.send(
             internal.serialize_msg(
                 internal.MsgType.Q3_RESULT_BATCH,
@@ -205,7 +199,8 @@ class AnomalyFilter(SideInputStatelessCoordinatedWorker, SafeOutputCapable):
     def _drop_flow_state(self, key):
         self._avgs.pop(key, None)
         self._side_input.drop(key)
-        self._flow_locks.pop(key, None)
+        with self._flow_locks_guard:
+            self._flow_locks.pop(key, None)
 
     def _flush_data(self, client_id, gateway_id):
         key = self._flow_key(client_id, gateway_id)

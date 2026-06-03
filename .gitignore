@@ -10,3 +10,7 @@ output/
 expected_output/
 pandas_expected_output/
 docker-compose.yaml
+
+internal_pb2.py
+external_pb2.py
+common_protobuf_pb2.py

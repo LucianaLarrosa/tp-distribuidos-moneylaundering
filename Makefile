@@ -26,17 +26,26 @@ BIDIRECTIONAL_SHARDERS     ?= $(REPLICAS)
 ACCOUNT_FREQUENCY_FILTERS  ?= $(REPLICAS)
 PATH_MAPPERS               ?= $(REPLICAS)
 PATH_FREQUENCY_FILTERS     ?= $(REPLICAS)
+DUPLICATE_ACCOUNT_FILTERS  ?= $(REPLICAS)
 
 COMPOSE_FILE ?= docker-compose.yaml
 
 DATASET_DIR       ?= ./data
 TRANSACTIONS_FILE ?= HI-Small_Trans.csv
 ACCOUNTS_FILE     ?= HI-Small_accounts.csv
+OUTPUT_DIR        ?= ./output
 
 EXPECTED_DIR        ?= ./expected_output
 PANDAS_EXPECTED_DIR ?= ./pandas_expected_output
-OUTPUT_DIR          ?= ./output
 
+# Dataset size (Small/Medium/Large) derived from TRANSACTIONS_FILE (e.g. HI-Medium_Trans.csv -> Medium).
+# Expected outputs are cached per size under $(EXPECTED_DIR)/$(SIZE).
+SIZE              := $(patsubst HI-%_Trans.csv,%,$(TRANSACTIONS_FILE))
+EXPECTED_SIZE_DIR := $(EXPECTED_DIR)/$(SIZE)
+
+# Adjust this to ensure the containers have:
+# 1. Enough time to fully start before the tests run
+# 2. Enough time to gracefully stop running processes when interrupted
 SLEEP_TIME ?= 30
 
 COMPOSE_ARGS = \
@@ -60,6 +69,7 @@ COMPOSE_ARGS = \
 	--account-frequency-filters   $(ACCOUNT_FREQUENCY_FILTERS) \
 	--path-mappers                $(PATH_MAPPERS) \
 	--path-frequency-filters      $(PATH_FREQUENCY_FILTERS) \
+	--duplicate-account-filters   $(DUPLICATE_ACCOUNT_FILTERS) \
 	--output-file                 $(COMPOSE_FILE)
 
 .PHONY: compose build up down logs remove-output clean clean-all build-expected verify-output output-test up-and-stop verify-shutdown verify-exit-codes exit-test
@@ -68,10 +78,20 @@ all: compose build
 	$(MAKE) output-test
 	$(MAKE) exit-test
 
+proto:
+	docker run --rm -v $(PWD):/w -w /w python:3.11-slim sh -c "\
+		pip install grpcio-tools==1.80.0 -q && \
+		python -m grpc_tools.protoc \
+			-I src \
+			--python_out=src \
+			src/common/protocol/common_protobuf/common_protobuf.proto \
+			src/common/protocol/internal/internal.proto \
+			src/common/protocol/external/external.proto"
+
 compose:
 	python3 compose_generator.py $(COMPOSE_ARGS)
 
-build:
+build: proto
 	docker compose -f $(COMPOSE_FILE) build
 
 up:
@@ -102,14 +122,23 @@ wait-clients:
 	docker container wait $$client_names
 
 build-expected:
-	DATASET_DIR=$(DATASET_DIR) EXPECTED_DIR=$(EXPECTED_DIR) TRANSACTIONS_FILE=$(TRANSACTIONS_FILE) ACCOUNTS_FILE=$(ACCOUNTS_FILE) python3 build_expected.py
+	@if [ -f "$(EXPECTED_SIZE_DIR)/q1_expected.csv" ] \
+		&& [ -f "$(EXPECTED_SIZE_DIR)/q2_expected.csv" ] \
+		&& [ -f "$(EXPECTED_SIZE_DIR)/q3_expected.csv" ] \
+		&& [ -f "$(EXPECTED_SIZE_DIR)/q4_expected.csv" ] \
+		&& [ -f "$(EXPECTED_SIZE_DIR)/q5_expected.csv" ]; then \
+		printf "$(LIME)Using cached expected output for size '$(SIZE)' ($(EXPECTED_SIZE_DIR))$(RESET)\n"; \
+	else \
+		printf "$(LIME)Building expected output for size '$(SIZE)' -> $(EXPECTED_SIZE_DIR)$(RESET)\n"; \
+		DATASET_DIR=$(DATASET_DIR) EXPECTED_DIR=$(EXPECTED_SIZE_DIR) TRANSACTIONS_FILE=$(TRANSACTIONS_FILE) ACCOUNTS_FILE=$(ACCOUNTS_FILE) python3 build_expected.py; \
+	fi
 
 verify-output:
 	@mismatch=0; \
 	for query_number in 1 2 3 4 5; do \
 		for i in $$(seq 1 $(N_CLIENTS)); do \
 			output_file="$(OUTPUT_DIR)/q$${query_number}_client_$${i}.csv"; \
-			expected_file="$(EXPECTED_DIR)/q$${query_number}_expected.csv"; \
+			expected_file="$(EXPECTED_SIZE_DIR)/q$${query_number}_expected.csv"; \
 			if diff <(LC_ALL=C sort "$$output_file") <(LC_ALL=C sort "$$expected_file") > /dev/null 2>&1; then \
 				printf "$(LIME)✓ Q%s client %s: OK$(RESET)\n" "$$query_number" "$$i"; \
 			else \

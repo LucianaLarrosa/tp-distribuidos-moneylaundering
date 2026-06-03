@@ -6,7 +6,7 @@ from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeTopicRabbitMQ,
 )
 from common.models.bank_max_partial import BankMaxPartial
-from common.protocol import internal
+from common.protocol.internal import internal
 from common.worker.sent_coordinated_worker import SentCoordinatedWorker
 from config import Config
 
@@ -28,7 +28,7 @@ class BankMaxAggregator(SentCoordinatedWorker):
         self._output_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
             exchange_name=config.output_exchange,
-            routing_keys=[self._shard_routing_key(s) for s in range(config.num_shards)],
+            routing_keys=[],
         )
 
     @property

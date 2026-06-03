@@ -1,7 +1,7 @@
 import logging
 
 from common.middleware.middleware_rabbitmq import MessageMiddlewareExchangeTopicRabbitMQ
-from common.protocol import internal
+from common.protocol.internal import internal
 from common.worker.stateless_worker import StatelessWorker
 from config import Config
 
