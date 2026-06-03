@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package internal;
 
+import "common/protocol/common_protobuf/common_protobuf.proto";
+
 
 message Transaction {
   string timestamp      = 1;
@@ -12,14 +14,6 @@ message Transaction {
   double amount         = 6;
   string currency       = 7;
   string payment_format = 8;
-}
-
-message RawTransaction {
-  string raw = 1;
-}
-
-message RawAccount {
-  string raw = 1;
 }
 
 message Bank {
@@ -75,35 +69,6 @@ message Path {
   string to_account   = 6;
 }
 
-message Q1Result {
-  string from_bank    = 1;
-  string from_account = 2;
-  string to_bank      = 3;
-  string to_account   = 4;
-  double amount_paid  = 5;
-}
-
-message Q2Result {
-  string bank_name    = 1;
-  string from_account = 2;
-  double amount_paid  = 3;
-}
-
-message Q3Result {
-  string from_bank    = 1;
-  string from_account = 2;
-  double amount_paid  = 3;
-}
-
-message Q4Result {
-  string bank    = 1;
-  string account = 2;
-}
-
-message Q5Result {
-  uint32 count = 1;
-}
-
 message EOF {
   uint32 message_count = 1;
 }
@@ -120,8 +85,6 @@ message QueryEnd {
   uint32 message_count = 2;
 }
 
-message RawTransactionBatch        { repeated RawTransaction                   items = 1; }
-message RawAccountBatch            { repeated RawAccount                       items = 1; }
 message TransactionBatch           { repeated Transaction                      items = 1; }
 message BankBatch                  { repeated Bank                             items = 1; }
 message CurrencyConversionBatch    { repeated TransactionForCurrencyConversion items = 1; }
@@ -131,36 +94,31 @@ message PaymentFormatPartialBatch  { repeated PaymentFormatPartial             i
 message PaymentFormatAverageBatch  { repeated PaymentFormatAverage             items = 1; }
 message AccountEdgeBatch           { repeated AccountEdge                      items = 1; }
 message PathBatch                  { repeated Path                             items = 1; }
-message Q1ResultBatch              { repeated Q1Result                         items = 1; }
-message Q2ResultBatch              { repeated Q2Result                         items = 1; }
-message Q3ResultBatch              { repeated Q3Result                         items = 1; }
-message Q4ResultBatch              { repeated Q4Result                         items = 1; }
-message Q5ResultBatch              { repeated Q5Result                         items = 1; }
 
 message Envelope {
   string client_id  = 1;
   string gateway_id = 2;
 
   oneof payload {
-    RawTransactionBatch       raw_transaction_batch        = 3;
-    RawAccountBatch           raw_account_batch            = 4;
-    TransactionBatch          transaction_batch            = 5;
-    BankBatch                 bank_batch                   = 6;
-    CurrencyConversionBatch   currency_conversion_batch    = 7;
-    AmountTransactionBatch    amount_transaction_batch     = 8;
-    BankMaxPartialBatch       bank_max_partial_batch       = 9;
-    PaymentFormatPartialBatch payment_format_partial_batch = 10;
-    PaymentFormatAverageBatch payment_format_average_batch = 11;
-    AccountEdgeBatch          account_edge_batch           = 12;
-    PathBatch                 path_batch                   = 13;
-    Q1ResultBatch             q1_result_batch              = 14;
-    Q2ResultBatch             q2_result_batch              = 15;
-    Q3ResultBatch             q3_result_batch              = 16;
-    Q4ResultBatch             q4_result_batch              = 17;
-    Q5ResultBatch             q5_result_batch              = 18;
-    Count                     count                        = 19;
-    EOF                       eof                          = 20;
-    RingEOF                   ring_eof                     = 21;
-    QueryEnd                  query_end                    = 22;
+    common_protobuf.RawTransactionBatch raw_transaction_batch        = 3;
+    common_protobuf.RawAccountBatch     raw_account_batch            = 4;
+    TransactionBatch                    transaction_batch            = 5;
+    BankBatch                           bank_batch                   = 6;
+    CurrencyConversionBatch             currency_conversion_batch    = 7;
+    AmountTransactionBatch              amount_transaction_batch     = 8;
+    BankMaxPartialBatch                 bank_max_partial_batch       = 9;
+    PaymentFormatPartialBatch           payment_format_partial_batch = 10;
+    PaymentFormatAverageBatch           payment_format_average_batch = 11;
+    AccountEdgeBatch                    account_edge_batch           = 12;
+    PathBatch                           path_batch                   = 13;
+    common_protobuf.Q1ResultBatch       q1_result_batch              = 14;
+    common_protobuf.Q2ResultBatch       q2_result_batch              = 15;
+    common_protobuf.Q3ResultBatch       q3_result_batch              = 16;
+    common_protobuf.Q4ResultBatch       q4_result_batch              = 17;
+    common_protobuf.Q5ResultBatch       q5_result_batch              = 18;
+    Count                               count                        = 19;
+    EOF                                 eof                          = 20;
+    RingEOF                             ring_eof                     = 21;
+    QueryEnd                            query_end                    = 22;
   }
 }

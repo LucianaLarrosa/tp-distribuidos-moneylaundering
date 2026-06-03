@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package common_protobuf;
+
+
+message RawTransaction {
+  string raw = 1;
+}
+
+message RawAccount {
+  string raw = 1;
+}
+
+message Q1Result {
+  string from_bank    = 1;
+  string from_account = 2;
+  string to_bank      = 3;
+  string to_account   = 4;
+  double amount_paid  = 5;
+}
+
+message Q2Result {
+  string bank_name    = 1;
+  string from_account = 2;
+  double amount_paid  = 3;
+}
+
+message Q3Result {
+  string from_bank    = 1;
+  string from_account = 2;
+  double amount_paid  = 3;
+}
+
+message Q4Result {
+  string bank    = 1;
+  string account = 2;
+}
+
+message Q5Result {
+  uint32 count = 1;
+}
+
+message RawTransactionBatch { repeated RawTransaction items = 1; }
+message RawAccountBatch     { repeated RawAccount     items = 1; }
+
+message Q1ResultBatch { repeated Q1Result items = 1; }
+message Q2ResultBatch { repeated Q2Result items = 1; }
+message Q3ResultBatch { repeated Q3Result items = 1; }
+message Q4ResultBatch { repeated Q4Result items = 1; }
+message Q5ResultBatch { repeated Q5Result items = 1; }

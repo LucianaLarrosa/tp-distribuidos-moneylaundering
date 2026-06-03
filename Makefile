@@ -82,8 +82,9 @@ proto:
 	docker run --rm -v $(PWD):/w -w /w python:3.11-slim sh -c "\
 		pip install grpcio-tools==1.80.0 -q && \
 		python -m grpc_tools.protoc \
-			-I src/common/protocol \
-			--python_out=src/common/protocol \
+			-I src \
+			--python_out=src \
+			src/common/protocol/common_protobuf/common_protobuf.proto \
 			src/common/protocol/internal/internal.proto \
 			src/common/protocol/external/external.proto"
 
