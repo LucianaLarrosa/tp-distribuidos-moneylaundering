@@ -92,8 +92,8 @@ class RingCoordinatedWorker(Worker):
     def _get_total_count(self, key, count_dict, partial_dict, lock, current_total):
         with lock:
             count = count_dict.get(key, 0)
-        partial = partial_dict.get(key, 0)
-        partial_dict[key] = count
+            partial = partial_dict.get(key, 0)
+            partial_dict[key] = count
         return current_total + count - partial
 
     def _increment_processed_count(self, client_id, gateway_id):
@@ -125,10 +125,15 @@ class RingCoordinatedWorker(Worker):
             ),
         )
 
-    def _handle_control_eof_message(self, client_id, gateway_id, ring_eof):
+    def _handle_control_eof_message(
+        self, client_id, gateway_id, ring_eof, output_exchange=None
+    ):
         """
         Handle a RING_EOF message by either forwarding it to the next node in the ring, flushing data and sending an EOF to the output middleware if this node is the coordinator.
         """
+        if output_exchange is None:
+            output_exchange = self._control_output_control_middleware
+
         if ring_eof.coordinator_id is None:
             ring_eof = self._update_ring_eof(client_id, gateway_id, ring_eof)
         else:
@@ -141,7 +146,7 @@ class RingCoordinatedWorker(Worker):
                     client_id, gateway_id, EOF(self._get_final_eof_count(ring_eof))
                 )
                 return
-        self._control_output_control_middleware.send(
+        output_exchange.send(
             internal.serialize_msg(
                 internal.MsgType.RING_EOF, client_id, gateway_id, ring_eof
             ),
@@ -160,10 +165,13 @@ class RingCoordinatedWorker(Worker):
     def _get_next_node_id(self):
         return (self._node_id + 1) % self._ring_size
 
-    def _handle_eof_message(self, client_id, gateway_id, eof):
+    def _handle_eof_message(self, client_id, gateway_id, eof, output_exchange=None):
         """
         Handle an EOF message by sending a RING_EOF to the next node in the ring.
         """
+        if output_exchange is None:
+            output_exchange = self._output_control_middleware
+
         total_processed_count = self._get_total_count(
             (client_id, gateway_id),
             self._processed_counts,
@@ -171,7 +179,7 @@ class RingCoordinatedWorker(Worker):
             self._processed_counts_lock,
             0,
         )
-        self._output_control_middleware.send(
+        output_exchange.send(
             internal.serialize_msg(
                 internal.MsgType.RING_EOF,
                 client_id,

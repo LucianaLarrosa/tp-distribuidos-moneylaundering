@@ -59,6 +59,11 @@ class AnomalyFilter(SideInputStatelessCoordinatedWorker, SafeOutputCapable):
             exchange_name=config.output_exchange,
             routing_keys=[],
         )
+        self._side_output_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
+            host=config.rabbitmq_host,
+            exchange_name=config.output_exchange,
+            routing_keys=[],
+        )
 
     @property
     def _input_middleware(self):
@@ -186,6 +191,17 @@ class AnomalyFilter(SideInputStatelessCoordinatedWorker, SafeOutputCapable):
                     entry.average_amount
                 )
 
+    def _on_side_input_ready(self, client_id, gateway_id):
+        key = self._flow_key(client_id, gateway_id)
+        with self._get_flow_lock(key):
+            avgs = self._avgs.get(key, {})
+            self._spill.drain(
+                key,
+                lambda batch: self._filter_and_emit(
+                    client_id, gateway_id, batch, avgs, self._side_output_exchange
+                ),
+            )
+
     def _drop_flow_state(self, key):
         self._avgs.pop(key, None)
         self._side_input.drop(key)
@@ -193,14 +209,14 @@ class AnomalyFilter(SideInputStatelessCoordinatedWorker, SafeOutputCapable):
 
     def _flush_data(self, client_id, gateway_id):
         key = self._flow_key(client_id, gateway_id)
-        avgs = self._avgs.get(key, {})
-        self._spill.drain(
-            key,
-            lambda batch: self._filter_and_emit(
-                client_id, gateway_id, batch, avgs, self._control_output_exchange
-            ),
-        )
         with self._get_flow_lock(key):
+            avgs = self._avgs.get(key, {})
+            self._spill.drain(
+                key,
+                lambda batch: self._filter_and_emit(
+                    client_id, gateway_id, batch, avgs, self._control_output_exchange
+                ),
+            )
             self._drop_flow_state(key)
 
     def _send_final_eof(self, client_id, gateway_id, eof):
@@ -217,6 +233,8 @@ class AnomalyFilter(SideInputStatelessCoordinatedWorker, SafeOutputCapable):
 
     def shutdown(self):
         super().shutdown()
+        self._side_output_exchange.close()
+        self._control_output_exchange.close()
         self._spill.close_all()
 
 

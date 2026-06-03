@@ -2,6 +2,9 @@ import logging
 import threading
 from abc import abstractmethod
 
+from common.middleware.middleware_rabbitmq import (
+    MessageMiddlewareExchangeDirectRabbitMQ,
+)
 from common.protocol import internal
 from common.utils import SideInputTracker
 from common.worker.ring_coordinated_worker import RingCoordinatedWorker
@@ -16,6 +19,11 @@ class SideInputStatelessCoordinatedWorker(RingCoordinatedWorker):
         self._deferred_data_eofs = {}
         self._deferred_ring_eofs = {}
         self._deferred_lock = threading.Lock()
+        self._side_output_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
+            host=self._rabbitmq_host,
+            exchange_name=self._control_exchange_name,
+            routing_keys=[],
+        )
 
     @property
     @abstractmethod
@@ -29,6 +37,9 @@ class SideInputStatelessCoordinatedWorker(RingCoordinatedWorker):
 
     @abstractmethod
     def _process_side_batch(self, client_id, gateway_id, payload):
+        pass
+
+    def _on_side_input_ready(self, client_id, gateway_id):
         pass
 
     def _get_total_sent_count(self, _client_id, _gateway_id, current_total):
@@ -89,10 +100,21 @@ class SideInputStatelessCoordinatedWorker(RingCoordinatedWorker):
             self._side_input_ready[key] = True
             deferred_data = self._deferred_data_eofs.pop(key, None)
             deferred_ring = self._deferred_ring_eofs.pop(key, None)
+        self._on_side_input_ready(client_id, gateway_id)
         if deferred_data is not None:
-            super()._handle_eof_message(client_id, gateway_id, deferred_data)
+            super()._handle_eof_message(
+                client_id,
+                gateway_id,
+                deferred_data,
+                self._side_output_control_exchange,
+            )
         if deferred_ring is not None:
-            super()._handle_control_eof_message(client_id, gateway_id, deferred_ring)
+            super()._handle_control_eof_message(
+                client_id,
+                gateway_id,
+                deferred_ring,
+                self._side_output_control_exchange,
+            )
 
     def start(self):
         self._side_input_thread = threading.Thread(
@@ -109,3 +131,4 @@ class SideInputStatelessCoordinatedWorker(RingCoordinatedWorker):
             self._input_side_middleware.stop_consuming_threadsafe()
             self._side_input_thread.join()
         self._input_side_middleware.close()
+        self._side_output_control_exchange.close()
