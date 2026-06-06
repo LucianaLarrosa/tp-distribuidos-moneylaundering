@@ -7,11 +7,11 @@ from common.middleware.middleware_rabbitmq import (
 )
 from common.models.bank_max_partial import BankMaxPartial
 from common.protocol.internal import internal
-from common.worker.sent_coordinated_worker import SentCoordinatedWorker
+from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
 from config import Config
 
 
-class BankMaxAggregator(SentCoordinatedWorker):
+class BankMaxAggregator(StatefulCoordinatedWorker):
     def __init__(self, config):
         self.config = config
         super().__init__()

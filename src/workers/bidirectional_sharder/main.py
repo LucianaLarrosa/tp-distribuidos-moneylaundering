@@ -8,12 +8,12 @@ from common.middleware.middleware_rabbitmq import (
 )
 from common.models.account_edge import AccountEdge
 from common.protocol.internal import internal
-from common.worker.sent_coordinated_worker import SentCoordinatedWorker
+from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
 from common.worker.safe_output_capable import SafeOutputCapable
 from config import Config
 
 
-class BidirectionalSharder(SafeOutputCapable, SentCoordinatedWorker):
+class BidirectionalSharder(SafeOutputCapable, StatefulCoordinatedWorker):
     NUM_FIELDS_FOR_SHARDING = 2
 
     def __init__(self, config):
@@ -95,7 +95,12 @@ class BidirectionalSharder(SafeOutputCapable, SentCoordinatedWorker):
         """
         edges_by_routing_key = {}
         for transaction in payload:
-            if None in (transaction.from_bank, transaction.from_account, transaction.to_bank, transaction.to_account):
+            if None in (
+                transaction.from_bank,
+                transaction.from_account,
+                transaction.to_bank,
+                transaction.to_account,
+            ):
                 continue
             for transaction_direction in [
                 (

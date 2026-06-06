@@ -6,11 +6,11 @@ from common.middleware.middleware_rabbitmq import (
 )
 
 from common.protocol.internal import internal
-from common.worker.sent_coordinated_worker import SentCoordinatedWorker
+from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
 from config import Config
 
 
-class BankMaxReducer(SentCoordinatedWorker):
+class BankMaxReducer(StatefulCoordinatedWorker):
     def __init__(self, config):
         self.config = config
         super().__init__()
@@ -97,7 +97,10 @@ class BankMaxReducer(SentCoordinatedWorker):
         for routing_key, bank_list in sharded_banks.items():
             self._output_exchange.send(
                 internal.serialize_msg(
-                    internal.MsgType.BANK_MAX_PARTIAL_BATCH, client_id, gateway_id, bank_list
+                    internal.MsgType.BANK_MAX_PARTIAL_BATCH,
+                    client_id,
+                    gateway_id,
+                    bank_list,
                 ),
                 routing_key=routing_key,
             )
@@ -106,8 +109,9 @@ class BankMaxReducer(SentCoordinatedWorker):
     def _send_final_eof(self, client_id, gateway_id, eof):
         self._output_exchange.send(
             internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof),
-            routing_key="1"
+            routing_key="1",
         )
+
 
 def main():
     logging.basicConfig(

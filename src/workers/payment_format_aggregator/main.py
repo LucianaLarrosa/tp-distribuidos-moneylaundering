@@ -7,11 +7,11 @@ from common.middleware.middleware_rabbitmq import (
 )
 from common.models.payment_format_partial import PaymentFormatPartial
 from common.protocol.internal import internal
-from common.worker.sent_coordinated_worker import SentCoordinatedWorker
+from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
 from config import Config
 
 
-class PaymentFormatAggregator(SentCoordinatedWorker):
+class PaymentFormatAggregator(StatefulCoordinatedWorker):
     def __init__(self, config):
         self.config = config
         super().__init__()

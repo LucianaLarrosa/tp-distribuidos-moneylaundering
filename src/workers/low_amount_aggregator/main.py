@@ -5,11 +5,11 @@ from common.middleware.middleware_rabbitmq import (
 )
 from common.models.count import Count
 from common.protocol.internal import internal
-from common.worker.sent_coordinated_worker import SentCoordinatedWorker
+from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
 from config import Config
 
 
-class LowAmountAggregator(SentCoordinatedWorker):
+class LowAmountAggregator(StatefulCoordinatedWorker):
     def __init__(self, config: Config):
         self.config = config
         super().__init__()
