@@ -1,16 +1,15 @@
 import logging
 
 from common.middleware.middleware_rabbitmq import (
-    MessageMiddlewareExchangeDirectRabbitMQ,
     MessageMiddlewareQueueRabbitMQ,
 )
 from common.models.count import Count
 from common.protocol.internal import internal
-from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
+from common.worker.sent_coordinated_worker import SentCoordinatedWorker
 from config import Config
 
 
-class LowAmountAggregator(StatefulCoordinatedWorker):
+class LowAmountAggregator(SentCoordinatedWorker):
     def __init__(self, config: Config):
         self.config = config
         super().__init__()
@@ -63,6 +62,7 @@ class LowAmountAggregator(StatefulCoordinatedWorker):
                 internal.MsgType.COUNT, client_id, gateway_id, Count(count=count)
             )
         )
+        self._increment_sent_count(client_id, gateway_id)
 
     def _send_final_eof(self, client_id, gateway_id, eof):
         self._output_queue.send(

@@ -6,10 +6,10 @@ from common.middleware.middleware_rabbitmq import (
 )
 from common.models.query_results import Q5Result
 from common.protocol.internal import internal
-from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
+from common.worker.sent_coordinated_worker import SentCoordinatedWorker
 from config import Config
 
-class LowAmountReducer(StatefulCoordinatedWorker):
+class LowAmountReducer(SentCoordinatedWorker):
     def __init__(self, config: Config):
         self.config = config
         super().__init__()
@@ -67,6 +67,7 @@ class LowAmountReducer(StatefulCoordinatedWorker):
             ),
             routing_key=gateway_id,
         )
+        self._increment_sent_count(client_id, gateway_id)
 
     def _send_final_eof(self, client_id, gateway_id, eof):
         self._output_exchange.send(
