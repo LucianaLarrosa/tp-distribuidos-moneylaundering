@@ -1,10 +1,9 @@
 import logging
 import signal
-import socket
 import threading
 
 from proxy.config import Config
-from common.socket.safe_socket import SafeSocket
+from common.socket.safe_socket import SafeTCPSocket
 from common.protocol.external import external
 from common.protocol.external.external import MsgType
 
@@ -12,8 +11,8 @@ from common.protocol.external.external import MsgType
 class Proxy:
     def __init__(self, config):
         self._config = config
-        self._server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._server_sock.bind((config.listen_host, config.listen_port))
+        self._server_sock = SafeTCPSocket()
+        self._server_sock.bind(config.listen_host, config.listen_port)
         self._server_sock.listen()
         self._next_index = 0
         self._index_lock = threading.Lock()
@@ -29,10 +28,10 @@ class Proxy:
         )
         try:
             while True:
-                client_sock_raw, addr = self._server_sock.accept()
+                client_sock, addr = self._server_sock.accept()
                 threading.Thread(
                     target=self._handle_client,
-                    args=(client_sock_raw, addr),
+                    args=(client_sock, addr),
                     daemon=True,
                 ).start()
         except OSError:
@@ -45,8 +44,7 @@ class Proxy:
             self._next_index = (self._next_index + 1) % len(self._config.gateway_hosts)
         return host
 
-    def _handle_client(self, client_sock_raw, addr):
-        sock = SafeSocket(client_sock_raw)
+    def _handle_client(self, sock, addr):
         try:
             host = self._pick_gateway()
             external.send_msg(sock, MsgType.REDIRECT, host, self._config.gateway_port)

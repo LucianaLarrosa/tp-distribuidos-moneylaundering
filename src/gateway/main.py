@@ -1,7 +1,6 @@
 import logging
 import multiprocessing
 import signal
-import socket
 import uuid
 
 from gateway.config import Config
@@ -11,7 +10,7 @@ from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
 from common.protocol.internal import internal
-from common.socket.safe_socket import SafeSocket
+from common.socket.safe_socket import SafeTCPSocket
 
 
 def _handle_client_process(sock, client_id, gateway_id, config, results_queue):
@@ -72,8 +71,8 @@ class Gateway:
     def __init__(self, config):
         self._config = config
         self._gateway_id = str(uuid.uuid4())
-        self._server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._server_sock.bind((config.listen_host, config.listen_port))
+        self._server_sock = SafeTCPSocket()
+        self._server_sock.bind(config.listen_host, config.listen_port)
         self._server_sock.listen()
         self._pool = multiprocessing.Pool(
             processes=config.pool_size, initializer=_worker_init
@@ -103,8 +102,7 @@ class Gateway:
 
         try:
             while True:
-                client_sock_raw, addr = self._server_sock.accept()
-                client_sock = SafeSocket(client_sock_raw)
+                client_sock, addr = self._server_sock.accept()
                 client_id = str(uuid.uuid4())
                 results_queue = self._manager.Queue()
                 self._client_queues[client_id] = results_queue
