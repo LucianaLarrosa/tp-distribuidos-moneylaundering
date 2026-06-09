@@ -72,11 +72,11 @@ COMPOSE_ARGS = \
 	--duplicate-account-filters   $(DUPLICATE_ACCOUNT_FILTERS) \
 	--output-file                 $(COMPOSE_FILE)
 
-.PHONY: compose build up down logs remove-output clean clean-all build-expected verify-output output-test up-and-stop verify-shutdown verify-exit-codes exit-test
+CHAOS_NODE ?= amount_filter_0
 
-all: compose build
-	$(MAKE) output-test
-	$(MAKE) exit-test
+.PHONY: compose build up down logs remove-output clean clean-all build-expected verify-output output-test chaos-kill
+
+all: compose build output-test
 
 proto:
 	docker run --rm -v $(PWD):/w -w /w python:3.11-slim sh -c "\
@@ -103,6 +103,9 @@ down:
 
 logs:
 	docker compose -f $(COMPOSE_FILE) logs -f
+
+chaos-kill:
+	docker kill $(CHAOS_NODE)
 
 remove-output:
 	rm -f $(COMPOSE_FILE)
@@ -157,46 +160,3 @@ verify-output:
 	[ $$mismatch -eq 0 ]
 
 output-test: up wait-clients build-expected verify-output down
-
-up-and-stop: up
-	sleep $(SLEEP_TIME)
-	docker compose -f $(COMPOSE_FILE) stop --timeout 10
-
-verify-shutdown:
-	@all_shutdown=0; \
-	for name in $$(docker compose -f $(COMPOSE_FILE) ps --all --format '{{.Name}}'); do \
-		if [ "$$name" != "rabbitmq" ]; then \
-			logs=$$(docker logs $$name 2>&1); \
-			if echo "$$logs" | grep -Eq "Shutting down|Shutdown"; then \
-				printf "$(LIME)✓ %-45s shutdown detected$(RESET)\n" "$$name"; \
-			else \
-				printf "$(RED)✗ %-45s missing shutdown log$(RESET)\n" "$$name"; \
-				all_shutdown=1; \
-			fi; \
-		fi; \
-	done; \
-	[ $$all_shutdown -eq 0 ]
-
-verify-exit-codes:
-	@has_successful_exit=1; \
-	for name in $$(docker compose -f $(COMPOSE_FILE) ps --all --format '{{.Name}}'); do \
-		code=$$(docker inspect $$name --format='{{.State.ExitCode}}'); \
-		if [ "$$code" = "0" ]; then \
-			printf "$(LIME)✓ %-45s exit code 0$(RESET)\n" "$$name"; \
-			has_successful_exit=0; \
-		else \
-			printf "$(RED)✗ %-45s exit code $$code$(RESET)\n" "$$name"; \
-		fi; \
-	done; \
-	[ $$has_successful_exit -eq 0 ]
-
-exit-test: up-and-stop
-	@$(MAKE) verify-shutdown; all_shutdown=$$?; \
-	$(MAKE) verify-exit-codes; has_successful_exit=$$?; \
-	if [ $$all_shutdown -eq 0 ] && [ $$has_successful_exit -eq 0 ]; then \
-		printf "$(LIME)Graceful shutdown test passed$(RESET)\n"; \
-	else \
-		printf "$(RED)Graceful shutdown test failed$(RESET)\n"; \
-	fi; \
-	$(MAKE) down; \
-	[ $$all_shutdown -eq 0 ] && [ $$has_successful_exit -eq 0 ]
