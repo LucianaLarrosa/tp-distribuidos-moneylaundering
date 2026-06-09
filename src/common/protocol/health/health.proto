@@ -1,0 +1,7 @@
+syntax = "proto3";
+
+package health;
+
+message Heartbeat {
+  string node_name = 1;
+}

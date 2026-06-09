@@ -86,7 +86,8 @@ proto:
 			--python_out=src \
 			src/common/protocol/common_protobuf/common_protobuf.proto \
 			src/common/protocol/internal/internal.proto \
-			src/common/protocol/external/external.proto"
+			src/common/protocol/external/external.proto \
+			src/common/protocol/health/health.proto"
 
 compose:
 	python3 compose_generator.py $(COMPOSE_ARGS)
