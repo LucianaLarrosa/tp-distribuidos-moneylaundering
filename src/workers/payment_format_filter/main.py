@@ -55,13 +55,12 @@ class PaymentFormatFilter(StatelessWorker):
             if None not in (transaction.timestamp, transaction.payment_format, transaction.amount, transaction.currency)
             and transaction.payment_format.lower() in self.config.valid_payment_formats
         ]
-        self._output_queue.send(
-            internal.serialize_msg(
-                internal.MsgType.CURRENCY_CONVERSION_BATCH,
-                client_id,
-                gateway_id,
-                filtered,
-            )
+        self._send(
+            self._output_queue,
+            internal.MsgType.CURRENCY_CONVERSION_BATCH,
+            client_id,
+            gateway_id,
+            filtered,
         )
 
 

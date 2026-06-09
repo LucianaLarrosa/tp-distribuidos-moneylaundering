@@ -63,10 +63,12 @@ class AmountFilter(StatelessWorker):
                         amount_paid=tx.amount,
                     )
                 )
-        self._output_exchange.send(
-            internal.serialize_msg(
-                internal.MsgType.Q1_RESULT_BATCH, client_id, gateway_id, filtered
-            ),
+        self._send(
+            self._output_exchange,
+            internal.MsgType.Q1_RESULT_BATCH,
+            client_id,
+            gateway_id,
+            filtered,
             routing_key=gateway_id,
         )
 

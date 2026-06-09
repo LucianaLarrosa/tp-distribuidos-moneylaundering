@@ -1,11 +1,11 @@
 import logging
-import hashlib
 
 from common.models.bank import Bank
 from common.protocol.internal import internal
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
+from common.sharding import shard_of
 from common.worker.stateless_worker import StatelessWorker
 from config import Config
 
@@ -42,33 +42,30 @@ class AccountsFieldMapper(StatelessWorker):
                 routing_key=self._output_prefix_routing_key(rk),
             )
 
-    def _shard_key(self, bank):
-        node_id = (
-            int(hashlib.md5(f"{bank}".encode()).hexdigest(), 16)
-            % self.config.output_node_count
-        )
-        return self._output_prefix_routing_key(node_id)
-
     def _handle_data_message(self, _, client_id, gateway_id, payload):
         """
         Parse each raw CSV line into a Bank and send one batch to every shard.
+        The input id is forwarded unchanged (pass-through): each shard goes to a
+        distinct downstream node, so the input id is already unique per consumer.
         """
         banks = [self._parse(raw_acc.raw) for raw_acc in payload]
 
         sharded_banks = {
-            self._output_prefix_routing_key(node_id): []
-            for node_id in range(self.config.output_node_count)
+            node_id: [] for node_id in range(self.config.output_node_count)
         }
         for bank in banks:
-            routing_key = self._shard_key(bank.bank_id)
-            sharded_banks[routing_key].append(bank)
+            sharded_banks[shard_of(bank.bank_id, self.config.output_node_count)].append(
+                bank
+            )
 
-        for routing_key, bank_list in sharded_banks.items():
-            self._output_exchange.send(
-                internal.serialize_msg(
-                    internal.MsgType.BANK_BATCH, client_id, gateway_id, bank_list
-                ),
-                routing_key=routing_key,
+        for node_id, bank_list in sharded_banks.items():
+            self._send(
+                self._output_exchange,
+                internal.MsgType.BANK_BATCH,
+                client_id,
+                gateway_id,
+                bank_list,
+                routing_key=self._output_prefix_routing_key(node_id),
             )
 
     def _output_prefix_routing_key(self, routing_key):

@@ -3,11 +3,17 @@ from datetime import datetime
 
 import requests
 
-from common.middleware.middleware_rabbitmq import MessageMiddlewareQueueRabbitMQ
+from common.middleware.middleware_rabbitmq import (
+    MessageMiddlewareExchangeDirectRabbitMQ,
+    MessageMiddlewareQueueRabbitMQ,
+)
 from common.models.transaction_amount import TransactionAmount
 from common.protocol.internal import internal
+from common.sharding import shard_of
 from common.worker.stateless_worker import StatelessWorker
 from config import Config
+
+EOF_SHARD = "0"
 
 
 class CurrencyMapper(StatelessWorker):
@@ -47,9 +53,10 @@ class CurrencyMapper(StatelessWorker):
             host=config.rabbitmq_host,
             queue_name=config.input_queue,
         )
-        self._output_queue = MessageMiddlewareQueueRabbitMQ(
+        self._output_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
-            queue_name=config.output_queue,
+            exchange_name=config.output_exchange,
+            routing_keys=[],
         )
 
     @property
@@ -58,7 +65,7 @@ class CurrencyMapper(StatelessWorker):
 
     @property
     def _output_middleware(self):
-        return self._output_queue
+        return self._output_exchange
 
     def _fetch_rates(self):
         """
@@ -94,14 +101,16 @@ class CurrencyMapper(StatelessWorker):
         return round(float(amount) * (1.0 / rate), self._DECIMAL_PLACES)
 
     def _send_final_eof(self, client_id, gateway_id, eof):
-        self._output_queue.send(
-            internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof)
+        self._send(
+            self._output_exchange,
+            internal.MsgType.EOF,
+            client_id,
+            gateway_id,
+            eof,
+            routing_key=EOF_SHARD,
         )
 
     def _handle_data_message(self, _, client_id, gateway_id, payload):
-        """
-        Handle incoming data messages by converting transaction amounts to the target currency and sending the converted amounts to the output queue.
-        """
         converted = [
             TransactionAmount(
                 amount=self._resolve_rate(
@@ -110,13 +119,14 @@ class CurrencyMapper(StatelessWorker):
             )
             for transaction in payload
         ]
-        self._output_queue.send(
-            internal.serialize_msg(
-                internal.MsgType.AMOUNT_TRANSACTION_BATCH,
-                client_id,
-                gateway_id,
-                converted,
-            )
+        shard = shard_of(self._current_message_id, self.config.output_node_count)
+        self._send(
+            self._output_exchange,
+            internal.MsgType.AMOUNT_TRANSACTION_BATCH,
+            client_id,
+            gateway_id,
+            converted,
+            routing_key=str(shard),
         )
 
 

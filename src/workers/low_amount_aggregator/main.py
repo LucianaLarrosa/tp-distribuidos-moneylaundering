@@ -1,6 +1,8 @@
 import logging
 
+from common.ids import flush_id
 from common.middleware.middleware_rabbitmq import (
+    MessageMiddlewareExchangeDirectRabbitMQ,
     MessageMiddlewareQueueRabbitMQ,
 )
 from common.models.count import Count
@@ -15,8 +17,10 @@ class LowAmountAggregator(StatefulCoordinatedWorker):
         super().__init__()
         self._counts = {}  # (client_id, gateway_id) -> count
 
-        self._input_queue = MessageMiddlewareQueueRabbitMQ(
+        self._input_queue = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
+            exchange_name=config.input_exchange,
+            routing_keys=[str(config.node_id)],
             queue_name=config.input_queue,
         )
         self._output_queue = MessageMiddlewareQueueRabbitMQ(
@@ -57,10 +61,13 @@ class LowAmountAggregator(StatefulCoordinatedWorker):
         Flush any buffered data by sending the count of low amount transactions for the given client_id and gateway_id to the output queue.
         """
         count = self._counts.pop((client_id, gateway_id), 0)
-        self._output_queue.send(
-            internal.serialize_msg(
-                internal.MsgType.COUNT, client_id, gateway_id, Count(count=count)
-            )
+        self._send(
+            self._output_queue,
+            internal.MsgType.COUNT,
+            client_id,
+            gateway_id,
+            Count(count=count),
+            message_id=flush_id(self.config.node_id, client_id, gateway_id, 0),
         )
         self._increment_sent_count(client_id, gateway_id)
 

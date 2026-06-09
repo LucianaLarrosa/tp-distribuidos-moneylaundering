@@ -31,12 +31,10 @@ class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
 
         self._spill = BatchSpill(
             spill_dir=self.config.spill_dir,
-            serialize=lambda batch: json.dumps(
-                [self._serialize_tx(tx) for tx in batch]
+            serialize=lambda entry: json.dumps(
+                {"mid": entry[0], "items": [self._serialize_tx(tx) for tx in entry[1]]}
             ),
-            deserialize=lambda line: [
-                self._deserialize_tx(d) for d in json.loads(line)
-            ],
+            deserialize=lambda line: self._deserialize_entry(line),
         )
 
         self._input_topic = MessageMiddlewareExchangeTopicRabbitMQ(
@@ -125,6 +123,10 @@ class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
         d["timestamp"] = datetime.fromisoformat(d["timestamp"])
         return Transaction(**d)
 
+    def _deserialize_entry(self, line):
+        obj = json.loads(line)
+        return (obj["mid"], [self._deserialize_tx(d) for d in obj["items"]])
+
     def _is_anomalous(self, tx, avgs):
         avg = avgs.get(tx.payment_format.strip().lower())
         if avg is None or avg <= 0:
@@ -134,7 +136,9 @@ class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
     def _payment_format_key(self, payment_format):
         return payment_format.strip().lower()
 
-    def _filter_and_emit(self, client_id, gateway_id, transactions, avgs, exchange):
+    def _filter_and_emit(
+        self, client_id, gateway_id, transactions, avgs, exchange, message_id
+    ):
         result_batch = []
         for tx in transactions:
             if self._is_anomalous(tx, avgs):
@@ -145,14 +149,14 @@ class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
                         amount_paid=tx.amount,
                     )
                 )
-        exchange.send(
-            internal.serialize_msg(
-                internal.MsgType.Q3_RESULT_BATCH,
-                client_id,
-                gateway_id,
-                result_batch,
-            ),
+        self._send(
+            exchange,
+            internal.MsgType.Q3_RESULT_BATCH,
+            client_id,
+            gateway_id,
+            result_batch,
             routing_key=gateway_id,
+            message_id=message_id,
         )
 
     def _has_required_anomaly_fields(self, tx):
@@ -172,9 +176,16 @@ class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
             if self._side_input.is_ready(key):
                 avgs = self._avgs.get(key, {})
             else:
-                self._spill.write(key, batch)
+                self._spill.write(key, (self._current_message_id, batch))
                 return
-        self._filter_and_emit(client_id, gateway_id, batch, avgs, self._output_exchange)
+        self._filter_and_emit(
+            client_id,
+            gateway_id,
+            batch,
+            avgs,
+            self._output_exchange,
+            message_id=self._current_message_id,
+        )
 
     def _process_side_batch(self, client_id, gateway_id, batch):
         key = self._flow_key(client_id, gateway_id)
@@ -191,8 +202,13 @@ class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
             avgs = self._avgs.get(key, {})
             self._spill.drain(
                 key,
-                lambda batch: self._filter_and_emit(
-                    client_id, gateway_id, batch, avgs, self._side_output_exchange
+                lambda entry: self._filter_and_emit(
+                    client_id,
+                    gateway_id,
+                    entry[1],
+                    avgs,
+                    self._side_output_exchange,
+                    message_id=entry[0],
                 ),
             )
 
@@ -208,8 +224,13 @@ class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
             avgs = self._avgs.get(key, {})
             self._spill.drain(
                 key,
-                lambda batch: self._filter_and_emit(
-                    client_id, gateway_id, batch, avgs, self._control_output_exchange
+                lambda entry: self._filter_and_emit(
+                    client_id,
+                    gateway_id,
+                    entry[1],
+                    avgs,
+                    self._control_output_exchange,
+                    message_id=entry[0],
                 ),
             )
             self._drop_flow_state(key)

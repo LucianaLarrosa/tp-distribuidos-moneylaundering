@@ -56,28 +56,18 @@ class DuplicateAccountFilter(StatefulCoordinatedWorker):
     def _ring_size(self):
         return self.config.ring_size
 
-    def _flush_data_in_batches(self, client_id, gateway_id, result):
-        """
-        Flush the given result in batches with the specified routing key.
-        """
-        for i in range(0, len(result), self.config.batch_size):
-            self._output_exchange.send(
-                internal.serialize_msg(
-                    internal.MsgType.Q4_RESULT_BATCH,
-                    client_id,
-                    gateway_id,
-                    result[i : i + self.config.batch_size],
-                ),
-                routing_key=gateway_id,
-            )
-            self._increment_sent_count(client_id, gateway_id)
-
     def _flush_data(self, client_id, gateway_id):
         unique_accounts = self._unique_accounts.pop((client_id, gateway_id), {})
-        self._flush_data_in_batches(
+        self._flush_sharded(
+            self._output_exchange,
+            internal.MsgType.Q4_RESULT_BATCH,
             client_id,
             gateway_id,
             list(unique_accounts.values()),
+            key_of=lambda result: f"{result.bank}.{result.account}",
+            num_shards=1,
+            batch_size=self.config.batch_size,
+            routing_key_for=lambda _shard: gateway_id,
         )
 
     def _send_final_eof(self, client_id, gateway_id, eof):

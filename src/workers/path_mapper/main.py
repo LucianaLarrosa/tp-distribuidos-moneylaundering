@@ -1,4 +1,3 @@
-import hashlib
 import logging
 import random
 
@@ -58,23 +57,13 @@ class PathMapper(StatefulCoordinatedWorker):
     def _ring_size(self):
         return self.config.ring_size
 
-    def _shard_key(self, bank, account, other_bank, other_account):
-        node_id = (
-            int(
-                hashlib.md5(
-                    f"{bank}.{account}.{other_bank}.{other_account}".encode()
-                ).hexdigest(),
-                16,
-            )
-            % self.config.output_node_count
-        )
-        return f"{self.config.output_node_prefix}{node_id}"
-
-    def _create_paths_by_routing_key(self, account_edges):
+    def _create_paths(self, account_edges):
         """
-        Create a dictionary mapping routing keys to paths, when possible, by hashing the bank and account of both extremes to ensure account affinity.
+        Build the in × out cartesian-product paths through each mid account,
+        flattened into a single list (the flush helper shards them by the path
+        extremes (from, to) to ensure account affinity downstream).
         """
-        paths_by_routing_key = {}
+        paths = []
         for (bank, account), (in_accounts, out_accounts) in account_edges.items():
             if not in_accounts or not out_accounts:
                 continue
@@ -82,10 +71,7 @@ class PathMapper(StatefulCoordinatedWorker):
                 for to_bank, to_account in out_accounts:
                     if (from_bank, from_account) == (to_bank, to_account):
                         continue
-                    paths_by_routing_key.setdefault(
-                        self._shard_key(from_bank, from_account, to_bank, to_account),
-                        [],
-                    ).append(
+                    paths.append(
                         Path(
                             from_bank=from_bank,
                             from_account=from_account,
@@ -95,29 +81,21 @@ class PathMapper(StatefulCoordinatedWorker):
                             to_account=to_account,
                         )
                     )
-        return paths_by_routing_key
-
-    def _flush_data_in_batches(self, client_id, gateway_id, routing_key, paths):
-        """
-        Flush the given paths in batches with the specified routing key.
-        """
-        for i in range(0, len(paths), self.config.batch_size):
-            self._output_exchange.send(
-                internal.serialize_msg(
-                    internal.MsgType.PATH_BATCH,
-                    client_id,
-                    gateway_id,
-                    paths[i : i + self.config.batch_size],
-                ),
-                routing_key=routing_key,
-            )
-            self._increment_sent_count(client_id, gateway_id)
+        return paths
 
     def _flush_data(self, client_id, gateway_id):
         account_edges = self._account_edges.pop((client_id, gateway_id), {})
-        paths_by_routing_key = self._create_paths_by_routing_key(account_edges)
-        for routing_key, paths in paths_by_routing_key.items():
-            self._flush_data_in_batches(client_id, gateway_id, routing_key, paths)
+        self._flush_sharded(
+            self._output_exchange,
+            internal.MsgType.PATH_BATCH,
+            client_id,
+            gateway_id,
+            self._create_paths(account_edges),
+            key_of=lambda path: f"{path.from_bank}.{path.from_account}.{path.to_bank}.{path.to_account}",
+            num_shards=self.config.output_node_count,
+            batch_size=self.config.batch_size,
+            routing_key_for=lambda shard: f"{self.config.output_node_prefix}{shard}",
+        )
 
     def _send_final_eof(self, client_id, gateway_id, eof):
         """

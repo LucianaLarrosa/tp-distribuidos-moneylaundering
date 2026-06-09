@@ -98,6 +98,7 @@ message PathBatch                  { repeated Path                             i
 message Envelope {
   string client_id  = 1;
   string gateway_id = 2;
+  string message_id = 23;
 
   oneof payload {
     common_protobuf.RawTransactionBatch raw_transaction_batch        = 3;

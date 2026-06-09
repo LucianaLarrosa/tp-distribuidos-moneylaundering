@@ -1,4 +1,3 @@
-import hashlib
 import logging
 import random
 
@@ -58,18 +57,12 @@ class AccountFrequencyFilter(StatefulCoordinatedWorker):
     def _ring_size(self):
         return self.config.ring_size
 
-    def _shard_key(self, bank, account):
-        node_id = (
-            int(hashlib.md5(f"{bank}.{account}".encode()).hexdigest(), 16)
-            % self.config.output_node_count
-        )
-        return f"{self.config.output_node_prefix}{node_id}"
-
-    def _create_edges_by_routing_key(self, account_edges):
+    def _create_edges(self, account_edges):
         """
-        Create a dictionary mapping routing keys to account edges that meet the frequency threshold, by hashing the bank and account to ensure account affinity.
+        Build the account edges that meet the frequency threshold, flattened into
+        a single list (the flush helper shards them by (bank, account)).
         """
-        edges_by_routing_key = {}
+        edges = []
         for (bank, account), (in_accounts, out_accounts) in account_edges.items():
             for accounts, is_sender in [
                 (in_accounts, False),
@@ -78,9 +71,7 @@ class AccountFrequencyFilter(StatefulCoordinatedWorker):
                 if len(accounts) < self.config.min_required_accounts:
                     continue
                 for other_bank, other_account in accounts:
-                    edges_by_routing_key.setdefault(
-                        self._shard_key(other_bank, other_account), []
-                    ).append(
+                    edges.append(
                         AccountEdge(
                             bank=other_bank,
                             account=other_account,
@@ -89,29 +80,21 @@ class AccountFrequencyFilter(StatefulCoordinatedWorker):
                             is_sender=not is_sender,
                         )
                     )
-        return edges_by_routing_key
-
-    def _flush_data_in_batches(self, client_id, gateway_id, routing_key, edges):
-        """
-        Flush the given edges in batches with the specified routing key.
-        """
-        for i in range(0, len(edges), self.config.batch_size):
-            self._output_exchange.send(
-                internal.serialize_msg(
-                    internal.MsgType.ACCOUNT_EDGE_BATCH,
-                    client_id,
-                    gateway_id,
-                    edges[i : i + self.config.batch_size],
-                ),
-                routing_key=routing_key,
-            )
-            self._increment_sent_count(client_id, gateway_id)
+        return edges
 
     def _flush_data(self, client_id, gateway_id):
         account_edges = self._account_edges.pop((client_id, gateway_id), {})
-        edges_by_routing_key = self._create_edges_by_routing_key(account_edges)
-        for routing_key, edges in edges_by_routing_key.items():
-            self._flush_data_in_batches(client_id, gateway_id, routing_key, edges)
+        self._flush_sharded(
+            self._output_exchange,
+            internal.MsgType.ACCOUNT_EDGE_BATCH,
+            client_id,
+            gateway_id,
+            self._create_edges(account_edges),
+            key_of=lambda edge: f"{edge.bank}.{edge.account}",
+            num_shards=self.config.output_node_count,
+            batch_size=self.config.batch_size,
+            routing_key_for=lambda shard: f"{self.config.output_node_prefix}{shard}",
+        )
 
     def _send_final_eof(self, client_id, gateway_id, eof):
         """

@@ -1,4 +1,3 @@
-import hashlib
 import logging
 import random
 
@@ -58,18 +57,12 @@ class PathFrequencyFilter(StatefulCoordinatedWorker):
     def _ring_size(self):
         return self.config.ring_size
 
-    def _shard_key(self, bank, account):
-        node_id = (
-            int(hashlib.md5(f"{bank}.{account}".encode()).hexdigest(), 16)
-            % self.config.output_node_count
-        )
-        return f"{self.config.output_node_prefix}{node_id}"
-
-    def _create_result_by_routing_key(self, paths):
+    def _create_results(self, paths):
         """
-        Create Q4Results by routing key, filtering paths below frequency threshold.
+        Build the Q4Results for paths above the frequency threshold, flattened
+        into a single list (the flush helper shards them by (bank, account)).
         """
-        result_by_routing_key = {}
+        results = []
         for (
             from_bank,
             from_account,
@@ -79,32 +72,22 @@ class PathFrequencyFilter(StatefulCoordinatedWorker):
             if len(mid_accounts) < self.config.min_required_accounts:
                 continue
             for bank, account in [(from_bank, from_account), (to_bank, to_account)]:
-                result_by_routing_key.setdefault(
-                    self._shard_key(bank, account), []
-                ).append(Q4Result(bank, account))
-        return result_by_routing_key
-
-    def _flush_data_in_batches(self, client_id, gateway_id, routing_key, result):
-        """
-        Flush the given result in batches with the specified routing key.
-        """
-        for i in range(0, len(result), self.config.batch_size):
-            self._output_exchange.send(
-                internal.serialize_msg(
-                    internal.MsgType.Q4_RESULT_BATCH,
-                    client_id,
-                    gateway_id,
-                    result[i : i + self.config.batch_size],
-                ),
-                routing_key=routing_key,
-            )
-            self._increment_sent_count(client_id, gateway_id)
+                results.append(Q4Result(bank, account))
+        return results
 
     def _flush_data(self, client_id, gateway_id):
         paths = self._paths.pop((client_id, gateway_id), {})
-        result_by_routing_key = self._create_result_by_routing_key(paths)
-        for routing_key, result in result_by_routing_key.items():
-            self._flush_data_in_batches(client_id, gateway_id, routing_key, result)
+        self._flush_sharded(
+            self._output_exchange,
+            internal.MsgType.Q4_RESULT_BATCH,
+            client_id,
+            gateway_id,
+            self._create_results(paths),
+            key_of=lambda result: f"{result.bank}.{result.account}",
+            num_shards=self.config.output_node_count,
+            batch_size=self.config.batch_size,
+            routing_key_for=lambda shard: f"{self.config.output_node_prefix}{shard}",
+        )
 
     def _send_final_eof(self, client_id, gateway_id, eof):
         node_id = random.randint(0, self.config.output_node_count - 1)

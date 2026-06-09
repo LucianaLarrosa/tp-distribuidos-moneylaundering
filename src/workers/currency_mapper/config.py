@@ -7,7 +7,8 @@ class Config:
     def __init__(self):
         self.rabbitmq_host = os.environ["RABBITMQ_HOST"]
         self.input_queue = os.environ["INPUT_QUEUE"]
-        self.output_queue = os.environ["OUTPUT_QUEUE"]
+        self.output_exchange = os.environ["OUTPUT_EXCHANGE"]
+        self.output_node_count = int(os.environ["OUTPUT_NODE_COUNT"])
         self.target_currency = os.environ.get("TARGET_CURRENCY")
         self.frankfurter_url = os.environ["FRANKFURTER_URL"]
         self.frankfurter_timeout_seconds = int(

@@ -28,8 +28,10 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
 
         self._spill = BatchSpill(
             spill_dir=self.config.spill_dir,
-            serialize=lambda batch: json.dumps([asdict(bm) for bm in batch]),
-            deserialize=lambda line: [BankMaxPartial(**d) for d in json.loads(line)],
+            serialize=lambda entry: json.dumps(
+                {"mid": entry[0], "items": [asdict(bm) for bm in entry[1]]}
+            ),
+            deserialize=lambda line: self._deserialize_entry(line),
         )
 
         self._input_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
@@ -104,6 +106,10 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
     def _flow_key(self, client_id, gateway_id):
         return (client_id, gateway_id)
 
+    def _deserialize_entry(self, line):
+        obj = json.loads(line)
+        return (obj["mid"], [BankMaxPartial(**d) for d in obj["items"]])
+
     def _get_flow_lock(self, key):
         with self._flow_locks_guard:
             lock = self._flow_locks.get(key)
@@ -135,7 +141,9 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
             for bank in batch:
                 self._store_bank_unlocked(key, bank, client_id, gateway_id)
 
-    def _map_and_emit(self, client_id, gateway_id, bank_max_batch, exchange):
+    def _map_and_emit(
+        self, client_id, gateway_id, bank_max_batch, exchange, message_id
+    ):
         key = self._flow_key(client_id, gateway_id)
         with self._bank_names_lock:
             bank_names = dict(self._bank_names.get(key, {}))
@@ -149,14 +157,14 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
                     amount_paid=bank_max.amount,
                 )
             )
-        exchange.send(
-            internal.serialize_msg(
-                internal.MsgType.Q2_RESULT_BATCH,
-                client_id,
-                gateway_id,
-                mapped_batch,
-            ),
+        self._send(
+            exchange,
+            internal.MsgType.Q2_RESULT_BATCH,
+            client_id,
+            gateway_id,
+            mapped_batch,
             routing_key=gateway_id,
+            message_id=message_id,
         )
 
     def _handle_data_message(self, _, client_id, gateway_id, bank_max_batch):
@@ -164,10 +172,14 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
         with self._get_flow_lock(key):
             super()._handle_data_message(_, client_id, gateway_id, bank_max_batch)
             if not self._side_input.is_ready(key):
-                self._spill.write(key, bank_max_batch)
+                self._spill.write(key, (self._current_message_id, bank_max_batch))
                 return
             self._map_and_emit(
-                client_id, gateway_id, bank_max_batch, self._output_exchange
+                client_id,
+                gateway_id,
+                bank_max_batch,
+                self._output_exchange,
+                message_id=self._current_message_id,
             )
 
     def _on_side_input_ready(self, client_id, gateway_id):
@@ -175,8 +187,12 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
         with self._get_flow_lock(key):
             self._spill.drain(
                 key,
-                lambda batch: self._map_and_emit(
-                    client_id, gateway_id, batch, self._side_output_exchange
+                lambda entry: self._map_and_emit(
+                    client_id,
+                    gateway_id,
+                    entry[1],
+                    self._side_output_exchange,
+                    message_id=entry[0],
                 ),
             )
 
@@ -185,8 +201,12 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
         with self._get_flow_lock(key):
             self._spill.drain(
                 key,
-                lambda batch: self._map_and_emit(
-                    client_id, gateway_id, batch, self._control_output_exchange
+                lambda entry: self._map_and_emit(
+                    client_id,
+                    gateway_id,
+                    entry[1],
+                    self._control_output_exchange,
+                    message_id=entry[0],
                 ),
             )
             with self._bank_names_lock:

@@ -1,4 +1,3 @@
-import hashlib
 import logging
 import random
 
@@ -8,6 +7,7 @@ from common.middleware.middleware_rabbitmq import (
 )
 from common.models.account_edge import AccountEdge
 from common.protocol.internal import internal
+from common.sharding import shard_of
 from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
 from common.worker.safe_output_capable import SafeOutputCapable
 from config import Config
@@ -69,12 +69,8 @@ class BidirectionalSharder(SafeOutputCapable, StatefulCoordinatedWorker):
     def _control_output_middleware(self):
         return self._control_output_exchange
 
-    def _shard_key(self, bank, account):
-        node_id = (
-            int(hashlib.md5(f"{bank}.{account}".encode()).hexdigest(), 16)
-            % self.config.output_node_count
-        )
-        return f"{self.config.output_node_prefix}{node_id}"
+    def _shard_for(self, bank, account):
+        return shard_of(f"{bank}.{account}", self.config.output_node_count)
 
     def _flush_data(self, _client_id, _gateway_id):
         pass
@@ -89,11 +85,8 @@ class BidirectionalSharder(SafeOutputCapable, StatefulCoordinatedWorker):
             routing_key=f"{self.config.output_node_prefix}{node_id}",
         )
 
-    def _create_edges_by_routing_key(self, payload):
-        """
-        Create a dictionary mapping routing keys to account edges, where each transaction generates sender and receiver edges routed by hashing the bank and account to ensure account affinity.
-        """
-        edges_by_routing_key = {}
+    def _create_edges_by_shard(self, payload):
+        edges_by_shard = {}
         for transaction in payload:
             if None in (
                 transaction.from_bank,
@@ -118,25 +111,23 @@ class BidirectionalSharder(SafeOutputCapable, StatefulCoordinatedWorker):
                     False,
                 ),
             ]:
-                edges_by_routing_key.setdefault(
-                    self._shard_key(
-                        *transaction_direction[: self.NUM_FIELDS_FOR_SHARDING]
-                    ),
-                    [],
-                ).append(AccountEdge(*transaction_direction))
-        return edges_by_routing_key
+                shard = self._shard_for(
+                    *transaction_direction[: self.NUM_FIELDS_FOR_SHARDING]
+                )
+                edges_by_shard.setdefault(shard, []).append(
+                    AccountEdge(*transaction_direction)
+                )
+        return edges_by_shard
 
     def _handle_data_message(self, msg_type, client_id, gateway_id, payload):
-        """
-        Handle a data message by creating account edges for each transaction and sending them with the appropriate routing key.
-        """
-        edges_by_routing_key = self._create_edges_by_routing_key(payload)
-        for routing_key, edges in edges_by_routing_key.items():
-            self._output_exchange.send(
-                internal.serialize_msg(
-                    internal.MsgType.ACCOUNT_EDGE_BATCH, client_id, gateway_id, edges
-                ),
-                routing_key=routing_key,
+        for shard, edges in self._create_edges_by_shard(payload).items():
+            self._send(
+                self._output_exchange,
+                internal.MsgType.ACCOUNT_EDGE_BATCH,
+                client_id,
+                gateway_id,
+                edges,
+                routing_key=f"{self.config.output_node_prefix}{shard}",
             )
             self._increment_sent_count(client_id, gateway_id)
         super()._handle_data_message(msg_type, client_id, gateway_id, payload)

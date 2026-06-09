@@ -7,8 +7,11 @@ from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
     MessageMiddlewareExchangeTopicRabbitMQ,
 )
+from common.sharding import shard_of
 from common.worker.stateless_worker import StatelessWorker
 from config import Config
+
+BANK_MAX_EOF_SHARD = "0"
 
 
 class TransactionsFieldMapper(StatelessWorker):
@@ -27,6 +30,11 @@ class TransactionsFieldMapper(StatelessWorker):
             exchange_name=config.output_exchange,
             binding_patterns=[],
         )
+        self._bank_max_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
+            host=config.rabbitmq_host,
+            exchange_name=config.bank_max_exchange,
+            routing_keys=[],
+        )
 
     @property
     def _input_middleware(self):
@@ -39,6 +47,11 @@ class TransactionsFieldMapper(StatelessWorker):
     def _send_final_eof(self, client_id, gateway_id, eof):
         msg = internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof)
         self._output_exchange.send(msg, routing_key=self.config.output_routing_key_eof)
+        self._bank_max_exchange.send(msg, routing_key=BANK_MAX_EOF_SHARD)
+
+    def shutdown(self):
+        super().shutdown()
+        self._bank_max_exchange.close()
 
     def _handle_data_message(self, _, client_id, gateway_id, payload):
         """
@@ -52,23 +65,31 @@ class TransactionsFieldMapper(StatelessWorker):
             if tx.currency.lower() == self.config.usd_currency.lower():
                 usd_transactions.append(tx)
 
-        self._output_exchange.send(
-            internal.serialize_msg(
-                internal.MsgType.TRANSACTION_BATCH,
-                client_id,
-                gateway_id,
-                usd_transactions,
-            ),
+        self._send(
+            self._output_exchange,
+            internal.MsgType.TRANSACTION_BATCH,
+            client_id,
+            gateway_id,
+            usd_transactions,
             routing_key=self.config.output_routing_key_usd,
         )
-        self._output_exchange.send(
-            internal.serialize_msg(
-                internal.MsgType.TRANSACTION_BATCH,
-                client_id,
-                gateway_id,
-                transactions,
-            ),
+        self._send(
+            self._output_exchange,
+            internal.MsgType.TRANSACTION_BATCH,
+            client_id,
+            gateway_id,
+            transactions,
             routing_key=self.config.output_routing_key_all,
+        )
+        self._send(
+            self._bank_max_exchange,
+            internal.MsgType.TRANSACTION_BATCH,
+            client_id,
+            gateway_id,
+            usd_transactions,
+            routing_key=str(
+                shard_of(self._current_message_id, self.config.bank_max_node_count)
+            ),
         )
 
     def _parse(self, raw):

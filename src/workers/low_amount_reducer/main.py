@@ -1,5 +1,6 @@
 import logging
 
+from common.ids import flush_id
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
     MessageMiddlewareQueueRabbitMQ,
@@ -59,14 +60,14 @@ class LowAmountReducer(StatefulCoordinatedWorker):
         Flush any buffered data by sending a Q5 result batch with the accumulated count.
         """
         count = self._counts.pop((client_id, gateway_id), 0)
-        self._output_exchange.send(
-            internal.serialize_msg(
-                internal.MsgType.Q5_RESULT_BATCH,
-                client_id,
-                gateway_id,
-                [Q5Result(count=count)],
-            ),
+        self._send(
+            self._output_exchange,
+            internal.MsgType.Q5_RESULT_BATCH,
+            client_id,
+            gateway_id,
+            [Q5Result(count=count)],
             routing_key=gateway_id,
+            message_id=flush_id(self.config.node_id, client_id, gateway_id, 0),
         )
         self._increment_sent_count(client_id, gateway_id)
 

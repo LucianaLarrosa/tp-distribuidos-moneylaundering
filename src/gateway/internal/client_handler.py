@@ -44,13 +44,13 @@ class ClientHandler:
 
             if msg_type == MsgType.TRANSACTION_BATCH:
                 self._router.forward_raw_transactions(
-                    self._client_id, self._gateway_id, payload
+                    self._client_id, self._gateway_id, payload, self._tx_batch_count
                 )
                 self._results_queue.put(("ack",))
                 self._tx_batch_count += 1
             elif msg_type == MsgType.ACCOUNT_BATCH:
                 self._router.forward_raw_accounts(
-                    self._client_id, self._gateway_id, payload
+                    self._client_id, self._gateway_id, payload, self._acc_batch_count
                 )
                 self._results_queue.put(("ack",))
                 self._acc_batch_count += 1

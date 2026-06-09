@@ -4,6 +4,7 @@ import os
 class Config:
     def __init__(self):
         self.rabbitmq_host = os.environ["RABBITMQ_HOST"]
+        self.input_exchange = os.environ["INPUT_EXCHANGE"]
         self.input_queue = os.environ["INPUT_QUEUE"]
         self.output_queue = os.environ["OUTPUT_QUEUE"]
         self.control_exchange = os.environ["CONTROL_EXCHANGE"]

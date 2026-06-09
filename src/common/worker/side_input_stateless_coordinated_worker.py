@@ -51,7 +51,9 @@ class SideInputStatelessCoordinatedWorker(RingCoordinatedWorker):
 
     def _handle_side_message(self, message, ack, nack):
         try:
-            msg_type, client_id, gateway_id, payload = internal.deserialize_msg(message)
+            msg_type, client_id, gateway_id, payload, _ = internal.deserialize_msg(
+                message
+            )
             key = (client_id, gateway_id)
 
             if msg_type == self._side_batch_msg_type:

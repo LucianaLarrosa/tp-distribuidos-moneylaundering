@@ -13,6 +13,8 @@ class Config:
     output_routing_key_all: str
     output_routing_key_eof: str
     usd_currency: str
+    bank_max_exchange: str
+    bank_max_node_count: int
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -26,4 +28,6 @@ class Config:
             output_routing_key_all=os.environ.get("OUTPUT_ROUTING_KEY_ALL", "all"),
             output_routing_key_eof=os.environ.get("OUTPUT_ROUTING_KEY_EOF", "eof"),
             usd_currency=os.environ.get("USD_CURRENCY", "us dollar"),
+            bank_max_exchange=os.environ.get("BANK_MAX_EXCHANGE", "bank_max_input"),
+            bank_max_node_count=int(os.environ.get("BANK_MAX_NODE_COUNT", "1")),
         )

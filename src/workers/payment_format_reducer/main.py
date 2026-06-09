@@ -1,5 +1,6 @@
 import logging
 
+from common.ids import flush_id
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
     MessageMiddlewareExchangeFanoutRabbitMQ,
@@ -83,13 +84,13 @@ class PaymentFormatReducer(StatefulCoordinatedWorker):
         self._send_average_batch(client_id, gateway_id, batch)
 
     def _send_average_batch(self, client_id, gateway_id, batch):
-        self._output_exchange.send(
-            internal.serialize_msg(
-                internal.MsgType.PAYMENT_FORMAT_AVERAGE_BATCH,
-                client_id,
-                gateway_id,
-                batch,
-            )
+        self._send(
+            self._output_exchange,
+            internal.MsgType.PAYMENT_FORMAT_AVERAGE_BATCH,
+            client_id,
+            gateway_id,
+            batch,
+            message_id=flush_id(self.config.node_id, client_id, gateway_id, 0),
         )
         self._increment_sent_count(client_id, gateway_id)
 

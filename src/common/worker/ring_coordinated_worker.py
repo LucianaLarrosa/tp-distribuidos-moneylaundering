@@ -155,7 +155,7 @@ class RingCoordinatedWorker(Worker):
 
     def _handle_control_message(self, message, ack, nack):
         try:
-            _, client_id, gateway_id, ring_eof = internal.deserialize_msg(message)
+            _, client_id, gateway_id, ring_eof, _ = internal.deserialize_msg(message)
             self._handle_control_eof_message(client_id, gateway_id, ring_eof)
             ack()
         except Exception:

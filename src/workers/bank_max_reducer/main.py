@@ -1,5 +1,4 @@
 import logging
-import hashlib
 
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
@@ -72,39 +71,16 @@ class BankMaxReducer(StatefulCoordinatedWorker):
 
     def _flush_data(self, client_id, gateway_id):
         flow_max = self._global_max.pop((client_id, gateway_id), {})
-        batch = []
-        for _from_bank, bank_max in flow_max.items():
-            batch.append(bank_max)
-            if len(batch) >= self.config.batch_size:
-                self._send_result_batch(client_id, gateway_id, batch)
-                batch = []
-        if batch:
-            self._send_result_batch(client_id, gateway_id, batch)
-
-    def _shard_key(self, bank):
-        node_id = (
-            int(hashlib.md5(f"{bank}".encode()).hexdigest(), 16)
-            % self.config.output_node_count
+        self._flush_sharded(
+            self._output_exchange,
+            internal.MsgType.BANK_MAX_PARTIAL_BATCH,
+            client_id,
+            gateway_id,
+            list(flow_max.values()),
+            key_of=lambda bank_max: bank_max.from_bank,
+            num_shards=self.config.output_node_count,
+            batch_size=self.config.batch_size,
         )
-        return str(node_id)
-
-    def _send_result_batch(self, client_id, gateway_id, batch):
-        sharded_banks = {self._shard_key(bank.from_bank): [] for bank in batch}
-        for bank in batch:
-            routing_key = self._shard_key(bank.from_bank)
-            sharded_banks[routing_key].append(bank)
-
-        for routing_key, bank_list in sharded_banks.items():
-            self._output_exchange.send(
-                internal.serialize_msg(
-                    internal.MsgType.BANK_MAX_PARTIAL_BATCH,
-                    client_id,
-                    gateway_id,
-                    bank_list,
-                ),
-                routing_key=routing_key,
-            )
-            self._increment_sent_count(client_id, gateway_id)
 
     def _send_final_eof(self, client_id, gateway_id, eof):
         self._output_exchange.send(

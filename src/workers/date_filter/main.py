@@ -1,9 +1,15 @@
 import logging
 
-from common.middleware.middleware_rabbitmq import MessageMiddlewareExchangeTopicRabbitMQ
+from common.middleware.middleware_rabbitmq import (
+    MessageMiddlewareExchangeDirectRabbitMQ,
+    MessageMiddlewareExchangeTopicRabbitMQ,
+)
 from common.protocol.internal import internal
+from common.sharding import shard_of
 from common.worker.stateless_worker import StatelessWorker
 from config import Config
+
+PAYMENT_FORMAT_EOF_SHARD = "0"
 
 
 class DateFilter(StatelessWorker):
@@ -22,6 +28,11 @@ class DateFilter(StatelessWorker):
             exchange_name=config.output_exchange,
             binding_patterns=[],
         )
+        self._payment_format_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
+            host=config.rabbitmq_host,
+            exchange_name=config.payment_format_exchange,
+            routing_keys=[],
+        )
 
     @property
     def _input_middleware(self):
@@ -32,10 +43,13 @@ class DateFilter(StatelessWorker):
         return self._output_exchange
 
     def _send_final_eof(self, client_id, gateway_id, eof):
-        self._output_exchange.send(
-            internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof),
-            routing_key=self.config.output_routing_key_eof,
-        )
+        msg = internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof)
+        self._output_exchange.send(msg, routing_key=self.config.output_routing_key_eof)
+        self._payment_format_exchange.send(msg, routing_key=PAYMENT_FORMAT_EOF_SHARD)
+
+    def shutdown(self):
+        super().shutdown()
+        self._payment_format_exchange.close()
 
     def _classify_transaction(self, transaction):
         """
@@ -77,15 +91,30 @@ class DateFilter(StatelessWorker):
             for routing_key in self._classify_transaction(transaction):
                 transactions_by_routing_key[routing_key].append(transaction)
         for routing_key, transactions in transactions_by_routing_key.items():
-            self._output_exchange.send(
-                internal.serialize_msg(
-                    internal.MsgType.TRANSACTION_BATCH,
-                    client_id,
-                    gateway_id,
-                    transactions,
-                ),
+            self._send(
+                self._output_exchange,
+                internal.MsgType.TRANSACTION_BATCH,
+                client_id,
+                gateway_id,
+                transactions,
                 routing_key=routing_key,
             )
+        usd_period_1_key = (
+            f"{self.config.output_routing_key_usd}."
+            f"{self.config.output_routing_key_period_1}"
+        )
+        self._send(
+            self._payment_format_exchange,
+            internal.MsgType.TRANSACTION_BATCH,
+            client_id,
+            gateway_id,
+            transactions_by_routing_key[usd_period_1_key],
+            routing_key=str(
+                shard_of(
+                    self._current_message_id, self.config.payment_format_node_count
+                )
+            ),
+        )
 
 
 def main():

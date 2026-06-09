@@ -8,6 +8,7 @@ from common.protocol.internal import internal
 class Worker(ABC):
     def __init__(self):
         self._closed = False
+        self._current_message_id = ""
         signal.signal(signal.SIGTERM, lambda *_: self.shutdown())
 
     @property
@@ -37,7 +38,10 @@ class Worker(ABC):
         Handle incoming messages from the input middleware accordingly.
         """
         try:
-            msg_type, client_id, gateway_id, payload = internal.deserialize_msg(message)
+            msg_type, client_id, gateway_id, payload, message_id = (
+                internal.deserialize_msg(message)
+            )
+            self._current_message_id = message_id
             if msg_type == internal.MsgType.EOF:
                 self._handle_eof_message(client_id, gateway_id, payload)
             else:
@@ -47,6 +51,26 @@ class Worker(ABC):
             logging.error(f"Error handling message: {e}")
             nack()
             raise
+
+    def _send(
+        self,
+        out_middleware,
+        msg_type,
+        client_id,
+        gateway_id,
+        payload,
+        routing_key=None,
+        message_id=None,
+    ):
+        if message_id is None:
+            message_id = self._current_message_id
+        msg = internal.serialize_msg(
+            msg_type, client_id, gateway_id, payload, message_id=message_id
+        )
+        if routing_key is not None:
+            out_middleware.send(msg, routing_key=routing_key)
+        else:
+            out_middleware.send(msg)
 
     def start(self):
         logging.info("Starting worker...")

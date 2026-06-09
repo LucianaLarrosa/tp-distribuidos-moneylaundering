@@ -13,6 +13,8 @@ LOW_AMOUNT_REDUCERS = 1
 
 EXCHANGE_RAW_DATA = "raw_data"
 EXCHANGE_FILTERED_TRANSACTIONS = "filtered_transactions"
+EXCHANGE_BANK_MAX_INPUT = "bank_max_input"
+EXCHANGE_PAYMENT_FORMAT_INPUT = "payment_format_input"
 EXCHANGE_DATE_FILTER_OUTPUT = "date_filter_output"
 EXCHANGE_BANK_CATALOG = "bank_catalog"
 EXCHANGE_BANK_MAX_OUTPUT = "bank_max_output"
@@ -25,7 +27,7 @@ EXCHANGE_PATH_MAPPER_OUTPUT = "path_mapper_output"
 EXCHANGE_PATH_FREQ_FILTER_OUTPUT = "path_freq_filter_output"
 EXCHANGE_QUERY_RESULTS = "query_results"
 QUEUE_CURRENCY_MAPPER_INPUT = "currency_mapper_input"
-QUEUE_CURRENCY_MAPPER_OUTPUT = "currency_mapper_output"
+EXCHANGE_LOW_AMOUNT_AGGREGATOR_INPUT = "low_amount_aggregator_input"
 QUEUE_LOW_AMOUNT_AGGREGATOR_OUTPUT = "low_amount_aggregator_output"
 QUEUE_BANK_MAX_RESULTS = "bank_max_results"
 
@@ -191,6 +193,8 @@ def _transactions_field_mapper(i, date_filters, bank_max_aggregators, amount_fil
             "OUTPUT_ROUTING_KEY_ALL": ROUTING_KEYS_ALL,
             "OUTPUT_ROUTING_KEY_EOF": ROUTING_KEYS_EOF,
             "USD_CURRENCY": USD_CURRENCY,
+            "BANK_MAX_EXCHANGE": EXCHANGE_BANK_MAX_INPUT,
+            "BANK_MAX_NODE_COUNT": str(bank_max_aggregators),
         },
     }
 
@@ -241,6 +245,8 @@ def _date_filter(
             "OUTPUT_ROUTING_KEY_PERIOD_1": ROUTING_KEY_PERIOD_1,
             "OUTPUT_ROUTING_KEY_PERIOD_2": ROUTING_KEY_PERIOD_2,
             "OUTPUT_ROUTING_KEY_EOF": ROUTING_KEYS_EOF,
+            "PAYMENT_FORMAT_EXCHANGE": EXCHANGE_PAYMENT_FORMAT_INPUT,
+            "PAYMENT_FORMAT_NODE_COUNT": str(payment_format_aggregators),
         },
     }
 
@@ -286,7 +292,8 @@ def _currency_mapper(i, low_amount_aggregators):
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
             "INPUT_QUEUE": QUEUE_CURRENCY_MAPPER_INPUT,
-            "OUTPUT_QUEUE": QUEUE_CURRENCY_MAPPER_OUTPUT,
+            "OUTPUT_EXCHANGE": EXCHANGE_LOW_AMOUNT_AGGREGATOR_INPUT,
+            "OUTPUT_NODE_COUNT": str(low_amount_aggregators),
             "TARGET_CURRENCY": USD_CURRENCY,
             "FRANKFURTER_URL": "https://api.frankfurter.dev/v2/rates?from=2022-09-01&to=2022-09-05&base=USD",
             "FRANKFURTER_TIMEOUT_SECONDS": "10",
@@ -315,7 +322,8 @@ def _low_amount_aggregator(i, low_amount_aggregators, low_amount_reducers):
         },
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "INPUT_QUEUE": QUEUE_CURRENCY_MAPPER_OUTPUT,
+            "INPUT_EXCHANGE": EXCHANGE_LOW_AMOUNT_AGGREGATOR_INPUT,
+            "INPUT_QUEUE": f"low_amount_aggregator_input_{i}",
             "OUTPUT_QUEUE": QUEUE_LOW_AMOUNT_AGGREGATOR_OUTPUT,
             "CONTROL_EXCHANGE": "low_amount_aggregator_control",
             "NODE_PREFIX": NODE_PREFIX,
@@ -390,9 +398,8 @@ def _bank_max_aggregator(i, bank_max_aggregators, bank_max_reducers):
         },
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "INPUT_EXCHANGE": EXCHANGE_FILTERED_TRANSACTIONS,
-            "INPUT_BINDING_PATTERNS": f"{ROUTING_KEY_USD},{ROUTING_KEYS_EOF}",
-            "INPUT_QUEUE": "bank_max_input",
+            "INPUT_EXCHANGE": EXCHANGE_BANK_MAX_INPUT,
+            "INPUT_QUEUE": f"bank_max_input_{i}",
             "OUTPUT_EXCHANGE": EXCHANGE_BANK_MAX_OUTPUT,
             "CONTROL_EXCHANGE": "bank_max_aggregator_control",
             "NODE_PREFIX": NODE_PREFIX,
@@ -494,9 +501,8 @@ def _payment_format_aggregator(i, payment_format_aggregators, payment_format_red
         },
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "INPUT_EXCHANGE": EXCHANGE_DATE_FILTER_OUTPUT,
-            "INPUT_BINDING_PATTERNS": f"{ROUTING_KEY_USD}.{ROUTING_KEY_PERIOD_1},{ROUTING_KEYS_EOF}",
-            "INPUT_QUEUE": "payment_format_aggregator_input",
+            "INPUT_EXCHANGE": EXCHANGE_PAYMENT_FORMAT_INPUT,
+            "INPUT_QUEUE": f"payment_format_input_{i}",
             "OUTPUT_EXCHANGE": EXCHANGE_PAYMENT_FORMAT_SHARDS,
             "CONTROL_EXCHANGE": "payment_format_aggregator_control",
             "NODE_PREFIX": NODE_PREFIX,

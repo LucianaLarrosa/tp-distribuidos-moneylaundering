@@ -1,3 +1,4 @@
+from common.ids import root_id
 from common.protocol.internal import internal
 from common.models.eof import EOF
 
@@ -8,22 +9,24 @@ class InternalRouter:
         self._transaction_rk = transaction_routing_key
         self._account_rk = account_routing_key
 
-    def forward_raw_transactions(self, client_id, gateway_id, batch):
+    def forward_raw_transactions(self, client_id, gateway_id, batch, batch_index):
         self._send(
             internal.MsgType.RAW_TRANSACTION_BATCH,
             client_id,
             gateway_id,
             batch,
             self._transaction_rk,
+            message_id=root_id(client_id, gateway_id, batch_index),
         )
 
-    def forward_raw_accounts(self, client_id, gateway_id, batch):
+    def forward_raw_accounts(self, client_id, gateway_id, batch, batch_index):
         self._send(
             internal.MsgType.RAW_ACCOUNT_BATCH,
             client_id,
             gateway_id,
             batch,
             self._account_rk,
+            message_id=root_id(client_id, gateway_id, batch_index),
         )
 
     def forward_eof_transactions(self, client_id, gateway_id, batch_count):
@@ -44,6 +47,8 @@ class InternalRouter:
             self._account_rk,
         )
 
-    def _send(self, msg_type, client_id, gateway_id, payload, routing_key):
-        msg = internal.serialize_msg(msg_type, client_id, gateway_id, payload)
+    def _send(self, msg_type, client_id, gateway_id, payload, routing_key, message_id=""):
+        msg = internal.serialize_msg(
+            msg_type, client_id, gateway_id, payload, message_id=message_id
+        )
         self._exchange.send(msg, routing_key=routing_key)

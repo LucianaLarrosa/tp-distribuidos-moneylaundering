@@ -49,7 +49,7 @@ def _run_results_consumer(rabbitmq_host, exchange_name, gateway_id, client_queue
     )
 
     def on_message(body, ack, _nack):
-        msg_type, client_id, _, payload = internal.deserialize_msg(body)
+        msg_type, client_id, _, payload, _ = internal.deserialize_msg(body)
         handler_queue = client_queues.get(client_id)
         if handler_queue is None:
             logging.warning(

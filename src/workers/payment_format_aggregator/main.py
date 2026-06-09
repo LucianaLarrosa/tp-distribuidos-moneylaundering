@@ -1,9 +1,7 @@
-import hashlib
 import logging
 
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
-    MessageMiddlewareExchangeTopicRabbitMQ,
 )
 from common.models.payment_format_partial import PaymentFormatPartial
 from common.protocol.internal import internal
@@ -17,10 +15,10 @@ class PaymentFormatAggregator(StatefulCoordinatedWorker):
         super().__init__()
         self._totals = {}
 
-        self._input_queue = MessageMiddlewareExchangeTopicRabbitMQ(
+        self._input_queue = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
             exchange_name=config.input_exchange,
-            binding_patterns=config.input_binding_patterns,
+            routing_keys=[str(config.node_id)],
             queue_name=config.input_queue,
         )
         self._output_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
@@ -66,12 +64,6 @@ class PaymentFormatAggregator(StatefulCoordinatedWorker):
     def _payment_format_key(self, payment_format):
         return payment_format.strip().lower()
 
-    def _shard_for_payment_format(self, payment_format):
-        return (
-            int(hashlib.md5(payment_format.encode()).hexdigest(), 16)
-            % self.config.num_shards
-        )
-
     def _has_required_fields(self, tx):
         return tx.payment_format is not None and tx.amount is not None
 
@@ -88,35 +80,24 @@ class PaymentFormatAggregator(StatefulCoordinatedWorker):
 
     def _flush_data(self, client_id, gateway_id):
         flow_totals = self._totals.pop(self._flow_key(client_id, gateway_id), {})
-        pending = {}
-        for payment_format, totals in flow_totals.items():
-            total_amount, count = totals
-            partial = PaymentFormatPartial(
+        partials = [
+            PaymentFormatPartial(
                 payment_format=payment_format,
                 total_amount=total_amount,
                 count=count,
             )
-            shard_id = self._shard_for_payment_format(payment_format)
-            bucket = pending.setdefault(shard_id, [])
-            bucket.append(partial)
-            if len(bucket) >= self.config.batch_size:
-                self._send_shard_batch(client_id, gateway_id, shard_id, bucket)
-                pending[shard_id] = []
-        for shard_id, bucket in pending.items():
-            if bucket:
-                self._send_shard_batch(client_id, gateway_id, shard_id, bucket)
-
-    def _send_shard_batch(self, client_id, gateway_id, shard_id, batch):
-        self._output_exchange.send(
-            internal.serialize_msg(
-                internal.MsgType.PAYMENT_FORMAT_PARTIAL_BATCH,
-                client_id,
-                gateway_id,
-                batch,
-            ),
-            routing_key=self._shard_routing_key(shard_id),
+            for payment_format, (total_amount, count) in flow_totals.items()
+        ]
+        self._flush_sharded(
+            self._output_exchange,
+            internal.MsgType.PAYMENT_FORMAT_PARTIAL_BATCH,
+            client_id,
+            gateway_id,
+            partials,
+            key_of=lambda partial: partial.payment_format,
+            num_shards=self.config.num_shards,
+            batch_size=self.config.batch_size,
         )
-        self._increment_sent_count(client_id, gateway_id)
 
     def _send_final_eof(self, client_id, gateway_id, eof):
         self._output_exchange.send(

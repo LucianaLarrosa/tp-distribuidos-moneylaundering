@@ -1,5 +1,9 @@
+import math
 import threading
+from collections import defaultdict
 
+from common.ids import flush_id
+from common.sharding import hash_of
 from common.worker.ring_coordinated_worker import RingCoordinatedWorker
 
 
@@ -37,3 +41,42 @@ class StatefulCoordinatedWorker(RingCoordinatedWorker):
             self._sent_count[(client_id, gateway_id)] = (
                 self._sent_count.get((client_id, gateway_id), 0) + 1
             )
+
+    def _flush_sharded(
+        self,
+        out_middleware,
+        msg_type,
+        client_id,
+        gateway_id,
+        items,
+        key_of,
+        num_shards,
+        batch_size,
+        routing_key_for=str,
+    ):
+        """
+        Deterministic flush: shard `items` by md5(key_of(item)) and, within each
+        shard, split into ceil(n/batch_size) buckets from the same hash, so the
+        batching depends only on content (reproducible on replay). Each batch is
+        sent with routing key routing_key_for(shard) and a flush_id keyed by bucket.
+        """
+        by_shard = defaultdict(list)
+        for item in items:
+            h = hash_of(key_of(item))
+            by_shard[h % num_shards].append((h, item))
+        for shard, pairs in by_shard.items():
+            num_buckets = max(1, math.ceil(len(pairs) / batch_size))
+            buckets = defaultdict(list)
+            for h, item in pairs:
+                buckets[(h // num_shards) % num_buckets].append(item)
+            for bucket, batch in buckets.items():
+                self._send(
+                    out_middleware,
+                    msg_type,
+                    client_id,
+                    gateway_id,
+                    batch,
+                    routing_key=routing_key_for(shard),
+                    message_id=flush_id(self._node_id, client_id, gateway_id, bucket),
+                )
+                self._increment_sent_count(client_id, gateway_id)

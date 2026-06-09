@@ -27,3 +27,5 @@ class Config:
         self.output_routing_key_period_1 = os.environ["OUTPUT_ROUTING_KEY_PERIOD_1"]
         self.output_routing_key_period_2 = os.environ["OUTPUT_ROUTING_KEY_PERIOD_2"]
         self.output_routing_key_eof = os.environ["OUTPUT_ROUTING_KEY_EOF"]
+        self.payment_format_exchange = os.environ["PAYMENT_FORMAT_EXCHANGE"]
+        self.payment_format_node_count = int(os.environ["PAYMENT_FORMAT_NODE_COUNT"])
