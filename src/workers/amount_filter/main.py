@@ -12,8 +12,7 @@ from config import Config
 
 class AmountFilter(StatelessWorker):
     def __init__(self, config):
-        super().__init__()
-        self.config = config
+        super().__init__(config)
 
         self._input_exchange = MessageMiddlewareExchangeTopicRabbitMQ(
             host=config.rabbitmq_host,
@@ -88,7 +87,7 @@ def main():
         level=logging.INFO,
         format="%(asctime)s [AmountFilter] %(levelname)s %(message)s",
     )
-    config = Config.from_env()
+    config = Config()
     worker = AmountFilter(config)
     try:
         worker.start()

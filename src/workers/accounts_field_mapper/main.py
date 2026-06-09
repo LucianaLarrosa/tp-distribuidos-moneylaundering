@@ -12,8 +12,7 @@ from config import Config
 
 class AccountsFieldMapper(StatelessWorker):
     def __init__(self, config):
-        super().__init__()
-        self.config = config
+        super().__init__(config)
 
         self._input_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
@@ -38,7 +37,9 @@ class AccountsFieldMapper(StatelessWorker):
     def _send_final_eof(self, client_id, gateway_id, eof):
         for rk in self.config.output_routing_keys:
             self._output_exchange.send(
-                internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof),
+                internal.serialize_msg(
+                    internal.MsgType.EOF, client_id, gateway_id, eof
+                ),
                 routing_key=self._output_prefix_routing_key(rk),
             )
 
@@ -84,7 +85,7 @@ def main():
         level=logging.INFO,
         format="%(asctime)s [AccountsFieldMapper] %(levelname)s %(message)s",
     )
-    config = Config.from_env()
+    config = Config()
     worker = AccountsFieldMapper(config)
     try:
         worker.start()

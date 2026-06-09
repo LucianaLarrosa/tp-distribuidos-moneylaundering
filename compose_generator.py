@@ -29,6 +29,21 @@ QUEUE_CURRENCY_MAPPER_OUTPUT = "currency_mapper_output"
 QUEUE_LOW_AMOUNT_AGGREGATOR_OUTPUT = "low_amount_aggregator_output"
 QUEUE_BANK_MAX_RESULTS = "bank_max_results"
 
+# --- Watchdog / Heartbeat Configuration ---
+
+WATCHDOG_HOST = "watchdog"
+WATCHDOG_PORT = "9000"
+HEARTBEAT_INTERVAL_SECONDS = "1"
+WATCHDOG_TIMEOUT_SECONDS = "10"
+WATCHDOG_CHECK_INTERVAL_SECONDS = "1"
+UNMONITORED_SERVICE_PREFIXES = (
+    "rabbitmq",
+    "gateway_",
+    "proxy",
+    "client_",
+    "watchdog",
+)
+
 # --- Query IDs ---
 
 QUERY_1_ID = 1
@@ -703,6 +718,31 @@ def _duplicate_account_filter(i, duplicate_account_filters):
     }
 
 
+def _watchdog(monitored_nodes):
+    return {
+        "build": {"context": ".", "dockerfile": "src/watchdog/Dockerfile"},
+        "container_name": "watchdog",
+        "volumes": ["/var/run/docker.sock:/var/run/docker.sock"],
+        "environment": {
+            "WATCHDOG_PORT": WATCHDOG_PORT,
+            "TIMEOUT_SECONDS": WATCHDOG_TIMEOUT_SECONDS,
+            "CHECK_INTERVAL_SECONDS": WATCHDOG_CHECK_INTERVAL_SECONDS,
+            "MONITORED_NODES": ",".join(monitored_nodes),
+        },
+    }
+
+
+def _enable_heartbeat(service):
+    service["environment"].update(
+        {
+            "WATCHDOG_HOST": WATCHDOG_HOST,
+            "WATCHDOG_PORT": WATCHDOG_PORT,
+            "HEARTBEAT_INTERVAL_SECONDS": HEARTBEAT_INTERVAL_SECONDS,
+            "NODE_NAME": service["container_name"],
+        }
+    )
+
+
 # --- Builder ---
 
 
@@ -808,6 +848,13 @@ def build_compose(
         )
     for i in range(anomaly_filters):
         services[f"anomaly_filter_{i}"] = _anomaly_filter(i, anomaly_filters)
+    monitored_nodes = []
+    for name, service in services.items():
+        if name.startswith(UNMONITORED_SERVICE_PREFIXES):
+            continue
+        _enable_heartbeat(service)
+        monitored_nodes.append(service["container_name"])
+    services["watchdog"] = _watchdog(monitored_nodes)
     volumes = {f"anomaly_filter_spill_{i}": None for i in range(anomaly_filters)}
     volumes.update({f"bank_mapper_spill_{i}": None for i in range(bank_mappers)})
     return {

@@ -22,8 +22,7 @@ from config import Config
 
 class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
     def __init__(self, config):
-        self.config = config
-        super().__init__()
+        super().__init__(config)
 
         self._avgs = {}
         self._flow_locks = {}

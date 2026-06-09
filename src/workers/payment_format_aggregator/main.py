@@ -13,8 +13,7 @@ from config import Config
 
 class PaymentFormatAggregator(StatefulCoordinatedWorker):
     def __init__(self, config):
-        self.config = config
-        super().__init__()
+        super().__init__(config)
         self._totals = {}
 
         self._input_queue = MessageMiddlewareExchangeTopicRabbitMQ(

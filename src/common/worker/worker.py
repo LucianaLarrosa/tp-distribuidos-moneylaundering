@@ -2,13 +2,22 @@ import logging
 import signal
 from abc import ABC, abstractmethod
 
+from common.health import HeartbeatSender
 from common.protocol.internal import internal
 
 
 class Worker(ABC):
-    def __init__(self):
+    def __init__(self, config):
+        self.config = config
         self._closed = False
         signal.signal(signal.SIGTERM, lambda *_: self.shutdown())
+        self._heartbeat = HeartbeatSender(
+            config.node_name,
+            config.watchdog_host,
+            config.watchdog_port,
+            config.heartbeat_interval_seconds,
+        )
+        self._heartbeat.start()
 
     @property
     @abstractmethod
@@ -57,6 +66,7 @@ class Worker(ABC):
             return
         self._closed = True
         logging.info("Shutting down worker...")
+        self._heartbeat.stop()
         self._input_middleware.stop_consuming()
         self._input_middleware.close()
         self._output_middleware.close()

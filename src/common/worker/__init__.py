@@ -1,3 +1,4 @@
+from common.worker.worker_config import WorkerConfig
 from common.worker.worker import Worker
 from common.worker.stateless_worker import StatelessWorker
 from common.worker.ring_coordinated_worker import RingCoordinatedWorker

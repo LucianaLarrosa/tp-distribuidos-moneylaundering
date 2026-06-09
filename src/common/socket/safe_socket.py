@@ -80,8 +80,8 @@ class SafeUDPSocket(BaseSafeSocket):
     def send(self, data, address):
         self._sock.sendto(data, address)
 
-    def recv(self, bufsize=BUF_SIZE):
-        return self._sock.recvfrom(bufsize)
+    def recv(self):
+        return self._sock.recvfrom(self.BUF_SIZE)
 
     def close(self):
         self._sock.close()

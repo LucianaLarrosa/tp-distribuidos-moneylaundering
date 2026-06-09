@@ -17,8 +17,7 @@ class BidirectionalSharder(SafeOutputCapable, StatefulCoordinatedWorker):
     NUM_FIELDS_FOR_SHARDING = 2
 
     def __init__(self, config):
-        self.config = config
-        super().__init__()
+        super().__init__(config)
 
         self._input_exchange = MessageMiddlewareExchangeTopicRabbitMQ(
             host=config.rabbitmq_host,

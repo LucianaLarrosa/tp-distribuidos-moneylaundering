@@ -8,8 +8,7 @@ from config import Config
 
 class DateFilter(StatelessWorker):
     def __init__(self, config):
-        super().__init__()
-        self.config = config
+        super().__init__(config)
 
         self._input_exchange = MessageMiddlewareExchangeTopicRabbitMQ(
             host=config.rabbitmq_host,

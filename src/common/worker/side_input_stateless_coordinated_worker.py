@@ -12,8 +12,8 @@ from common.worker.ring_coordinated_worker import RingCoordinatedWorker
 
 
 class SideInputStatelessCoordinatedWorker(RingCoordinatedWorker):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, config):
+        super().__init__(config)
         self._side_input = SideInputTracker()
         self._side_input_thread = None
         self._side_input_ready = {}

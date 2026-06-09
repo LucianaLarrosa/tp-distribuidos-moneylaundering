@@ -12,8 +12,7 @@ from config import Config
 
 class LowAmountReducer(StatefulCoordinatedWorker):
     def __init__(self, config: Config):
-        self.config = config
-        super().__init__()
+        super().__init__(config)
         self._counts = {}  # (client_id, gateway_id) -> accumulated count
 
         self._input_queue = MessageMiddlewareQueueRabbitMQ(

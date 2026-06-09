@@ -1,29 +1,19 @@
 import os
-from dataclasses import dataclass
+
+from common.worker.worker_config import WorkerConfig
 
 
-@dataclass
-class Config:
-    rabbitmq_host: str
-    raw_data_exchange: str
-    input_routing_key: str
-    input_queue_name: str
-    output_exchange: str
-    output_routing_key_usd: str
-    output_routing_key_all: str
-    output_routing_key_eof: str
-    usd_currency: str
-
-    @classmethod
-    def from_env(cls) -> "Config":
-        return cls(
-            rabbitmq_host=os.environ.get("RABBITMQ_HOST", "rabbitmq"),
-            raw_data_exchange=os.environ.get("RAW_DATA_EXCHANGE", "raw_data"),
-            input_routing_key=os.environ.get("INPUT_ROUTING_KEY", "transaction"),
-            input_queue_name=os.environ.get("INPUT_QUEUE_NAME"),
-            output_exchange=os.environ.get("OUTPUT_EXCHANGE", "filtered_transactions"),
-            output_routing_key_usd=os.environ.get("OUTPUT_ROUTING_KEY_USD", "usd"),
-            output_routing_key_all=os.environ.get("OUTPUT_ROUTING_KEY_ALL", "all"),
-            output_routing_key_eof=os.environ.get("OUTPUT_ROUTING_KEY_EOF", "eof"),
-            usd_currency=os.environ.get("USD_CURRENCY", "us dollar"),
+class Config(WorkerConfig):
+    def __init__(self):
+        super().__init__()
+        self.rabbitmq_host = os.environ.get("RABBITMQ_HOST", "rabbitmq")
+        self.raw_data_exchange = os.environ.get("RAW_DATA_EXCHANGE", "raw_data")
+        self.input_routing_key = os.environ.get("INPUT_ROUTING_KEY", "transaction")
+        self.input_queue_name = os.environ.get("INPUT_QUEUE_NAME")
+        self.output_exchange = os.environ.get(
+            "OUTPUT_EXCHANGE", "filtered_transactions"
         )
+        self.output_routing_key_usd = os.environ.get("OUTPUT_ROUTING_KEY_USD", "usd")
+        self.output_routing_key_all = os.environ.get("OUTPUT_ROUTING_KEY_ALL", "all")
+        self.output_routing_key_eof = os.environ.get("OUTPUT_ROUTING_KEY_EOF", "eof")
+        self.usd_currency = os.environ.get("USD_CURRENCY", "us dollar")

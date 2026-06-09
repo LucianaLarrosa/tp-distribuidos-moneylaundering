@@ -13,8 +13,7 @@ from config import Config
 
 class TransactionsFieldMapper(StatelessWorker):
     def __init__(self, config):
-        super().__init__()
-        self.config = config
+        super().__init__(config)
 
         self._input_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
@@ -90,7 +89,7 @@ def main():
         level=logging.INFO,
         format="%(asctime)s [TransactionsFieldMapper] %(levelname)s %(message)s",
     )
-    config = Config.from_env()
+    config = Config()
     worker = TransactionsFieldMapper(config)
     try:
         worker.start()
