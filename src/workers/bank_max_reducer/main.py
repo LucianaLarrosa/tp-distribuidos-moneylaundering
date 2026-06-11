@@ -92,7 +92,7 @@ class BankMaxReducer(StatefulCoordinatedWorker):
                 eof,
                 message_id=eof_id(client_id, gateway_id),
             ),
-            routing_key="1",
+            routing_key="0",
         )
 
 

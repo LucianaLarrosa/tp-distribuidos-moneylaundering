@@ -34,6 +34,8 @@ def ring_seq_of(message_id):
         return -1
 
 
-def eof_id(client_id, gateway_id):
-    """Coordinator-independent id for a final EOF / QUERY_END."""
-    return SEPARATOR.join((str(client_id), str(gateway_id), "eof"))
+def eof_id(client_id, gateway_id, disc=None):
+    parts = [str(client_id), str(gateway_id), "eof"]
+    if disc is not None:
+        parts.append(str(disc))
+    return SEPARATOR.join(parts)
