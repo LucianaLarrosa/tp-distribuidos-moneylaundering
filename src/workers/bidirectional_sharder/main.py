@@ -1,10 +1,10 @@
 import logging
-import random
 
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
     MessageMiddlewareExchangeTopicRabbitMQ,
 )
+from common.ids import eof_id
 from common.models.account_edge import AccountEdge
 from common.protocol.internal import internal
 from common.sharding import shard_of
@@ -76,13 +76,15 @@ class BidirectionalSharder(SafeOutputCapable, StatefulCoordinatedWorker):
         pass
 
     def _send_final_eof(self, client_id, gateway_id, eof):
-        """
-        Send the final EOF to a randomly selected output node of the next stage.
-        """
-        node_id = random.randint(0, self.config.output_node_count - 1)
         self._control_output_exchange.send(
-            internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof),
-            routing_key=f"{self.config.output_node_prefix}{node_id}",
+            internal.serialize_msg(
+                internal.MsgType.EOF,
+                client_id,
+                gateway_id,
+                eof,
+                message_id=eof_id(client_id, gateway_id),
+            ),
+            routing_key=f"{self.config.output_node_prefix}0",
         )
 
     def _create_edges_by_shard(self, payload):

@@ -3,6 +3,7 @@ import logging
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
+from common.ids import eof_id
 from common.models.query_results import Q4Result
 from common.protocol.internal import internal
 from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
@@ -78,6 +79,7 @@ class DuplicateAccountFilter(StatefulCoordinatedWorker):
                 gateway_id,
                 self.config.query_id,
                 eof.message_count,
+                message_id=eof_id(client_id, gateway_id, self.config.query_id),
             ),
             routing_key=gateway_id,
         )

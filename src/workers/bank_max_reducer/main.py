@@ -4,6 +4,7 @@ from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
 
+from common.ids import eof_id
 from common.protocol.internal import internal
 from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
 from config import Config
@@ -84,7 +85,13 @@ class BankMaxReducer(StatefulCoordinatedWorker):
 
     def _send_final_eof(self, client_id, gateway_id, eof):
         self._output_exchange.send(
-            internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof),
+            internal.serialize_msg(
+                internal.MsgType.EOF,
+                client_id,
+                gateway_id,
+                eof,
+                message_id=eof_id(client_id, gateway_id),
+            ),
             routing_key="1",
         )
 

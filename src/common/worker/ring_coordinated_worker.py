@@ -7,6 +7,7 @@ from common.middleware.middleware_rabbitmq import (
 from common.worker.worker import Worker
 from common.protocol.internal import internal
 from common.models.eof import EOF, RingEOF
+from common.ids import ring_id, ring_seq_of, RING_PHASE_COUNT, RING_PHASE_FLUSH
 
 
 class RingCoordinatedWorker(Worker):
@@ -126,7 +127,7 @@ class RingCoordinatedWorker(Worker):
         )
 
     def _handle_control_eof_message(
-        self, client_id, gateway_id, ring_eof, output_exchange=None
+        self, client_id, gateway_id, ring_eof, in_message_id="", output_exchange=None
     ):
         """
         Handle a RING_EOF message by either forwarding it to the next node in the ring, flushing data and sending an EOF to the output middleware if this node is the coordinator.
@@ -136,6 +137,16 @@ class RingCoordinatedWorker(Worker):
 
         if ring_eof.coordinator_id is None:
             ring_eof = self._update_ring_eof(client_id, gateway_id, ring_eof)
+            if ring_eof.coordinator_id == self._node_id:
+                # counting -> became coordinator: start the flush phase
+                out_message_id = ring_id(client_id, gateway_id, RING_PHASE_FLUSH, 0)
+            else:
+                out_message_id = ring_id(
+                    client_id,
+                    gateway_id,
+                    RING_PHASE_COUNT,
+                    ring_seq_of(in_message_id) + 1,
+                )
         else:
             self._flush_data(client_id, gateway_id)
             ring_eof.total_sent_count = self._get_total_sent_count(
@@ -146,17 +157,28 @@ class RingCoordinatedWorker(Worker):
                     client_id, gateway_id, EOF(self._get_final_eof_count(ring_eof))
                 )
                 return
+            out_message_id = ring_id(
+                client_id, gateway_id, RING_PHASE_FLUSH, ring_seq_of(in_message_id) + 1
+            )
         output_exchange.send(
             internal.serialize_msg(
-                internal.MsgType.RING_EOF, client_id, gateway_id, ring_eof
+                internal.MsgType.RING_EOF,
+                client_id,
+                gateway_id,
+                ring_eof,
+                message_id=out_message_id,
             ),
             routing_key=self._get_ring_routing_key(self._get_next_node_id()),
         )
 
     def _handle_control_message(self, message, ack, nack):
         try:
-            _, client_id, gateway_id, ring_eof, _ = internal.deserialize_msg(message)
-            self._handle_control_eof_message(client_id, gateway_id, ring_eof)
+            _, client_id, gateway_id, ring_eof, message_id = internal.deserialize_msg(
+                message
+            )
+            self._handle_control_eof_message(
+                client_id, gateway_id, ring_eof, message_id
+            )
             ack()
         except Exception:
             nack()
@@ -191,6 +213,7 @@ class RingCoordinatedWorker(Worker):
                         client_id, gateway_id, 0
                     ),
                 ),
+                message_id=ring_id(client_id, gateway_id, RING_PHASE_COUNT, 0),
             ),
             routing_key=self._get_ring_routing_key(self._get_next_node_id()),
         )

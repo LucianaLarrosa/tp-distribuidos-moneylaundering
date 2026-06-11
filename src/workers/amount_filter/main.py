@@ -4,6 +4,7 @@ from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
     MessageMiddlewareExchangeTopicRabbitMQ,
 )
+from common.ids import eof_id
 from common.models.query_results import Q1Result
 from common.protocol.internal import internal
 from common.worker.stateless_worker import StatelessWorker
@@ -80,6 +81,7 @@ class AmountFilter(StatelessWorker):
                 gateway_id,
                 self.config.query_id,
                 eof.message_count,
+                message_id=eof_id(client_id, gateway_id, self.config.query_id),
             ),
             routing_key=gateway_id,
         )

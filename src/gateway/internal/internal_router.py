@@ -1,4 +1,4 @@
-from common.ids import root_id
+from common.ids import root_id, eof_id
 from common.protocol.internal import internal
 from common.models.eof import EOF
 
@@ -36,6 +36,7 @@ class InternalRouter:
             gateway_id,
             EOF(message_count=batch_count),
             self._transaction_rk,
+            message_id=eof_id(client_id, gateway_id),
         )
 
     def forward_eof_accounts(self, client_id, gateway_id, batch_count):
@@ -45,6 +46,7 @@ class InternalRouter:
             gateway_id,
             EOF(message_count=batch_count),
             self._account_rk,
+            message_id=eof_id(client_id, gateway_id),
         )
 
     def _send(self, msg_type, client_id, gateway_id, payload, routing_key, message_id=""):

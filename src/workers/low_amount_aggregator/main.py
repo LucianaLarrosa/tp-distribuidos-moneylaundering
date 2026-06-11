@@ -1,6 +1,6 @@
 import logging
 
-from common.ids import flush_id
+from common.ids import flush_id, eof_id
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
     MessageMiddlewareQueueRabbitMQ,
@@ -73,7 +73,13 @@ class LowAmountAggregator(StatefulCoordinatedWorker):
 
     def _send_final_eof(self, client_id, gateway_id, eof):
         self._output_queue.send(
-            internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof)
+            internal.serialize_msg(
+                internal.MsgType.EOF,
+                client_id,
+                gateway_id,
+                eof,
+                message_id=eof_id(client_id, gateway_id),
+            )
         )
 
     def _handle_data_message(self, _, client_id, gateway_id, payload):

@@ -89,13 +89,17 @@ class SideInputStatelessCoordinatedWorker(RingCoordinatedWorker):
                 return
         super()._handle_eof_message(client_id, gateway_id, eof)
 
-    def _handle_control_eof_message(self, client_id, gateway_id, ring_eof):
+    def _handle_control_eof_message(
+        self, client_id, gateway_id, ring_eof, in_message_id="", output_exchange=None
+    ):
         key = (client_id, gateway_id)
         with self._deferred_lock:
             if not self._side_input_ready.get(key, False):
-                self._deferred_ring_eofs[key] = ring_eof
+                self._deferred_ring_eofs[key] = (ring_eof, in_message_id)
                 return
-        super()._handle_control_eof_message(client_id, gateway_id, ring_eof)
+        super()._handle_control_eof_message(
+            client_id, gateway_id, ring_eof, in_message_id
+        )
 
     def _mark_side_input_ready(self, client_id, gateway_id):
         key = (client_id, gateway_id)
@@ -112,10 +116,12 @@ class SideInputStatelessCoordinatedWorker(RingCoordinatedWorker):
                 self._side_output_control_exchange,
             )
         if deferred_ring is not None:
+            ring_eof, in_message_id = deferred_ring
             super()._handle_control_eof_message(
                 client_id,
                 gateway_id,
-                deferred_ring,
+                ring_eof,
+                in_message_id,
                 self._side_output_control_exchange,
             )
 

@@ -9,6 +9,7 @@ from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeFanoutRabbitMQ,
     MessageMiddlewareExchangeTopicRabbitMQ,
 )
+from common.ids import eof_id
 from common.models.query_results import Q3Result
 from common.models.transaction import Transaction
 from common.protocol.internal import internal
@@ -243,6 +244,7 @@ class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
                 gateway_id,
                 self.config.query_id,
                 eof.message_count,
+                message_id=eof_id(client_id, gateway_id, self.config.query_id),
             ),
             routing_key=gateway_id,
         )

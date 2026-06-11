@@ -6,6 +6,7 @@ from dataclasses import asdict
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
+from common.ids import eof_id
 from common.models.bank_max_partial import BankMaxPartial
 from common.models.query_results import Q2Result
 from common.protocol.internal import internal
@@ -223,6 +224,7 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
                 gateway_id,
                 self.config.query_id,
                 eof.message_count,
+                message_id=eof_id(client_id, gateway_id, self.config.query_id),
             ),
             routing_key=gateway_id,
         )

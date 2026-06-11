@@ -1,5 +1,6 @@
 import logging
 
+from common.ids import eof_id
 from common.models.bank import Bank
 from common.protocol.internal import internal
 from common.middleware.middleware_rabbitmq import (
@@ -38,7 +39,13 @@ class AccountsFieldMapper(StatelessWorker):
     def _send_final_eof(self, client_id, gateway_id, eof):
         for rk in self.config.output_routing_keys:
             self._output_exchange.send(
-                internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof),
+                internal.serialize_msg(
+                    internal.MsgType.EOF,
+                    client_id,
+                    gateway_id,
+                    eof,
+                    message_id=eof_id(client_id, gateway_id),
+                ),
                 routing_key=self._output_prefix_routing_key(rk),
             )
 

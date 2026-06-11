@@ -7,6 +7,7 @@ from common.middleware.middleware_rabbitmq import (
 from common.models.transaction_for_currency_conversion import (
     TransactionForCurrencyConversion,
 )
+from common.ids import eof_id
 from common.protocol.internal import internal
 from common.worker.stateless_worker import StatelessWorker
 from config import Config
@@ -38,7 +39,13 @@ class PaymentFormatFilter(StatelessWorker):
 
     def _send_final_eof(self, client_id, gateway_id, eof):
         self._output_queue.send(
-            internal.serialize_msg(internal.MsgType.EOF, client_id, gateway_id, eof)
+            internal.serialize_msg(
+                internal.MsgType.EOF,
+                client_id,
+                gateway_id,
+                eof,
+                message_id=eof_id(client_id, gateway_id),
+            )
         )
 
     def _handle_data_message(self, _, client_id, gateway_id, payload):
