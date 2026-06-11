@@ -10,7 +10,7 @@ from common.sharding import shard_of
 from common.worker.stateless_worker import StatelessWorker
 from config import Config
 
-PAYMENT_FORMAT_EOF_SHARD = "0"
+EOF_SHARD = "0"
 
 
 class DateFilter(StatelessWorker):
@@ -34,6 +34,16 @@ class DateFilter(StatelessWorker):
             exchange_name=config.payment_format_exchange,
             routing_keys=[],
         )
+        self._bidirectional_sharder_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
+            host=config.rabbitmq_host,
+            exchange_name=config.bidirectional_sharder_exchange,
+            routing_keys=[],
+        )
+        self._anomaly_filter_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
+            host=config.rabbitmq_host,
+            exchange_name=config.anomaly_filter_exchange,
+            routing_keys=[],
+        )
 
     @property
     def _input_middleware(self):
@@ -52,11 +62,15 @@ class DateFilter(StatelessWorker):
             message_id=eof_id(client_id, gateway_id),
         )
         self._output_exchange.send(msg, routing_key=self.config.output_routing_key_eof)
-        self._payment_format_exchange.send(msg, routing_key=PAYMENT_FORMAT_EOF_SHARD)
+        self._payment_format_exchange.send(msg, routing_key=EOF_SHARD)
+        self._bidirectional_sharder_exchange.send(msg, routing_key=EOF_SHARD)
+        self._anomaly_filter_exchange.send(msg, routing_key=EOF_SHARD)
 
     def shutdown(self):
         super().shutdown()
         self._payment_format_exchange.close()
+        self._bidirectional_sharder_exchange.close()
+        self._anomaly_filter_exchange.close()
 
     def _classify_transaction(self, transaction):
         """
@@ -82,33 +96,55 @@ class DateFilter(StatelessWorker):
             ]
         return []
 
+    def _shard_routing_key(self, node_count):
+        return str(shard_of(self._current_message_id, node_count))
+
     def _handle_data_message(self, _, client_id, gateway_id, payload):
-        """
-        Handle incoming data messages by classifying transactions and sending them to the output exchange with the appropriate routing keys.
-        """
+        usd_period_1_key = (
+            f"{self.config.output_routing_key_usd}."
+            f"{self.config.output_routing_key_period_1}"
+        )
+        usd_period_2_key = (
+            f"{self.config.output_routing_key_usd}."
+            f"{self.config.output_routing_key_period_2}"
+        )
+        all_period_1_key = (
+            f"{self.config.output_routing_key_all}."
+            f"{self.config.output_routing_key_period_1}"
+        )
         transactions_by_routing_key = {
-            routing_key: []
-            for routing_key in [
-                f"{self.config.output_routing_key_usd}.{self.config.output_routing_key_period_1}",
-                f"{self.config.output_routing_key_usd}.{self.config.output_routing_key_period_2}",
-                f"{self.config.output_routing_key_all}.{self.config.output_routing_key_period_1}",
-            ]
+            usd_period_1_key: [],
+            usd_period_2_key: [],
+            all_period_1_key: [],
         }
         for transaction in payload:
             for routing_key in self._classify_transaction(transaction):
                 transactions_by_routing_key[routing_key].append(transaction)
-        for routing_key, transactions in transactions_by_routing_key.items():
-            self._send(
-                self._output_exchange,
-                internal.MsgType.TRANSACTION_BATCH,
-                client_id,
-                gateway_id,
-                transactions,
-                routing_key=routing_key,
-            )
-        usd_period_1_key = (
-            f"{self.config.output_routing_key_usd}."
-            f"{self.config.output_routing_key_period_1}"
+        self._send(
+            self._output_exchange,
+            internal.MsgType.TRANSACTION_BATCH,
+            client_id,
+            gateway_id,
+            transactions_by_routing_key[all_period_1_key],
+            routing_key=all_period_1_key,
+        )
+        self._send(
+            self._bidirectional_sharder_exchange,
+            internal.MsgType.TRANSACTION_BATCH,
+            client_id,
+            gateway_id,
+            transactions_by_routing_key[usd_period_1_key],
+            routing_key=self._shard_routing_key(
+                self.config.bidirectional_sharder_node_count
+            ),
+        )
+        self._send(
+            self._anomaly_filter_exchange,
+            internal.MsgType.TRANSACTION_BATCH,
+            client_id,
+            gateway_id,
+            transactions_by_routing_key[usd_period_2_key],
+            routing_key=self._shard_routing_key(self.config.anomaly_filter_node_count),
         )
         self._send(
             self._payment_format_exchange,
@@ -116,11 +152,7 @@ class DateFilter(StatelessWorker):
             client_id,
             gateway_id,
             transactions_by_routing_key[usd_period_1_key],
-            routing_key=str(
-                shard_of(
-                    self._current_message_id, self.config.payment_format_node_count
-                )
-            ),
+            routing_key=self._shard_routing_key(self.config.payment_format_node_count),
         )
 
 

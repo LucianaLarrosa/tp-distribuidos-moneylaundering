@@ -7,7 +7,6 @@ from datetime import datetime
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
     MessageMiddlewareExchangeFanoutRabbitMQ,
-    MessageMiddlewareExchangeTopicRabbitMQ,
 )
 from common.ids import eof_id
 from common.models.query_results import Q3Result
@@ -38,11 +37,11 @@ class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
             deserialize=lambda line: self._deserialize_entry(line),
         )
 
-        self._input_topic = MessageMiddlewareExchangeTopicRabbitMQ(
+        self._input_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
             exchange_name=config.input_exchange,
-            binding_patterns=config.input_routing_keys,
-            queue_name=config.input_queue_name,
+            routing_keys=[str(config.node_id)],
+            queue_name=config.input_queue,
         )
         self._input_avg_exchange = MessageMiddlewareExchangeFanoutRabbitMQ(
             host=config.rabbitmq_host,
@@ -66,7 +65,7 @@ class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
 
     @property
     def _input_middleware(self):
-        return self._input_topic
+        return self._input_exchange
 
     @property
     def _output_middleware(self):

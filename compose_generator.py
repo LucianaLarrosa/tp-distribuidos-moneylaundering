@@ -21,7 +21,9 @@ EXCHANGE_BANK_MAX_OUTPUT = "bank_max_output"
 EXCHANGE_BANK_MAX_SHARDED = "bank_max_sharded"
 EXCHANGE_PAYMENT_FORMAT_SHARDS = "payment_format_shards"
 EXCHANGE_PAYMENT_FORMAT_AVERAGES = "payment_format_averages"
+EXCHANGE_BIDIRECTIONAL_SHARDER_INPUT = "bidirectional_sharder_input"
 EXCHANGE_BIDIRECTIONAL_SHARDER_OUTPUT = "bidirectional_sharder_output"
+EXCHANGE_ANOMALY_FILTER_INPUT = "anomaly_filter_input"
 EXCHANGE_ACCOUNT_FREQ_FILTER_OUTPUT = "account_freq_filter_output"
 EXCHANGE_PATH_MAPPER_OUTPUT = "path_mapper_output"
 EXCHANGE_PATH_FREQ_FILTER_OUTPUT = "path_freq_filter_output"
@@ -247,6 +249,10 @@ def _date_filter(
             "OUTPUT_ROUTING_KEY_EOF": ROUTING_KEYS_EOF,
             "PAYMENT_FORMAT_EXCHANGE": EXCHANGE_PAYMENT_FORMAT_INPUT,
             "PAYMENT_FORMAT_NODE_COUNT": str(payment_format_aggregators),
+            "BIDIRECTIONAL_SHARDER_EXCHANGE": EXCHANGE_BIDIRECTIONAL_SHARDER_INPUT,
+            "BIDIRECTIONAL_SHARDER_NODE_COUNT": str(bidirectional_sharders),
+            "ANOMALY_FILTER_EXCHANGE": EXCHANGE_ANOMALY_FILTER_INPUT,
+            "ANOMALY_FILTER_NODE_COUNT": str(anomaly_filters),
         },
     }
 
@@ -552,9 +558,8 @@ def _anomaly_filter(i, anomaly_filters):
         "volumes": [f"anomaly_filter_spill_{i}:/tmp/anomaly_filter"],
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "INPUT_EXCHANGE": EXCHANGE_DATE_FILTER_OUTPUT,
-            "INPUT_ROUTING_KEYS": f"{ROUTING_KEY_USD}.{ROUTING_KEY_PERIOD_2},{ROUTING_KEYS_EOF}",
-            "INPUT_QUEUE_NAME": "anomaly_filter_input",
+            "INPUT_EXCHANGE": EXCHANGE_ANOMALY_FILTER_INPUT,
+            "INPUT_QUEUE": f"anomaly_filter_input_{i}",
             "AVG_EXCHANGE": EXCHANGE_PAYMENT_FORMAT_AVERAGES,
             "OUTPUT_EXCHANGE": EXCHANGE_QUERY_RESULTS,
             "QUERY_ID": str(QUERY_3_ID),
@@ -584,9 +589,8 @@ def _bidirectional_sharder(i, bidirectional_sharders, account_frequency_filters)
         },
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "INPUT_EXCHANGE": EXCHANGE_DATE_FILTER_OUTPUT,
-            "INPUT_ROUTING_KEY": f"{ROUTING_KEY_USD}.{ROUTING_KEY_PERIOD_1},{ROUTING_KEYS_EOF}",
-            "INPUT_QUEUE_NAME": "bidirectional_sharder_input",
+            "INPUT_EXCHANGE": EXCHANGE_BIDIRECTIONAL_SHARDER_INPUT,
+            "INPUT_QUEUE": f"bidirectional_sharder_input_{i}",
             "OUTPUT_EXCHANGE": EXCHANGE_BIDIRECTIONAL_SHARDER_OUTPUT,
             "CONTROL_EXCHANGE": "bidirectional_sharder_control",
             "NODE_PREFIX": NODE_PREFIX,

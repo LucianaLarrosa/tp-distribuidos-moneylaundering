@@ -29,3 +29,11 @@ class Config:
         self.output_routing_key_eof = os.environ["OUTPUT_ROUTING_KEY_EOF"]
         self.payment_format_exchange = os.environ["PAYMENT_FORMAT_EXCHANGE"]
         self.payment_format_node_count = int(os.environ["PAYMENT_FORMAT_NODE_COUNT"])
+        self.bidirectional_sharder_exchange = os.environ[
+            "BIDIRECTIONAL_SHARDER_EXCHANGE"
+        ]
+        self.bidirectional_sharder_node_count = int(
+            os.environ["BIDIRECTIONAL_SHARDER_NODE_COUNT"]
+        )
+        self.anomaly_filter_exchange = os.environ["ANOMALY_FILTER_EXCHANGE"]
+        self.anomaly_filter_node_count = int(os.environ["ANOMALY_FILTER_NODE_COUNT"])

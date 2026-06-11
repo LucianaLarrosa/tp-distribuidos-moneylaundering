@@ -2,7 +2,6 @@ import logging
 
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
-    MessageMiddlewareExchangeTopicRabbitMQ,
 )
 from common.ids import eof_id
 from common.models.account_edge import AccountEdge
@@ -20,11 +19,11 @@ class BidirectionalSharder(SafeOutputCapable, StatefulCoordinatedWorker):
         self.config = config
         super().__init__()
 
-        self._input_exchange = MessageMiddlewareExchangeTopicRabbitMQ(
+        self._input_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
             exchange_name=config.input_exchange,
-            binding_patterns=config.input_routing_keys,
-            queue_name=config.input_queue_name,
+            routing_keys=[str(config.node_id)],
+            queue_name=config.input_queue,
         )
         self._output_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,

@@ -5,10 +5,7 @@ class Config:
     def __init__(self):
         self.rabbitmq_host = os.environ["RABBITMQ_HOST"]
         self.input_exchange = os.environ["INPUT_EXCHANGE"]
-        self.input_routing_keys = [
-            k.strip() for k in os.environ["INPUT_ROUTING_KEYS"].split(",") if k.strip()
-        ]
-        self.input_queue_name = os.environ["INPUT_QUEUE_NAME"]
+        self.input_queue = os.environ["INPUT_QUEUE"]
         self.avg_exchange = os.environ["AVG_EXCHANGE"]
         self.output_exchange = os.environ["OUTPUT_EXCHANGE"]
         self.query_id = int(os.environ["QUERY_ID"])
