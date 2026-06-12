@@ -2,7 +2,7 @@ import logging
 import signal
 from abc import ABC, abstractmethod
 
-from common.health import HeartbeatSender
+from common.health import HealthResponder
 from common.protocol.internal import internal
 
 
@@ -11,13 +11,10 @@ class Worker(ABC):
         self.config = config
         self._closed = False
         signal.signal(signal.SIGTERM, lambda *_: self.shutdown())
-        self._heartbeat = HeartbeatSender(
-            config.node_name,
-            config.watchdog_host,
-            config.watchdog_port,
-            config.heartbeat_interval_seconds,
+        self._health_responder = HealthResponder(
+            config.node_name, config.ping_port, config.ping_pong_host
         )
-        self._heartbeat.start()
+        self._health_responder.start()
 
     @property
     @abstractmethod
@@ -66,7 +63,7 @@ class Worker(ABC):
             return
         self._closed = True
         logging.info("Shutting down worker...")
-        self._heartbeat.stop()
+        self._health_responder.stop()
         self._input_middleware.stop_consuming()
         self._input_middleware.close()
         self._output_middleware.close()

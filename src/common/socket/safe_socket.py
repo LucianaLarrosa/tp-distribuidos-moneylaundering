@@ -2,6 +2,10 @@ import socket
 from abc import ABC, abstractmethod
 
 
+class SocketTimeoutError(Exception):
+    pass
+
+
 class IncompleteReadError(Exception):
     def __init__(self, partial: bytes, expected: int):
         self.partial = partial
@@ -80,8 +84,12 @@ class SafeUDPSocket(BaseSafeSocket):
     def send(self, data, address):
         self._sock.sendto(data, address)
 
-    def recv(self):
-        return self._sock.recvfrom(self.BUF_SIZE)
+    def recv(self, timeout=None):
+        self._sock.settimeout(timeout)
+        try:
+            return self._sock.recvfrom(self.BUF_SIZE)
+        except socket.timeout:
+            raise SocketTimeoutError()
 
     def close(self):
         self._sock.close()

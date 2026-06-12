@@ -29,13 +29,14 @@ QUEUE_CURRENCY_MAPPER_OUTPUT = "currency_mapper_output"
 QUEUE_LOW_AMOUNT_AGGREGATOR_OUTPUT = "low_amount_aggregator_output"
 QUEUE_BANK_MAX_RESULTS = "bank_max_results"
 
-# --- Watchdog / Heartbeat Configuration ---
+# --- Watchdog / Health Configuration ---
 
-WATCHDOG_HOST = "watchdog"
-WATCHDOG_PORT = "9000"
-HEARTBEAT_INTERVAL_SECONDS = "1"
-WATCHDOG_TIMEOUT_SECONDS = "10"
-WATCHDOG_CHECK_INTERVAL_SECONDS = "1"
+PING_PONG_HOST = "0.0.0.0"
+PING_PORT = "9001"
+PONG_PORT = "9000"
+PING_TIMEOUT_SECONDS = "2"
+CHECK_INTERVAL_SECONDS = "5"
+MAX_RETRIES = "3"
 UNMONITORED_SERVICE_PREFIXES = (
     "rabbitmq",
     "gateway_",
@@ -724,20 +725,22 @@ def _watchdog(monitored_nodes):
         "container_name": "watchdog",
         "volumes": ["/var/run/docker.sock:/var/run/docker.sock"],
         "environment": {
-            "WATCHDOG_PORT": WATCHDOG_PORT,
-            "TIMEOUT_SECONDS": WATCHDOG_TIMEOUT_SECONDS,
-            "CHECK_INTERVAL_SECONDS": WATCHDOG_CHECK_INTERVAL_SECONDS,
+            "PING_PONG_HOST": PING_PONG_HOST,
+            "PING_PORT": PING_PORT,
+            "PONG_PORT": PONG_PORT,
+            "PING_TIMEOUT_SECONDS": PING_TIMEOUT_SECONDS,
+            "CHECK_INTERVAL_SECONDS": CHECK_INTERVAL_SECONDS,
+            "MAX_RETRIES": MAX_RETRIES,
             "MONITORED_NODES": ",".join(monitored_nodes),
         },
     }
 
 
-def _enable_heartbeat(service):
+def _enable_health(service):
     service["environment"].update(
         {
-            "WATCHDOG_HOST": WATCHDOG_HOST,
-            "WATCHDOG_PORT": WATCHDOG_PORT,
-            "HEARTBEAT_INTERVAL_SECONDS": HEARTBEAT_INTERVAL_SECONDS,
+            "PING_PONG_HOST": PING_PONG_HOST,
+            "PING_PORT": PING_PORT,
             "NODE_NAME": service["container_name"],
         }
     )
@@ -852,7 +855,7 @@ def build_compose(
     for name, service in services.items():
         if name.startswith(UNMONITORED_SERVICE_PREFIXES):
             continue
-        _enable_heartbeat(service)
+        _enable_health(service)
         monitored_nodes.append(service["container_name"])
     services["watchdog"] = _watchdog(monitored_nodes)
     volumes = {f"anomaly_filter_spill_{i}": None for i in range(anomaly_filters)}

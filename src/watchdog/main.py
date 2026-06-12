@@ -1,49 +1,55 @@
 import logging
 import signal
 import subprocess
-import threading
 import time
 
 from common.protocol.health import health
-from common.socket import SafeUDPSocket
+from common.socket import SafeUDPSocket, SocketTimeoutError
 from config import Config
 
 
 class Watchdog:
-    WATCHDOG_HOST = "0.0.0.0"
-
     def __init__(self, config):
         self._config = config
         self._closed = False
-        self._last_seen = {}  # node_name -> last heartbeat timestamp
-        self._lock = threading.Lock()
+        self._seen = set()
+        self._miss_count = (
+            {}
+        )  # node -> consecutive missed pongs (only tracked after first pong)
         self._socket = SafeUDPSocket()
-        self._socket.bind(self.WATCHDOG_HOST, config.port)
-        self._receiver_thread = threading.Thread(target=self._receive_loop, daemon=True)
+        self._socket.bind(config.ping_pong_host, config.pong_port)
 
         signal.signal(signal.SIGTERM, lambda *_: self.shutdown())
 
-    def _update_last_seen(self, node_name):
-        with self._lock:
-            self._last_seen[node_name] = time.monotonic()
-
-    def _receive_loop(self):
-        """
-        Continuously receive heartbeat messages from nodes and update their last seen timestamps.
-        """
-        while not self._closed:
+    def _send_pings(self):
+        ping_data = health.serialize_ping()
+        for node in self._config.monitored_nodes:
             try:
-                data, _ = self._socket.recv()
-            except OSError:
+                self._socket.send(ping_data, (node, self._config.ping_port))
+            except OSError as e:
+                logging.warning("Failed to ping '%s': %s", node, e)
+
+    def _collect_pongs(self):
+        """
+        Collect pong responses from nodes until the timeout expires, returning a set of nodes that responded.
+        """
+        responded = set()
+        deadline = time.monotonic() + self._config.ping_timeout_seconds
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
                 break
             try:
-                node_name = health.deserialize_heartbeat(data)
+                data, _ = self._socket.recv(timeout=remaining)
+            except (SocketTimeoutError, OSError):
+                break
+            try:
+                node_name = health.deserialize_pong(data)
+                if node_name:
+                    responded.add(node_name)
             except Exception as e:
-                logging.warning("Ignoring malformed heartbeat: %s", e)
-                continue
-            if not node_name:
-                continue
-            self._update_last_seen(node_name)
+                logging.warning("Ignoring malformed pong: %s", e)
+        return responded
 
     def _revive(self, node_name):
         """
@@ -57,33 +63,30 @@ class Watchdog:
         else:
             logging.info("Node '%s' revived", node_name)
 
-    def _get_dead_nodes(self):
-        now = time.monotonic()
-        with self._lock:
-            return [
-                node
-                for node, last_seen in self._last_seen.items()
-                if now - last_seen > self._config.timeout_seconds
-            ]
-
-    def _check_once(self):
+    def _process_results(self, responded):
         """
-        Check for nodes that have not sent a heartbeat within the timeout period and attempt to revive them.
+        Update internal state based on which nodes responded to the ping, and attempt to revive any that have missed too many pongs.
         """
-        for node in self._get_dead_nodes():
-            logging.warning(
-                "Node %s timed out (no heartbeat for %d seconds), attempting to revive",
-                node,
-                self._config.timeout_seconds,
-            )
-            self._revive(node)
-            self._update_last_seen(node)
+        self._seen.update(responded)
+        for node in responded:
+            self._miss_count[node] = 0
+        for node in self._seen - responded:
+            self._miss_count[node] += 1
+            if self._miss_count[node] >= self._config.max_retries:
+                logging.warning(
+                    "Node '%s' presumed dead after %d missed pongs, reviving...",
+                    node,
+                    self._miss_count[node],
+                )
+                self._revive(node)
+                self._miss_count[node] = 0
 
     def start(self):
         logging.info("Starting watchdog...")
-        self._receiver_thread.start()
         while not self._closed:
-            self._check_once()
+            self._send_pings()
+            responded = self._collect_pongs()
+            self._process_results(responded)
             time.sleep(self._config.check_interval_seconds)
 
     def shutdown(self):

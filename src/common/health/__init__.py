@@ -1,1 +1,1 @@
-from common.health.heartbeat import HeartbeatSender
+from common.health.health_responder import HealthResponder
