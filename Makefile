@@ -8,6 +8,7 @@ N_CLIENTS ?= 2
 N_GATEWAYS ?= 2
 
 REPLICAS ?= 3
+
 TRANSACTIONS_FIELD_MAPPERS ?= $(REPLICAS)
 ACCOUNTS_FIELD_MAPPERS     ?= $(REPLICAS)
 DATE_FILTERS               ?= $(REPLICAS)
@@ -27,6 +28,7 @@ ACCOUNT_FREQUENCY_FILTERS  ?= $(REPLICAS)
 PATH_MAPPERS               ?= $(REPLICAS)
 PATH_FREQUENCY_FILTERS     ?= $(REPLICAS)
 DUPLICATE_ACCOUNT_FILTERS  ?= $(REPLICAS)
+WATCHDOGS                  ?= $(REPLICAS)
 
 COMPOSE_FILE ?= docker-compose.yaml
 
@@ -70,9 +72,9 @@ COMPOSE_ARGS = \
 	--path-mappers                $(PATH_MAPPERS) \
 	--path-frequency-filters      $(PATH_FREQUENCY_FILTERS) \
 	--duplicate-account-filters   $(DUPLICATE_ACCOUNT_FILTERS) \
+	--watchdogs                   $(WATCHDOGS) \
 	--output-file                 $(COMPOSE_FILE)
 
-CHAOS_NODE ?= amount_filter_0
 
 .PHONY: compose build up down logs remove-output clean clean-all build-expected verify-output output-test chaos-kill
 
@@ -87,7 +89,8 @@ proto:
 			src/common/protocol/common_protobuf/common_protobuf.proto \
 			src/common/protocol/internal/internal.proto \
 			src/common/protocol/external/external.proto \
-			src/common/protocol/health/health.proto"
+			src/common/protocol/health/health.proto \
+			src/common/protocol/election/election.proto"
 
 compose:
 	python3 compose_generator.py $(COMPOSE_ARGS)
@@ -105,7 +108,7 @@ logs:
 	docker compose -f $(COMPOSE_FILE) logs -f
 
 chaos-kill:
-	docker kill $(CHAOS_NODE)
+	docker kill $(NODE)
 
 remove-output:
 	rm -f $(COMPOSE_FILE)

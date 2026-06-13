@@ -16,3 +16,13 @@ class Config:
             for node in os.environ["MONITORED_NODES"].split(self.ENV_SEPARATOR)
             if node.strip()
         ]
+        self.watchdog_id = int(os.environ["WATCHDOG_ID"])
+        self.peers = {
+            i: f"watchdog_{i}" for i in range(int(os.environ["WATCHDOG_COUNT"]))
+        }
+        self.node_name = self.peers[self.watchdog_id]
+        self.election_port = int(os.environ["ELECTION_PORT"])
+        self.election_timeout_seconds = float(os.environ["ELECTION_TIMEOUT_SECONDS"])
+        self.leader_probe_miss_threshold = int(
+            os.environ["LEADER_PROBE_MISS_THRESHOLD"]
+        )

@@ -1,4 +1,5 @@
 import socket
+import time
 from abc import ABC, abstractmethod
 
 
@@ -41,11 +42,21 @@ class BaseSafeSocket(ABC):
 
 
 class SafeTCPSocket(BaseSafeSocket):
+    DEFAULT_CONNECT_RETRIES = 3
+    CONNECT_RETRY_DELAY = 0.3
+
     def __init__(self, sock=None):
         super().__init__(sock or socket.socket(socket.AF_INET, socket.SOCK_STREAM))
 
-    def connect(self, host, port):
-        self._sock.connect((host, port))
+    def connect(self, host, port, retries=DEFAULT_CONNECT_RETRIES):
+        for attempt in range(retries):
+            try:
+                self._sock.connect((host, port))
+                return
+            except OSError:
+                if attempt == retries - 1:
+                    raise
+                time.sleep(self.CONNECT_RETRY_DELAY)
 
     def listen(self):
         self._sock.listen()
@@ -57,15 +68,19 @@ class SafeTCPSocket(BaseSafeSocket):
     def send(self, data):
         self._sock.sendall(data)
 
-    def recv(self, size):
-        buf = bytearray(size)
-        pos = 0
-        while pos < size:
-            n = self._sock.recv_into(memoryview(buf)[pos:])
-            if n == 0:
-                raise IncompleteReadError(bytes(buf[:pos]), size)
-            pos += n
-        return bytes(buf)
+    def recv(self, size, timeout=None):
+        self._sock.settimeout(timeout)
+        try:
+            buf = bytearray(size)
+            pos = 0
+            while pos < size:
+                n = self._sock.recv_into(memoryview(buf)[pos:])
+                if n == 0:
+                    raise IncompleteReadError(bytes(buf[:pos]), size)
+                pos += n
+            return bytes(buf)
+        except (socket.timeout, BlockingIOError):
+            raise SocketTimeoutError()
 
     def close(self):
         try:

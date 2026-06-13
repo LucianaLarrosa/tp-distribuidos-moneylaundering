@@ -7,17 +7,13 @@ from common.models.query_results import (
     Q4Result,
     Q5Result,
 )
+from common.protocol.length_prefix import (
+    UINT32_SIZE,
+    deserialize_uint32,
+    serialize_uint32,
+)
+
 from . import external_pb2 as pb
-
-UINT32_SIZE = 4
-
-
-def serialize_uint32(u):
-    return u.to_bytes(UINT32_SIZE, "big")
-
-
-def deserialize_uint32(b):
-    return int.from_bytes(b, byteorder="big", signed=False)
 
 
 class MsgType:

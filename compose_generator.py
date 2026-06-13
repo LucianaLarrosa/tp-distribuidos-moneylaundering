@@ -37,6 +37,9 @@ PONG_PORT = "9000"
 PING_TIMEOUT_SECONDS = "2"
 CHECK_INTERVAL_SECONDS = "5"
 MAX_RETRIES = "3"
+ELECTION_PORT = "9002"
+ELECTION_TIMEOUT_SECONDS = "5"
+LEADER_PROBE_MISS_THRESHOLD = "3"
 UNMONITORED_SERVICE_PREFIXES = (
     "rabbitmq",
     "gateway_",
@@ -719,10 +722,11 @@ def _duplicate_account_filter(i, duplicate_account_filters):
     }
 
 
-def _watchdog(monitored_nodes):
+def _watchdog(watchdog_id, watchdog_count, monitored_nodes):
     return {
         "build": {"context": ".", "dockerfile": "src/watchdog/Dockerfile"},
-        "container_name": "watchdog",
+        "container_name": f"watchdog_{watchdog_id}",
+        "restart": "unless-stopped",
         "volumes": ["/var/run/docker.sock:/var/run/docker.sock"],
         "environment": {
             "PING_PONG_HOST": PING_PONG_HOST,
@@ -732,6 +736,11 @@ def _watchdog(monitored_nodes):
             "CHECK_INTERVAL_SECONDS": CHECK_INTERVAL_SECONDS,
             "MAX_RETRIES": MAX_RETRIES,
             "MONITORED_NODES": ",".join(monitored_nodes),
+            "WATCHDOG_ID": str(watchdog_id),
+            "WATCHDOG_COUNT": str(watchdog_count),
+            "ELECTION_PORT": ELECTION_PORT,
+            "ELECTION_TIMEOUT_SECONDS": ELECTION_TIMEOUT_SECONDS,
+            "LEADER_PROBE_MISS_THRESHOLD": LEADER_PROBE_MISS_THRESHOLD,
         },
     }
 
@@ -771,6 +780,7 @@ def build_compose(
     path_mappers,
     path_frequency_filters,
     duplicate_account_filters,
+    watchdogs,
 ):
     services = {}
     services["rabbitmq"] = _rabbitmq()
@@ -857,7 +867,8 @@ def build_compose(
             continue
         _enable_health(service)
         monitored_nodes.append(service["container_name"])
-    services["watchdog"] = _watchdog(monitored_nodes)
+    for i in range(watchdogs):
+        services[f"watchdog_{i}"] = _watchdog(i, watchdogs, monitored_nodes)
     volumes = {f"anomaly_filter_spill_{i}": None for i in range(anomaly_filters)}
     volumes.update({f"bank_mapper_spill_{i}": None for i in range(bank_mappers)})
     return {
@@ -914,6 +925,7 @@ def main():
     parser.add_argument(
         "--duplicate-account-filters", type=int, default=DEFAULT_REPLICAS
     )
+    parser.add_argument("--watchdogs", type=int, default=DEFAULT_REPLICAS)
     parser.add_argument("--output-file", required=True)
     args = parser.parse_args()
 
@@ -939,6 +951,7 @@ def main():
         ("--path-mappers", args.path_mappers),
         ("--path-frequency-filters", args.path_frequency_filters),
         ("--duplicate-account-filters", args.duplicate_account_filters),
+        ("--watchdogs", args.watchdogs),
     ]
     for flag, value in counts:
         if value < 1:
@@ -966,6 +979,7 @@ def main():
         path_mappers=args.path_mappers,
         path_frequency_filters=args.path_frequency_filters,
         duplicate_account_filters=args.duplicate_account_filters,
+        watchdogs=args.watchdogs,
     )
 
     output = yaml.safe_dump(compose, sort_keys=False, default_flow_style=False)
