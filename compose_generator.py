@@ -720,7 +720,6 @@ def _watchdog(watchdog_id, watchdog_count, monitored_nodes):
     return {
         "build": {"context": ".", "dockerfile": "src/watchdog/Dockerfile"},
         "container_name": f"watchdog_{watchdog_id}",
-        "restart": "unless-stopped",
         "volumes": ["/var/run/docker.sock:/var/run/docker.sock"],
         "environment": {
             "PING_PONG_HOST": PING_PONG_HOST,
