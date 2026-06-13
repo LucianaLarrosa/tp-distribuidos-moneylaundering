@@ -45,14 +45,12 @@ PANDAS_EXPECTED_DIR ?= ./pandas_expected_output
 SIZE              := $(patsubst HI-%_Trans.csv,%,$(TRANSACTIONS_FILE))
 EXPECTED_SIZE_DIR := $(EXPECTED_DIR)/$(SIZE)
 
-# Adjust this to ensure the containers have:
-# 1. Enough time to fully start before the tests run
-# 2. Enough time to gracefully stop running processes when interrupted
-SLEEP_TIME ?= 30
+PROTECTED_PREFIXES ?= rabbitmq gateway proxy client
 
 COMPOSE_ARGS = \
 	--clients                     $(N_CLIENTS) \
 	--gateways                    $(N_GATEWAYS) \
+	--protected-prefixes          "$(PROTECTED_PREFIXES)" \
 	--transactions-field-mappers  $(TRANSACTIONS_FIELD_MAPPERS) \
 	--accounts-field-mappers      $(ACCOUNTS_FIELD_MAPPERS) \
 	--date-filters                $(DATE_FILTERS) \
@@ -75,8 +73,9 @@ COMPOSE_ARGS = \
 	--watchdogs                   $(WATCHDOGS) \
 	--output-file                 $(COMPOSE_FILE)
 
+CHAOS_INTERVAL ?= 30
 
-.PHONY: compose build up down logs remove-output clean clean-all build-expected verify-output output-test chaos-kill
+.PHONY: compose build up down logs remove-output clean clean-all build-expected verify-output output-test chaos-kill chaos-monkey
 
 all: compose build output-test
 
@@ -108,7 +107,25 @@ logs:
 	docker compose -f $(COMPOSE_FILE) logs -f
 
 chaos-kill:
-	docker kill $(NODE)
+	@if [ -n "$(NODE)" ]; then \
+		target="$(NODE)"; \
+	else \
+		protected_regex="^($$(echo $(PROTECTED_PREFIXES) | tr ' ' '|'))"; \
+		containers=$$(docker ps --format '{{.Names}}' | grep -vE "$$protected_regex"); \
+		if [ -z "$$containers" ]; then \
+			printf "$(RED)No killable containers found$(RESET)\n"; \
+			exit 1; \
+		fi; \
+		target=$$(echo "$$containers" | shuf -n 1); \
+	fi; \
+	printf "$(RED)chaos-kill: $$target$(RESET)\n"; \
+	docker kill $$target
+
+chaos-monkey:
+	while true; do \
+		$(MAKE) --no-print-directory chaos-kill; \
+		sleep $(CHAOS_INTERVAL); \
+	done
 
 remove-output:
 	rm -f $(COMPOSE_FILE)
@@ -116,12 +133,12 @@ remove-output:
 
 clean:
 	docker compose -f $(COMPOSE_FILE) down -v --rmi local
-	$(MAKE) remove-output
+	$(MAKE) --no-print-directory remove-output
 
 clean-all:
 	docker compose -f $(COMPOSE_FILE) down -v --rmi local --remove-orphans
 	docker system prune -f
-	$(MAKE) remove-output
+	$(MAKE) --no-print-directory remove-output
 
 wait-clients:
 	@client_names=""; \

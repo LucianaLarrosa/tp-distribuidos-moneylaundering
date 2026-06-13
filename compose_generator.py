@@ -40,13 +40,7 @@ MAX_RETRIES = "3"
 ELECTION_PORT = "9002"
 ELECTION_TIMEOUT_SECONDS = "5"
 LEADER_PROBE_MISS_THRESHOLD = "3"
-UNMONITORED_SERVICE_PREFIXES = (
-    "rabbitmq",
-    "gateway_",
-    "proxy",
-    "client_",
-    "watchdog",
-)
+DEFAULT_PROTECTED_PREFIXES = "rabbitmq gateway proxy client"
 
 # --- Query IDs ---
 
@@ -781,6 +775,7 @@ def build_compose(
     path_frequency_filters,
     duplicate_account_filters,
     watchdogs,
+    protected_prefixes,
 ):
     services = {}
     services["rabbitmq"] = _rabbitmq()
@@ -861,9 +856,10 @@ def build_compose(
         )
     for i in range(anomaly_filters):
         services[f"anomaly_filter_{i}"] = _anomaly_filter(i, anomaly_filters)
+    unmonitored_prefixes = tuple(protected_prefixes.split())
     monitored_nodes = []
     for name, service in services.items():
-        if name.startswith(UNMONITORED_SERVICE_PREFIXES):
+        if name.startswith(unmonitored_prefixes):
             continue
         _enable_health(service)
         monitored_nodes.append(service["container_name"])
@@ -926,6 +922,11 @@ def main():
         "--duplicate-account-filters", type=int, default=DEFAULT_REPLICAS
     )
     parser.add_argument("--watchdogs", type=int, default=DEFAULT_REPLICAS)
+    parser.add_argument(
+        "--protected-prefixes",
+        default=DEFAULT_PROTECTED_PREFIXES,
+        help="Space-separated service name prefixes that are neither health-monitored nor killed by chaos.",
+    )
     parser.add_argument("--output-file", required=True)
     args = parser.parse_args()
 
@@ -980,6 +981,7 @@ def main():
         path_frequency_filters=args.path_frequency_filters,
         duplicate_account_filters=args.duplicate_account_filters,
         watchdogs=args.watchdogs,
+        protected_prefixes=args.protected_prefixes,
     )
 
     output = yaml.safe_dump(compose, sort_keys=False, default_flow_style=False)
