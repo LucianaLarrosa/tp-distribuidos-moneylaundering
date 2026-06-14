@@ -326,6 +326,7 @@ def _low_amount_aggregator(i, low_amount_aggregators, low_amount_reducers):
                 for j in range(low_amount_reducers)
             },
         },
+        "volumes": [f"low_amount_aggregator_state_{i}:/state"],
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
             "INPUT_EXCHANGE": EXCHANGE_LOW_AMOUNT_AGGREGATOR_INPUT,
@@ -336,6 +337,7 @@ def _low_amount_aggregator(i, low_amount_aggregators, low_amount_reducers):
             "NODE_ID": str(i),
             "RING_SIZE": str(low_amount_aggregators),
             "AMOUNT_THRESHOLD": "1.0",
+            "STATE_DIR": "/state",
         },
     }
 
@@ -348,6 +350,7 @@ def _low_amount_reducer(i, low_amount_reducers):
         },
         "container_name": f"low_amount_reducer_{i}",
         "depends_on": {"rabbitmq": {"condition": "service_healthy"}},
+        "volumes": [f"low_amount_reducer_state_{i}:/state"],
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
             "INPUT_QUEUE": QUEUE_LOW_AMOUNT_AGGREGATOR_OUTPUT,
@@ -357,6 +360,7 @@ def _low_amount_reducer(i, low_amount_reducers):
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
             "RING_SIZE": str(low_amount_reducers),
+            "STATE_DIR": "/state",
         },
     }
 
@@ -402,6 +406,7 @@ def _bank_max_aggregator(i, bank_max_aggregators, bank_max_reducers):
                 for j in range(bank_max_reducers)
             },
         },
+        "volumes": [f"bank_max_aggregator_state_{i}:/state"],
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
             "INPUT_EXCHANGE": EXCHANGE_BANK_MAX_INPUT,
@@ -413,6 +418,7 @@ def _bank_max_aggregator(i, bank_max_aggregators, bank_max_reducers):
             "RING_SIZE": str(bank_max_aggregators),
             "BATCH_SIZE": BANK_MAX_PARTIAL_BATCH_SIZE,
             "NUM_SHARDS": str(bank_max_reducers),
+            "STATE_DIR": "/state",
         },
     }
 
@@ -431,6 +437,7 @@ def _bank_max_reducer(i, bank_max_reducers, bank_mappers):
                 for j in range(bank_mappers)
             },
         },
+        "volumes": [f"bank_max_reducer_state_{i}:/state"],
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
             "INPUT_EXCHANGE": EXCHANGE_BANK_MAX_OUTPUT,
@@ -443,6 +450,7 @@ def _bank_max_reducer(i, bank_max_reducers, bank_mappers):
             "NODE_ID": str(i),
             "RING_SIZE": str(bank_max_reducers),
             "BATCH_SIZE": BANK_MAX_PARTIAL_BATCH_SIZE,
+            "STATE_DIR": "/state",
         },
     }
 
@@ -473,7 +481,10 @@ def _bank_mapper(i, bank_mappers):
         "build": {"context": ".", "dockerfile": "src/workers/bank_mapper/Dockerfile"},
         "container_name": f"bank_mapper_{i}",
         "depends_on": {"rabbitmq": {"condition": "service_healthy"}},
-        "volumes": [f"bank_mapper_spill_{i}:/tmp/bank_mapper"],
+        "volumes": [
+            f"bank_mapper_spill_{i}:/tmp/bank_mapper",
+            f"bank_mapper_state_{i}:/state",
+        ],
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
             "INPUT_EXCHANGE": EXCHANGE_BANK_MAX_SHARDED,
@@ -487,6 +498,7 @@ def _bank_mapper(i, bank_mappers):
             "NODE_ID": str(i),
             "RING_SIZE": str(bank_mappers),
             "SPILL_DIR": "/tmp/bank_mapper",
+            "STATE_DIR": "/state",
         },
     }
 
@@ -505,6 +517,7 @@ def _payment_format_aggregator(i, payment_format_aggregators, payment_format_red
                 for j in range(payment_format_reducers)
             },
         },
+        "volumes": [f"payment_format_aggregator_state_{i}:/state"],
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
             "INPUT_EXCHANGE": EXCHANGE_PAYMENT_FORMAT_INPUT,
@@ -516,6 +529,7 @@ def _payment_format_aggregator(i, payment_format_aggregators, payment_format_red
             "RING_SIZE": str(payment_format_aggregators),
             "BATCH_SIZE": PAYMENT_FORMAT_PARTIAL_BATCH_SIZE,
             "NUM_SHARDS": str(payment_format_reducers),
+            "STATE_DIR": "/state",
         },
     }
 
@@ -534,6 +548,7 @@ def _payment_format_reducer(i, payment_format_reducers, anomaly_filters):
                 for j in range(anomaly_filters)
             },
         },
+        "volumes": [f"payment_format_reducer_state_{i}:/state"],
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
             "INPUT_EXCHANGE": EXCHANGE_PAYMENT_FORMAT_SHARDS,
@@ -543,6 +558,7 @@ def _payment_format_reducer(i, payment_format_reducers, anomaly_filters):
             "NODE_PREFIX": NODE_PREFIX,
             "NODE_ID": str(i),
             "RING_SIZE": str(payment_format_reducers),
+            "STATE_DIR": "/state",
         },
     }
 
@@ -555,7 +571,10 @@ def _anomaly_filter(i, anomaly_filters):
         },
         "container_name": f"anomaly_filter_{i}",
         "depends_on": {"rabbitmq": {"condition": "service_healthy"}},
-        "volumes": [f"anomaly_filter_spill_{i}:/tmp/anomaly_filter"],
+        "volumes": [
+            f"anomaly_filter_spill_{i}:/tmp/anomaly_filter",
+            f"anomaly_filter_state_{i}:/state",
+        ],
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
             "INPUT_EXCHANGE": EXCHANGE_ANOMALY_FILTER_INPUT,
@@ -569,6 +588,7 @@ def _anomaly_filter(i, anomaly_filters):
             "RING_SIZE": str(anomaly_filters),
             "SPILL_DIR": "/tmp/anomaly_filter",
             "ANOMALY_THRESHOLD": "0.01",
+            "STATE_DIR": "/state",
         },
     }
 
@@ -587,6 +607,7 @@ def _bidirectional_sharder(i, bidirectional_sharders, account_frequency_filters)
                 for j in range(account_frequency_filters)
             },
         },
+        "volumes": [f"bidirectional_sharder_state_{i}:/state"],
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
             "INPUT_EXCHANGE": EXCHANGE_BIDIRECTIONAL_SHARDER_INPUT,
@@ -598,6 +619,7 @@ def _bidirectional_sharder(i, bidirectional_sharders, account_frequency_filters)
             "RING_SIZE": str(bidirectional_sharders),
             "OUTPUT_NODE_COUNT": str(account_frequency_filters),
             "OUTPUT_NODE_PREFIX": NODE_PREFIX,
+            "STATE_DIR": "/state",
         },
     }
 
@@ -616,6 +638,7 @@ def _account_frequency_filter(i, account_frequency_filters, path_mappers):
                 for j in range(path_mappers)
             },
         },
+        "volumes": [f"account_frequency_filter_state_{i}:/state"],
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
             "INPUT_EXCHANGE": EXCHANGE_BIDIRECTIONAL_SHARDER_OUTPUT,
@@ -628,6 +651,7 @@ def _account_frequency_filter(i, account_frequency_filters, path_mappers):
             "OUTPUT_NODE_PREFIX": NODE_PREFIX,
             "MIN_REQUIRED_ACCOUNTS": MIN_REQUIRED_ACCOUNTS,
             "BATCH_SIZE": ACCOUNT_EDGE_BATCH_SIZE,
+            "STATE_DIR": "/state",
         },
     }
 
@@ -646,6 +670,7 @@ def _path_mapper(i, path_mappers, path_frequency_filters):
                 for j in range(path_frequency_filters)
             },
         },
+        "volumes": [f"path_mapper_state_{i}:/state"],
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
             "INPUT_EXCHANGE": EXCHANGE_ACCOUNT_FREQ_FILTER_OUTPUT,
@@ -657,6 +682,7 @@ def _path_mapper(i, path_mappers, path_frequency_filters):
             "OUTPUT_NODE_COUNT": str(path_frequency_filters),
             "OUTPUT_NODE_PREFIX": NODE_PREFIX,
             "BATCH_SIZE": PATH_BATCH_SIZE,
+            "STATE_DIR": "/state",
         },
     }
 
@@ -675,6 +701,7 @@ def _path_frequency_filter(i, path_frequency_filters, duplicate_account_filters)
                 for j in range(duplicate_account_filters)
             },
         },
+        "volumes": [f"path_frequency_filter_state_{i}:/state"],
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
             "INPUT_EXCHANGE": EXCHANGE_PATH_MAPPER_OUTPUT,
@@ -687,6 +714,7 @@ def _path_frequency_filter(i, path_frequency_filters, duplicate_account_filters)
             "OUTPUT_NODE_PREFIX": NODE_PREFIX,
             "MIN_REQUIRED_ACCOUNTS": MIN_REQUIRED_ACCOUNTS,
             "BATCH_SIZE": Q4_RESULT_BATCH_SIZE,
+            "STATE_DIR": "/state",
         },
     }
 
@@ -699,6 +727,7 @@ def _duplicate_account_filter(i, duplicate_account_filters):
         },
         "container_name": f"duplicate_account_filter_{i}",
         "depends_on": {"rabbitmq": {"condition": "service_healthy"}},
+        "volumes": [f"duplicate_account_filter_state_{i}:/state"],
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
             "INPUT_EXCHANGE": EXCHANGE_PATH_FREQ_FILTER_OUTPUT,
@@ -709,6 +738,7 @@ def _duplicate_account_filter(i, duplicate_account_filters):
             "NODE_ID": str(i),
             "RING_SIZE": str(duplicate_account_filters),
             "BATCH_SIZE": Q4_RESULT_BATCH_SIZE,
+            "STATE_DIR": "/state",
         },
     }
 
@@ -820,6 +850,65 @@ def build_compose(
         services[f"anomaly_filter_{i}"] = _anomaly_filter(i, anomaly_filters)
     volumes = {f"anomaly_filter_spill_{i}": None for i in range(anomaly_filters)}
     volumes.update({f"bank_mapper_spill_{i}": None for i in range(bank_mappers)})
+    volumes.update({f"anomaly_filter_state_{i}": None for i in range(anomaly_filters)})
+    volumes.update({f"bank_mapper_state_{i}": None for i in range(bank_mappers)})
+    volumes.update(
+        {
+            f"low_amount_aggregator_state_{i}": None
+            for i in range(low_amount_aggregators)
+        }
+    )
+    volumes.update(
+        {
+            f"low_amount_reducer_state_{i}": None
+            for i in range(low_amount_reducers)
+        }
+    )
+    volumes.update(
+        {f"bank_max_aggregator_state_{i}": None for i in range(bank_max_aggregators)}
+    )
+    volumes.update(
+        {f"bank_max_reducer_state_{i}": None for i in range(bank_max_reducers)}
+    )
+    volumes.update(
+        {
+            f"payment_format_aggregator_state_{i}": None
+            for i in range(payment_format_aggregators)
+        }
+    )
+    volumes.update(
+        {
+            f"payment_format_reducer_state_{i}": None
+            for i in range(payment_format_reducers)
+        }
+    )
+    volumes.update(
+        {
+            f"bidirectional_sharder_state_{i}": None
+            for i in range(bidirectional_sharders)
+        }
+    )
+    volumes.update(
+        {
+            f"account_frequency_filter_state_{i}": None
+            for i in range(account_frequency_filters)
+        }
+    )
+    volumes.update(
+        {f"path_mapper_state_{i}": None for i in range(path_mappers)}
+    )
+    volumes.update(
+        {
+            f"path_frequency_filter_state_{i}": None
+            for i in range(path_frequency_filters)
+        }
+    )
+    volumes.update(
+        {
+            f"duplicate_account_filter_state_{i}": None
+            for i in range(duplicate_account_filters)
+        }
+    )
     return {
         "name": "moneylaundering-client",
         "services": services,

@@ -48,8 +48,10 @@ def _run_results_consumer(rabbitmq_host, exchange_name, gateway_id, client_queue
         rabbitmq_host, exchange_name, [gateway_id]
     )
 
+    seen = set()  # (client_id, query_id, message_id) 
+
     def on_message(body, ack, _nack):
-        msg_type, client_id, _, payload, _ = internal.deserialize_msg(body)
+        msg_type, client_id, _, payload, message_id = internal.deserialize_msg(body)
         handler_queue = client_queues.get(client_id)
         if handler_queue is None:
             logging.warning(
@@ -59,6 +61,13 @@ def _run_results_consumer(rabbitmq_host, exchange_name, gateway_id, client_queue
             )
             ack()
             return
+        if message_id:
+            query_id = payload[0] if msg_type == internal.MsgType.QUERY_END else None
+            key = (client_id, query_id, message_id)
+            if key in seen:
+                ack()
+                return
+            seen.add(key)
         handler_queue.put((msg_type, payload))
         ack()
 
