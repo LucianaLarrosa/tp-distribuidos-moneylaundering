@@ -39,11 +39,13 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
             host=config.rabbitmq_host,
             exchange_name=config.input_exchange,
             routing_keys=[self.config.shard_id],
+            queue_name=f"{config.input_exchange}_{config.shard_id}",
         )
         self._input_banks_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
             exchange_name=config.banks_exchange,
             routing_keys=[self._side_input_prefix_key(config.node_id)],
+            queue_name=f"{config.banks_exchange}_{config.node_id}",
         )
         self._output_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
@@ -119,28 +121,26 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
                 self._flow_locks[key] = lock
             return lock
 
-    def _store_bank_unlocked(self, key, bank, client_id, gateway_id):
-        bank_id = str(int(bank.bank_id))
-        bank_names = self._bank_names.setdefault(key, {})
-        current = bank_names.get(bank_id)
-        if current is None:
-            bank_names[bank_id] = bank.name
-            return
-        if current != bank.name:
-            logging.warning(
-                "Bank id %s arrived with conflicting names for client %s/%s: %s / %s",
-                bank_id,
-                client_id,
-                gateway_id,
-                current,
-                bank.name,
-            )
+    def _side_delta(self, payload):
+        return [[str(int(bank.bank_id)), bank.name] for bank in payload]
 
-    def _process_side_batch(self, client_id, gateway_id, batch):
+    def _apply_side_delta(self, client_id, gateway_id, delta):
         key = self._flow_key(client_id, gateway_id)
         with self._bank_names_lock:
-            for bank in batch:
-                self._store_bank_unlocked(key, bank, client_id, gateway_id)
+            bank_names = self._bank_names.setdefault(key, {})
+            for bank_id, name in delta:
+                current = bank_names.get(bank_id)
+                if current is None:
+                    bank_names[bank_id] = name
+                elif current != name:
+                    logging.warning(
+                        "Bank id %s arrived with conflicting names for client %s/%s: %s / %s",
+                        bank_id,
+                        client_id,
+                        gateway_id,
+                        current,
+                        name,
+                    )
 
     def _map_and_emit(
         self, client_id, gateway_id, bank_max_batch, exchange, message_id

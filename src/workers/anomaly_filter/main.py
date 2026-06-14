@@ -46,6 +46,7 @@ class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
         self._input_avg_exchange = MessageMiddlewareExchangeFanoutRabbitMQ(
             host=config.rabbitmq_host,
             exchange_name=config.avg_exchange,
+            queue_name=f"{config.avg_exchange}_{config.node_id}",
         )
         self._output_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
@@ -187,14 +188,18 @@ class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
             message_id=self._current_message_id,
         )
 
-    def _process_side_batch(self, client_id, gateway_id, batch):
+    def _side_delta(self, payload):
+        return [
+            [self._payment_format_key(entry.payment_format), entry.average_amount]
+            for entry in payload
+        ]
+
+    def _apply_side_delta(self, client_id, gateway_id, delta):
         key = self._flow_key(client_id, gateway_id)
         with self._get_flow_lock(key):
             table = self._avgs.setdefault(key, {})
-            for entry in batch:
-                table[self._payment_format_key(entry.payment_format)] = (
-                    entry.average_amount
-                )
+            for payment_format, avg in delta:
+                table[payment_format] = avg
 
     def _on_side_input_ready(self, client_id, gateway_id):
         key = self._flow_key(client_id, gateway_id)
