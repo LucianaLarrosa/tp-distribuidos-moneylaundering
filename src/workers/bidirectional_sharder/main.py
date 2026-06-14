@@ -121,6 +121,7 @@ class BidirectionalSharder(SafeOutputCapable, StatefulCoordinatedWorker):
         return edges_by_shard
 
     def _handle_data_message(self, msg_type, client_id, gateway_id, payload):
+        sent = 0
         for shard, edges in self._create_edges_by_shard(payload).items():
             self._send(
                 self._output_exchange,
@@ -131,7 +132,15 @@ class BidirectionalSharder(SafeOutputCapable, StatefulCoordinatedWorker):
                 routing_key=f"{self.config.output_node_prefix}{shard}",
             )
             self._increment_sent_count(client_id, gateway_id)
+            sent += 1
         super()._handle_data_message(msg_type, client_id, gateway_id, payload)
+        return {"sent": sent}
+
+    def _apply_delta(self, client_id, gateway_id, delta):
+        with self._sent_count_lock:
+            self._sent_count[(client_id, gateway_id)] = (
+                self._sent_count.get((client_id, gateway_id), 0) + delta["sent"]
+            )
 
 
 def main():

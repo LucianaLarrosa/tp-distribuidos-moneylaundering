@@ -68,28 +68,45 @@ class BankMaxAggregator(StatefulCoordinatedWorker):
             and tx.from_account is not None
         )
 
+    @staticmethod
+    def _beats(amount, account, cur_amount, cur_account):
+        return amount > cur_amount or (amount == cur_amount and account < cur_account)
+
     def _handle_data_message(self, _, client_id, gateway_id, transaction_batch):
         super()._handle_data_message(_, client_id, gateway_id, transaction_batch)
-        flow_max = self._local_max.setdefault((client_id, gateway_id), {})
+        delta = {}
         for transaction in transaction_batch:
             if not self.__has_required_anomaly_fields(transaction):
                 continue
-
             from_bank = str(int(transaction.from_bank))
+            current = delta.get(from_bank)
+            if current is None or self._beats(
+                transaction.amount, transaction.from_account, current[1], current[0]
+            ):
+                delta[from_bank] = [transaction.from_account, transaction.amount]
+        self._apply_delta(client_id, gateway_id, delta)
+        return delta
+
+    def _apply_delta(self, client_id, gateway_id, delta):
+        flow_max = self._local_max.setdefault((client_id, gateway_id), {})
+        for from_bank, (from_account, amount) in delta.items():
             current = flow_max.get(from_bank)
-            if (
-                current is None
-                or transaction.amount > current.amount
-                or (
-                    transaction.amount == current.amount
-                    and transaction.from_account < current.from_account
-                )
+            if current is None or self._beats(
+                amount, from_account, current.amount, current.from_account
             ):
                 flow_max[from_bank] = BankMaxPartial(
                     from_bank=from_bank,
-                    from_account=transaction.from_account,
-                    amount=transaction.amount,
+                    from_account=from_account,
+                    amount=amount,
                 )
+
+    def _state_as_delta(self, client_id, gateway_id):
+        return {
+            from_bank: [bank_max.from_account, bank_max.amount]
+            for from_bank, bank_max in self._local_max.get(
+                (client_id, gateway_id), {}
+            ).items()
+        }
 
     def _flush_data(self, client_id, gateway_id):
         flow_max = self._local_max.pop((client_id, gateway_id), {})

@@ -5,6 +5,7 @@ from common.middleware.middleware_rabbitmq import (
 )
 
 from common.ids import eof_id
+from common.models.bank_max_partial import BankMaxPartial
 from common.protocol.internal import internal
 from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
 from config import Config
@@ -20,6 +21,7 @@ class BankMaxReducer(StatefulCoordinatedWorker):
             host=config.rabbitmq_host,
             exchange_name=config.input_exchange,
             routing_keys=[config.shard_id],
+            queue_name=f"{config.input_exchange}_{config.shard_id}",
         )
         self._output_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
@@ -55,20 +57,42 @@ class BankMaxReducer(StatefulCoordinatedWorker):
     def _ring_size(self):
         return self.config.ring_size
 
+    @staticmethod
+    def _beats(amount, account, cur_amount, cur_account):
+        return amount > cur_amount or (amount == cur_amount and account < cur_account)
+
     def _handle_data_message(self, _, client_id, gateway_id, bank_max_batch):
         super()._handle_data_message(_, client_id, gateway_id, bank_max_batch)
-        flow_max = self._global_max.setdefault((client_id, gateway_id), {})
+        delta = {}
         for bank_max in bank_max_batch:
-            current = flow_max.get(bank_max.from_bank)
-            if (
-                current is None
-                or bank_max.amount > current.amount
-                or (
-                    bank_max.amount == current.amount
-                    and bank_max.from_account < current.from_account
-                )
+            current = delta.get(bank_max.from_bank)
+            if current is None or self._beats(
+                bank_max.amount, bank_max.from_account, current[1], current[0]
             ):
-                flow_max[bank_max.from_bank] = bank_max
+                delta[bank_max.from_bank] = [bank_max.from_account, bank_max.amount]
+        self._apply_delta(client_id, gateway_id, delta)
+        return delta
+
+    def _apply_delta(self, client_id, gateway_id, delta):
+        flow_max = self._global_max.setdefault((client_id, gateway_id), {})
+        for from_bank, (from_account, amount) in delta.items():
+            current = flow_max.get(from_bank)
+            if current is None or self._beats(
+                amount, from_account, current.amount, current.from_account
+            ):
+                flow_max[from_bank] = BankMaxPartial(
+                    from_bank=from_bank,
+                    from_account=from_account,
+                    amount=amount,
+                )
+
+    def _state_as_delta(self, client_id, gateway_id):
+        return {
+            from_bank: [bank_max.from_account, bank_max.amount]
+            for from_bank, bank_max in self._global_max.get(
+                (client_id, gateway_id), {}
+            ).items()
+        }
 
     def _flush_data(self, client_id, gateway_id):
         flow_max = self._global_max.pop((client_id, gateway_id), {})

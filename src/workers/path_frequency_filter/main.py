@@ -22,6 +22,7 @@ class PathFrequencyFilter(StatefulCoordinatedWorker):
             host=config.rabbitmq_host,
             exchange_name=config.input_exchange,
             routing_keys=[self._get_ring_routing_key(config.node_id)],
+            queue_name=f"{config.input_exchange}_{config.node_id}",
         )
         self._output_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
@@ -101,26 +102,56 @@ class PathFrequencyFilter(StatefulCoordinatedWorker):
             routing_key=f"{self.config.output_node_prefix}0",
         )
 
-    def _update_paths(self, client_id, gateway_id, path):
-        """
-        Update the paths by adding the intermediary account to the set of intermediaries.
-        """
-        client_gateway_key = (client_id, gateway_id)
-        extreme_key = (
-            path.from_bank,
-            path.from_account,
-            path.to_bank,
-            path.to_account,
-        )
-        mid_account_key = (path.mid_bank, path.mid_account)
-        self._paths.setdefault(client_gateway_key, {}).setdefault(
-            extreme_key, set()
-        ).add((mid_account_key))
+    def _add_path(
+        self,
+        client_id,
+        gateway_id,
+        from_bank,
+        from_account,
+        to_bank,
+        to_account,
+        mid_bank,
+        mid_account,
+    ):
+        self._paths.setdefault((client_id, gateway_id), {}).setdefault(
+            (from_bank, from_account, to_bank, to_account), set()
+        ).add((mid_bank, mid_account))
 
     def _handle_data_message(self, _, client_id, gateway_id, payload):
-        for path in payload:
-            self._update_paths(client_id, gateway_id, path)
         super()._handle_data_message(_, client_id, gateway_id, payload)
+        delta = [
+            [p.from_bank, p.from_account, p.to_bank, p.to_account, p.mid_bank, p.mid_account]
+            for p in payload
+        ]
+        self._apply_delta(client_id, gateway_id, delta)
+        return delta
+
+    def _apply_delta(self, client_id, gateway_id, delta):
+        for from_bank, from_account, to_bank, to_account, mid_bank, mid_account in delta:
+            self._add_path(
+                client_id,
+                gateway_id,
+                from_bank,
+                from_account,
+                to_bank,
+                to_account,
+                mid_bank,
+                mid_account,
+            )
+
+    def _state_as_delta(self, client_id, gateway_id):
+        out = []
+        for (
+            from_bank,
+            from_account,
+            to_bank,
+            to_account,
+        ), mid_accounts in self._paths.get((client_id, gateway_id), {}).items():
+            for mid_bank, mid_account in mid_accounts:
+                out.append(
+                    [from_bank, from_account, to_bank, to_account, mid_bank, mid_account]
+                )
+        return out
 
 
 def main():

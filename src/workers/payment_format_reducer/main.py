@@ -21,6 +21,7 @@ class PaymentFormatReducer(StatefulCoordinatedWorker):
             host=config.rabbitmq_host,
             exchange_name=config.input_exchange,
             routing_keys=[config.shard_id],
+            queue_name=f"{config.input_exchange}_{config.shard_id}",
         )
         self._output_exchange = MessageMiddlewareExchangeFanoutRabbitMQ(
             host=config.rabbitmq_host,
@@ -60,13 +61,29 @@ class PaymentFormatReducer(StatefulCoordinatedWorker):
 
     def _handle_data_message(self, _, client_id, gateway_id, partial_batch):
         super()._handle_data_message(_, client_id, gateway_id, partial_batch)
-        flow_totals = self._totals.setdefault(self._flow_key(client_id, gateway_id), {})
+        delta = {}
         for partial in partial_batch:
-            total_amount, count = flow_totals.get(partial.payment_format, (0.0, 0))
-            flow_totals[partial.payment_format] = (
+            total_amount, count = delta.get(partial.payment_format, (0.0, 0))
+            delta[partial.payment_format] = [
                 total_amount + partial.total_amount,
                 count + partial.count,
-            )
+            ]
+        self._apply_delta(client_id, gateway_id, delta)
+        return delta
+
+    def _apply_delta(self, client_id, gateway_id, delta):
+        flow_totals = self._totals.setdefault(self._flow_key(client_id, gateway_id), {})
+        for payment_format, (total_amount, count) in delta.items():
+            cur_total, cur_count = flow_totals.get(payment_format, (0.0, 0))
+            flow_totals[payment_format] = (cur_total + total_amount, cur_count + count)
+
+    def _state_as_delta(self, client_id, gateway_id):
+        return {
+            payment_format: [total_amount, count]
+            for payment_format, (total_amount, count) in self._totals.get(
+                self._flow_key(client_id, gateway_id), {}
+            ).items()
+        }
 
     def _flush_data(self, client_id, gateway_id):
         flow_totals = self._totals.pop(self._flow_key(client_id, gateway_id), {})

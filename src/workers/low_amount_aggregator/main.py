@@ -96,6 +96,16 @@ class LowAmountAggregator(StatefulCoordinatedWorker):
             self._counts.get(client_gateway_key, 0) + transaction_count
         )
         super()._handle_data_message(_, client_id, gateway_id, payload)
+        return {"count": transaction_count}
+
+    def _apply_delta(self, client_id, gateway_id, delta):
+        client_gateway_key = (client_id, gateway_id)
+        self._counts[client_gateway_key] = (
+            self._counts.get(client_gateway_key, 0) + delta["count"]
+        )
+
+    def _state_as_delta(self, client_id, gateway_id):
+        return {"count": self._counts.get((client_id, gateway_id), 0)}
 
 
 def main():

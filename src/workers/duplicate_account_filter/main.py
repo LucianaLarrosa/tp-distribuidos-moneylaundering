@@ -22,6 +22,7 @@ class DuplicateAccountFilter(StatefulCoordinatedWorker):
             host=config.rabbitmq_host,
             exchange_name=config.input_exchange,
             routing_keys=[self._get_ring_routing_key(config.node_id)],
+            queue_name=f"{config.input_exchange}_{config.node_id}",
         )
         self._output_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
@@ -88,10 +89,23 @@ class DuplicateAccountFilter(StatefulCoordinatedWorker):
         """
         Handle incoming data messages by storing unique (bank, account) pairs for each client and gateway.
         """
-        unique_accounts = self._unique_accounts.setdefault((client_id, gateway_id), {})
-        for account in payload:
-            unique_accounts[(account.bank, account.account)] = account
         super()._handle_data_message(_, client_id, gateway_id, payload)
+        delta = [[account.bank, account.account] for account in payload]
+        self._apply_delta(client_id, gateway_id, delta)
+        return delta
+
+    def _apply_delta(self, client_id, gateway_id, delta):
+        unique_accounts = self._unique_accounts.setdefault((client_id, gateway_id), {})
+        for bank, account in delta:
+            unique_accounts[(bank, account)] = Q4Result(bank, account)
+
+    def _state_as_delta(self, client_id, gateway_id):
+        return [
+            [result.bank, result.account]
+            for result in self._unique_accounts.get(
+                (client_id, gateway_id), {}
+            ).values()
+        ]
 
 
 def main():

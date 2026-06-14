@@ -22,6 +22,7 @@ class AccountFrequencyFilter(StatefulCoordinatedWorker):
             host=config.rabbitmq_host,
             exchange_name=config.input_exchange,
             routing_keys=[self._get_ring_routing_key(config.node_id)],
+            queue_name=f"{config.input_exchange}_{config.node_id}",
         )
         self._output_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
@@ -108,25 +109,42 @@ class AccountFrequencyFilter(StatefulCoordinatedWorker):
             routing_key=f"{self.config.output_node_prefix}0",
         )
 
-    def _update_account_edges(self, client_id, gateway_id, edge):
-        """
-        Update the account edges by adding the other account to the appropriate in or out set based on whether the edge is a sender or receiver.
-        """
-        client_gateway_key = (client_id, gateway_id)
-        account_key = (edge.bank, edge.account)
-        other_account_key = (edge.other_bank, edge.other_account)
+    def _add_edge(
+        self, client_id, gateway_id, bank, account, other_bank, other_account, is_sender
+    ):
         in_accounts, out_accounts = self._account_edges.setdefault(
-            client_gateway_key, {}
-        ).setdefault(account_key, (set(), set()))
-        if edge.is_sender:
-            out_accounts.add(other_account_key)
+            (client_id, gateway_id), {}
+        ).setdefault((bank, account), (set(), set()))
+        if is_sender:
+            out_accounts.add((other_bank, other_account))
         else:
-            in_accounts.add(other_account_key)
+            in_accounts.add((other_bank, other_account))
 
     def _handle_data_message(self, _, client_id, gateway_id, payload):
-        for edge in payload:
-            self._update_account_edges(client_id, gateway_id, edge)
         super()._handle_data_message(_, client_id, gateway_id, payload)
+        delta = [
+            [e.bank, e.account, e.other_bank, e.other_account, e.is_sender]
+            for e in payload
+        ]
+        self._apply_delta(client_id, gateway_id, delta)
+        return delta
+
+    def _apply_delta(self, client_id, gateway_id, delta):
+        for bank, account, other_bank, other_account, is_sender in delta:
+            self._add_edge(
+                client_id, gateway_id, bank, account, other_bank, other_account, is_sender
+            )
+
+    def _state_as_delta(self, client_id, gateway_id):
+        edges = []
+        for (bank, account), (in_accounts, out_accounts) in self._account_edges.get(
+            (client_id, gateway_id), {}
+        ).items():
+            for other_bank, other_account in in_accounts:
+                edges.append([bank, account, other_bank, other_account, False])
+            for other_bank, other_account in out_accounts:
+                edges.append([bank, account, other_bank, other_account, True])
+        return edges
 
 
 def main():

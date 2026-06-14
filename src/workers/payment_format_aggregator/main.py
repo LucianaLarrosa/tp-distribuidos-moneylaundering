@@ -70,14 +70,29 @@ class PaymentFormatAggregator(StatefulCoordinatedWorker):
 
     def _handle_data_message(self, _, client_id, gateway_id, transaction_batch):
         super()._handle_data_message(_, client_id, gateway_id, transaction_batch)
-        flow_totals = self._totals.setdefault(self._flow_key(client_id, gateway_id), {})
+        delta = {}
         for transaction in transaction_batch:
             if not self._has_required_fields(transaction):
                 continue
-
             payment_format = self._payment_format_key(transaction.payment_format)
-            total_amount, count = flow_totals.get(payment_format, (0.0, 0))
-            flow_totals[payment_format] = (total_amount + transaction.amount, count + 1)
+            total_amount, count = delta.get(payment_format, (0.0, 0))
+            delta[payment_format] = [total_amount + transaction.amount, count + 1]
+        self._apply_delta(client_id, gateway_id, delta)
+        return delta
+
+    def _apply_delta(self, client_id, gateway_id, delta):
+        flow_totals = self._totals.setdefault(self._flow_key(client_id, gateway_id), {})
+        for payment_format, (total_amount, count) in delta.items():
+            cur_total, cur_count = flow_totals.get(payment_format, (0.0, 0))
+            flow_totals[payment_format] = (cur_total + total_amount, cur_count + count)
+
+    def _state_as_delta(self, client_id, gateway_id):
+        return {
+            payment_format: [total_amount, count]
+            for payment_format, (total_amount, count) in self._totals.get(
+                self._flow_key(client_id, gateway_id), {}
+            ).items()
+        }
 
     def _flush_data(self, client_id, gateway_id):
         flow_totals = self._totals.pop(self._flow_key(client_id, gateway_id), {})
