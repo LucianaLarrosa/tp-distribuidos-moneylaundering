@@ -20,6 +20,14 @@ TYPES = {
 }
 
 
+def send_peer_id(sock, peer_id):
+    sock.send(serialize_uint32(peer_id))
+
+
+def recv_peer_id(sock):
+    return deserialize_uint32(sock.recv(UINT32_SIZE))
+
+
 def send_msg(sock, data):
     sock.send(serialize_uint32(len(data)) + data)
 

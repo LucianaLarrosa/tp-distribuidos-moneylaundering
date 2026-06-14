@@ -1,15 +1,14 @@
 import logging
 import signal
-import subprocess
 import threading
-import time
 
 from common.health import HealthResponder
 from common.protocol.election import election
 from common.protocol.election.election import MsgType
-from common.protocol.health import health
-from common.socket import SafeTCPSocket, SafeUDPSocket, SocketTimeoutError
+from common.socket import SafeTCPSocket
 from config import Config
+from health_monitor import HealthMonitor
+from peer_handler import PeerHandler
 
 
 class Watchdog:
@@ -20,228 +19,183 @@ class Watchdog:
     def __init__(self, config):
         self._config = config
         self._closed = False
-        self._miss_count = {}
-        self._leader_misses = 0
 
         self._role = Watchdog.Role.FOLLOWER
         self._leader_id = None
-        self._election_requested = False
+        self._election_needed = threading.Event()
+        self._answer_received = threading.Event()
 
-        self._higher_peer_ids = [id for id in config.peers if id > config.watchdog_id]
-        self._monitored_hosts = list(config.monitored_nodes) + [
-            host
-            for peer_id, host in config.peers.items()
+        self._peer_lock = threading.Lock()
+        self._peer_handlers = {
+            peer_id: PeerHandler(peer_id)
+            for peer_id in config.peers
             if peer_id != config.watchdog_id
-        ]
+        }
+        self._higher_peer_ids = [id for id in config.peers if id > config.watchdog_id]
+        self._server_socket = SafeTCPSocket()
+        self._server_socket.bind(config.ping_pong_host, config.election_port)
+        self._server_socket.listen()
 
-        self._socket = SafeUDPSocket()
-        self._socket.bind(config.ping_pong_host, config.pong_port)
+        monitored_hosts = list(config.monitored_nodes) + [
+            host for id, host in config.peers.items() if id != config.watchdog_id
+        ]
+        self._health_monitor = HealthMonitor(
+            monitored_hosts=monitored_hosts,
+            host=config.ping_pong_host,
+            pong_port=config.pong_port,
+            ping_port=config.ping_port,
+            ping_timeout=config.ping_timeout_seconds,
+            check_interval=config.check_interval_seconds,
+            max_retries=config.max_retries,
+        )
 
         self._health_responder = HealthResponder(
             config.node_name, config.ping_port, config.ping_pong_host
         )
 
-        self._server_socket = SafeTCPSocket()
-        self._server_socket.bind(config.ping_pong_host, config.election_port)
-        self._server_socket.listen()
-
         signal.signal(signal.SIGTERM, lambda *_: self.shutdown())
 
-    def _become_role(self, role, leader_id):
-        logging.info("Transitioning to role %s with leader_id %s", role, leader_id)
-        self._role = role
-        self._leader_id = leader_id
-        self._miss_count.clear()
-        self._leader_misses = 0
-        if role == Watchdog.Role.LEADER:
-            self._broadcast_coordinator()
+    # --- Peer Management ---
 
-    # --- Election, Client Side (main thread) ---
-
-    def _send_to_peer(self, host, data):
-        sock = SafeTCPSocket()
-        try:
-            sock.connect(host, self._config.election_port)
-            election.send_msg(sock, data)
-        except OSError as e:
-            logging.warning("Failed to reach peer '%s': %s", host, e)
-        finally:
-            sock.close()
-
-    def _broadcast_coordinator(self):
-        for peer_id, host in self._config.peers.items():
-            if peer_id == self._config.watchdog_id:
-                continue
-            self._send_to_peer(
-                host, election.serialize_coordinator(self._config.watchdog_id)
-            )
-
-    def _run_election(self):
-        logging.info("Starting election...")
-        self._election_requested = False
-        if not self._higher_peer_ids:
-            self._become_role(Watchdog.Role.LEADER, self._config.watchdog_id)
-            return
-        for peer_id in self._higher_peer_ids:
-            socket = SafeTCPSocket()
-            try:
-                socket.connect(self._config.peers[peer_id], self._config.election_port)
-                election.send_msg(
-                    socket, election.serialize_election(self._config.watchdog_id)
-                )
-                election.recv_msg(socket, timeout=self._config.election_timeout_seconds)
-                self._role = Watchdog.Role.FOLLOWER
-                return
-            except (SocketTimeoutError, OSError):
-                continue
-            finally:
-                socket.close()
-        self._become_role(Watchdog.Role.LEADER, self._config.watchdog_id)
-
-    # --- Election, Server Side (accept thread) ---
-
-    def _handle_election(self, conn):
-        election.send_msg(conn, election.serialize_answer(self._config.watchdog_id))
-        if self._role == Watchdog.Role.LEADER:
-            self._broadcast_coordinator()
-        else:
-            self._election_requested = True
-
-    def _handle_coordinator(self, leader_id):
-        if leader_id > self._config.watchdog_id:
-            self._become_role(Watchdog.Role.FOLLOWER, leader_id)
-        elif leader_id < self._config.watchdog_id:
-            self._election_requested = True
-
-    def _handle_connection(self, client_socket):
-        msg_type, node_id = election.recv_msg(client_socket)
-        if msg_type == MsgType.ELECTION:
-            self._handle_election(client_socket)
-        elif msg_type == MsgType.COORDINATOR:
-            self._handle_coordinator(node_id)
-
-    def _accept_peer_connections(self):
+    def _accept_lower_peer_connections(self):
         while not self._closed:
             try:
-                socket, _ = self._server_socket.accept()
+                sock, _ = self._server_socket.accept()
             except OSError:
                 return
             try:
-                self._handle_connection(socket)
-            except (SocketTimeoutError, OSError) as e:
-                logging.warning("Election connection error: %s", e)
-            finally:
-                socket.close()
-
-    # --- Ping/Pong + Revive ---
-
-    def _send_ping(self, host):
-        self._socket.send(health.serialize_ping(), (host, self._config.ping_port))
-
-    def _send_pings(self):
-        for node in self._monitored_hosts:
-            try:
-                self._send_ping(node)
+                peer_id = election.recv_peer_id(sock)
             except OSError as e:
-                logging.warning("Failed to ping '%s': %s", node, e)
-
-    def _collect_pongs_until(self, timeout):
-        deadline = time.monotonic() + timeout
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return
-            try:
-                data, _ = self._socket.recv(timeout=remaining)
-            except (SocketTimeoutError, OSError):
-                return
-            try:
-                node_name = health.deserialize_pong(data)
-                if node_name:
-                    yield node_name
-            except Exception as e:
-                logging.warning("Ignoring malformed pong: %s", e)
-
-    def _collect_pongs(self):
-        return set(self._collect_pongs_until(self._config.ping_timeout_seconds))
-
-    def _revive(self, node_name):
-        result = subprocess.run(
-            ["docker", "start", node_name], capture_output=True, text=True
-        )
-        if result.returncode != 0:
-            logging.error("Failed to revive '%s': %s", node_name, result.stderr.strip())
-        else:
-            logging.info("Node '%s' revived", node_name)
-
-    def _process_results(self, responded):
-        for node in self._monitored_hosts:
-            if node in responded:
-                self._miss_count[node] = 0
+                logging.warning("Failed to read peer ID: %s", e)
+                sock.close()
                 continue
-            self._miss_count[node] = self._miss_count.get(node, 0) + 1
-            if self._miss_count[node] >= self._config.max_retries:
-                logging.warning(
-                    "Node '%s' presumed dead after %d missed pongs, reviving...",
-                    node,
-                    self._miss_count[node],
+            logging.info("Accepted connection from peer %d", peer_id)
+            self._peer_handlers[peer_id].accept(
+                sock, self._on_peer_message, self._on_peer_disconnect
+            )
+
+    def _connect_to_higher_peers(self):
+        for peer_id, host in self._config.peers.items():
+            if peer_id > self._config.watchdog_id:
+                self._peer_handlers[peer_id].connect(
+                    host,
+                    self._config.election_port,
+                    self._config.watchdog_id,
+                    self._on_peer_message,
+                    self._on_peer_disconnect,
                 )
-                self._revive(node)
-                self._miss_count[node] = 0
 
-    def _probe_leader(self):
-        leader_host = self._config.peers.get(self._leader_id)
-        if leader_host is None:
-            return False
-        try:
-            self._send_ping(leader_host)
-        except OSError:
-            return False
-        return leader_host in self._collect_pongs_until(
-            self._config.ping_timeout_seconds
+    # --- Election ---
+
+    def _send_to_peer(self, peer_id, data):
+        self._peer_handlers[peer_id].send(data)
+
+    def _send_to_peers(self, peer_ids, data):
+        for peer_id in peer_ids:
+            self._send_to_peer(peer_id, data)
+
+    def _broadcast_coordinator(self):
+        self._send_to_peers(
+            self._peer_handlers.keys(),
+            election.serialize_coordinator(self._config.watchdog_id),
         )
 
-    # --- Main loop ---
+    def _become_role(self, new_role, leader_id=None):
+        if leader_id is None:
+            leader_id = self._config.watchdog_id
+        logging.info("Becoming %s (leader=%d)", new_role, leader_id)
+        with self._peer_lock:
+            self._role = new_role
+            self._leader_id = leader_id
+        self._election_needed.clear()
+        if new_role == Watchdog.Role.LEADER:
+            self._broadcast_coordinator()
+            self._health_monitor.start()
+        else:
+            self._health_monitor.stop()
 
-    def _run(self):
-        while not self._closed:
-            if self._election_requested:
-                self._run_election()
-                continue
-            if self._role == Watchdog.Role.LEADER:
-                self._send_pings()
-                responded = self._collect_pongs()
-                self._process_results(responded)
-            else:
-                if self._probe_leader():
-                    self._leader_misses = 0
-                else:
-                    self._leader_misses += 1
-                    if self._leader_misses >= self._config.leader_probe_miss_threshold:
-                        logging.warning(
-                            "Leader watchdog %s unreachable, starting election",
-                            self._leader_id,
-                        )
-                        self._leader_misses = 0
-                        self._run_election()
-                        continue
-            time.sleep(self._config.check_interval_seconds)
+    def _on_election_received(self, peer_id):
+        self._send_to_peer(peer_id, election.serialize_answer(self._config.watchdog_id))
+        with self._peer_lock:
+            role = self._role
+        if role == Watchdog.Role.LEADER:
+            self._broadcast_coordinator()
+        else:
+            self._election_needed.set()
+
+    def _on_coordinator_received(self, leader_id):
+        if leader_id < self._config.watchdog_id:
+            self._election_needed.set()
+        else:
+            self._become_role(Watchdog.Role.FOLLOWER, leader_id)
+
+    def _on_peer_message(self, peer_id, msg_type, node_id):
+        """
+        Bully algorithm: if an election message is received, answer and trigger an election if not already a leader; if an answer message is received, mark that an answer was received for the current election; if a coordinator message is received, become a follower if the leader ID is higher, or trigger an election if it's lower.
+        """
+        if msg_type == MsgType.ELECTION:
+            self._on_election_received(peer_id)
+        elif msg_type == MsgType.ANSWER:
+            self._answer_received.set()
+        elif msg_type == MsgType.COORDINATOR:
+            self._on_coordinator_received(node_id)
+
+    def _on_peer_disconnect(self, peer_id):
+        if self._closed:
+            return
+        with self._peer_lock:
+            if peer_id == self._leader_id:
+                logging.warning("Leader %d disconnected, triggering election", peer_id)
+                self._election_needed.set()
+
+    def _run_election(self):
+        """
+        Start an election, sending election messages to all higher-ID peers and waiting for answers, and if none are received within the timeout, becoming the leader.
+        """
+        if self._closed:
+            return
+        logging.info("Starting election...")
+        self._election_needed.clear()
+        self._answer_received.clear()
+        with self._peer_lock:
+            self._leader_id = None
+        if not self._higher_peer_ids:
+            self._become_role(Watchdog.Role.LEADER)
+            return
+        self._send_to_peers(
+            self._higher_peer_ids, election.serialize_election(self._config.watchdog_id)
+        )
+        if not self._answer_received.wait(
+            timeout=self._config.election_timeout_seconds
+        ):
+            self._become_role(Watchdog.Role.LEADER)
+
+    # --- Lifecycle ---
 
     def start(self):
-        logging.info("Starting watchdog...")
+        logging.info("Starting watchdog %d...", self._config.watchdog_id)
         self._health_responder.start()
-        threading.Thread(target=self._accept_peer_connections, daemon=True).start()
+        threading.Thread(
+            target=self._accept_lower_peer_connections, daemon=True
+        ).start()
+        self._connect_to_higher_peers()
         self._run_election()
-        self._run()
+        while not self._closed:
+            if self._election_needed.wait():
+                self._run_election()
 
     def shutdown(self):
         if self._closed:
             return
         self._closed = True
-        logging.info("Shutting down watchdog...")
+        logging.info("Shutting down watchdog %d...", self._config.watchdog_id)
+        self._election_needed.set()
+        self._answer_received.set()
         self._health_responder.stop()
+        self._health_monitor.close()
         self._server_socket.close()
-        self._socket.close()
+        for handler in self._peer_handlers.values():
+            handler.close()
 
 
 def main():
