@@ -4,7 +4,7 @@ from abc import abstractmethod
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
-from common.worker.worker import Worker
+from common.worker.worker import Worker, MAIN_CHANNEL, CONTROL_CHANNEL
 from common.protocol.internal import internal
 from common.models.eof import EOF, RingEOF
 from common.ids import ring_id, ring_seq_of, RING_PHASE_COUNT, RING_PHASE_FLUSH
@@ -26,6 +26,7 @@ class RingCoordinatedWorker(Worker):
             host=self._rabbitmq_host,
             exchange_name=self._control_exchange_name,
             routing_keys=[self._get_ring_routing_key(self._node_id)],
+            queue_name=f"{self._control_exchange_name}.{self._node_id}",
         )
         self._output_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=self._rabbitmq_host,
@@ -176,13 +177,60 @@ class RingCoordinatedWorker(Worker):
             _, client_id, gateway_id, ring_eof, message_id = internal.deserialize_msg(
                 message
             )
-            self._handle_control_eof_message(
-                client_id, gateway_id, ring_eof, message_id
-            )
+            with self._state_lock:
+                seen = self._seen.setdefault(
+                    (CONTROL_CHANNEL, client_id, gateway_id), set()
+                )
+                if message_id in seen:
+                    ack()
+                    return
+                self._handle_control_eof_message(
+                    client_id, gateway_id, ring_eof, message_id
+                )
+                seen.add(message_id)
+                self._state_store.append(
+                    {
+                        "ch": CONTROL_CHANNEL,
+                        "mid": message_id,
+                        "c": client_id,
+                        "g": gateway_id,
+                        "ring": self._control_state_snapshot(client_id, gateway_id),
+                    }
+                )
+                self._note_append()
             ack()
         except Exception:
             nack()
             raise
+
+    def _control_state_snapshot(self, client_id, gateway_id):
+        return {
+            "partial_processed": self._partial_processed_count.get(
+                (client_id, gateway_id), 0
+            )
+        }
+
+    def _restore_control_state(self, client_id, gateway_id, snapshot):
+        self._partial_processed_count[(client_id, gateway_id)] = snapshot[
+            "partial_processed"
+        ]
+
+    def _flow_keys(self):
+        keys = super()._flow_keys()
+        return keys | set(self._partial_processed_count) | set(self._processed_counts)
+
+    def _snapshot_flow(self, client_id, gateway_id):
+        record = super()._snapshot_flow(client_id, gateway_id)
+        key = (client_id, gateway_id)
+        record["processed"] = self._processed_counts.get(key, 0)
+        record["partial_processed"] = self._partial_processed_count.get(key, 0)
+        return record
+
+    def _restore_snapshot(self, record):
+        super()._restore_snapshot(record)
+        key = (record["c"], record["g"])
+        self._processed_counts[key] = record["processed"]
+        self._partial_processed_count[key] = record["partial_processed"]
 
     def _get_next_node_id(self):
         return (self._node_id + 1) % self._ring_size
@@ -221,7 +269,15 @@ class RingCoordinatedWorker(Worker):
     def _handle_data_message(self, msg_type, client_id, gateway_id, payload):
         self._increment_processed_count(client_id, gateway_id)
 
+    def _replay_record(self, record):
+        super()._replay_record(record)
+        if record["ch"] == MAIN_CHANNEL and not record.get("eof"):
+            self._increment_processed_count(record["c"], record["g"])
+        elif record["ch"] == CONTROL_CHANNEL:
+            self._restore_control_state(record["c"], record["g"], record["ring"])
+
     def start(self):
+        self._recover()
         self._control_thread = threading.Thread(
             target=self._input_control_middleware.start_consuming,
             args=(self._handle_control_message,),

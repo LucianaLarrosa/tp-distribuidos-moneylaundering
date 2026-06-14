@@ -42,6 +42,36 @@ class StatefulCoordinatedWorker(RingCoordinatedWorker):
                 self._sent_count.get((client_id, gateway_id), 0) + 1
             )
 
+    def _control_state_snapshot(self, client_id, gateway_id):
+        snapshot = super()._control_state_snapshot(client_id, gateway_id)
+        key = (client_id, gateway_id)
+        snapshot["sent_count"] = self._sent_count.get(key, 0)
+        snapshot["partial_sent"] = self._partial_sent_count.get(key, 0)
+        return snapshot
+
+    def _restore_control_state(self, client_id, gateway_id, snapshot):
+        super()._restore_control_state(client_id, gateway_id, snapshot)
+        key = (client_id, gateway_id)
+        self._sent_count[key] = snapshot["sent_count"]
+        self._partial_sent_count[key] = snapshot["partial_sent"]
+
+    def _flow_keys(self):
+        keys = super()._flow_keys()
+        return keys | set(self._sent_count) | set(self._partial_sent_count)
+
+    def _snapshot_flow(self, client_id, gateway_id):
+        record = super()._snapshot_flow(client_id, gateway_id)
+        key = (client_id, gateway_id)
+        record["sent"] = self._sent_count.get(key, 0)
+        record["partial_sent"] = self._partial_sent_count.get(key, 0)
+        return record
+
+    def _restore_snapshot(self, record):
+        super()._restore_snapshot(record)
+        key = (record["c"], record["g"])
+        self._sent_count[key] = record["sent"]
+        self._partial_sent_count[key] = record["partial_sent"]
+
     def _flush_sharded(
         self,
         out_middleware,

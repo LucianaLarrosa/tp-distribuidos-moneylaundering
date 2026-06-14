@@ -12,6 +12,7 @@ from .middleware import (
 
 class MessageMiddlewareRabbitMQBase:
     _HEARTBEAT_INTERVAL = 1200
+    _PREFETCH_COUNT = 100  
 
     def start_consuming(self, on_message_callback):
         """
@@ -29,6 +30,7 @@ class MessageMiddlewareRabbitMQBase:
             )
 
         try:
+            self.channel.basic_qos(prefetch_count=self._PREFETCH_COUNT)
             self.channel.basic_consume(
                 queue=self.queue_name, on_message_callback=ack_nack_callback_adapter
             )
@@ -199,9 +201,10 @@ class MessageMiddlewareExchangeFanoutRabbitMQ(
     MessageMiddlewareRabbitMQBase, MessageMiddlewareExchangeFanout
 ):
 
-    def __init__(self, host, exchange_name):
+    def __init__(self, host, exchange_name, queue_name=None):
         """Initializes the connection to the RabbitMQ server, declares the fanout exchange
-        and binds a temporary queue to the exchange."""
+        and binds a queue to it. If queue_name is provided the queue is durable and named
+        (survives a consumer crash); otherwise a temporary exclusive queue is used."""
         self.exchange_name = exchange_name
 
         self.connection = pika.BlockingConnection(
@@ -214,8 +217,12 @@ class MessageMiddlewareExchangeFanoutRabbitMQ(
                 exchange=self.exchange_name, exchange_type="fanout", durable=True
             )
 
-            result = self.channel.queue_declare(queue="", exclusive=True)
-            self.queue_name = result.method.queue
+            if queue_name is None:
+                result = self.channel.queue_declare(queue="", exclusive=True)
+                self.queue_name = result.method.queue
+            else:
+                self.channel.queue_declare(queue=queue_name, durable=True)
+                self.queue_name = queue_name
             self.channel.queue_bind(
                 exchange=self.exchange_name,
                 queue=self.queue_name,
