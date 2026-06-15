@@ -24,6 +24,7 @@ class Watchdog:
         self._leader_id = None
         self._election_needed = threading.Event()
         self._answer_received = threading.Event()
+        self._coordinator_received = threading.Event()
 
         self._peer_lock = threading.Lock()
         self._peer_handlers = {
@@ -128,6 +129,7 @@ class Watchdog:
             self._election_needed.set()
         else:
             self._become_role(Watchdog.Role.FOLLOWER, leader_id)
+            self._coordinator_received.set()
 
     def _on_peer_message(self, peer_id, msg_type, node_id):
         """
@@ -155,8 +157,8 @@ class Watchdog:
         if self._closed:
             return
         logging.info("Starting election...")
-        self._election_needed.clear()
         self._answer_received.clear()
+        self._coordinator_received.clear()
         with self._peer_lock:
             self._leader_id = None
         if not self._higher_peer_ids:
@@ -169,6 +171,11 @@ class Watchdog:
             timeout=self._config.election_timeout_seconds
         ):
             self._become_role(Watchdog.Role.LEADER)
+        else:
+            if not self._coordinator_received.wait(
+                timeout=self._config.election_timeout_seconds
+            ):
+                self._election_needed.set()
 
     # --- Lifecycle ---
 
@@ -191,6 +198,7 @@ class Watchdog:
         logging.info("Shutting down watchdog %d...", self._config.watchdog_id)
         self._election_needed.set()
         self._answer_received.set()
+        self._coordinator_received.set()
         self._health_responder.stop()
         self._health_monitor.close()
         self._server_socket.close()
