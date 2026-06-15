@@ -1,5 +1,4 @@
 import socket
-import time
 from abc import ABC, abstractmethod
 
 
@@ -42,21 +41,11 @@ class BaseSafeSocket(ABC):
 
 
 class SafeTCPSocket(BaseSafeSocket):
-    DEFAULT_CONNECT_RETRIES = 3
-    CONNECT_RETRY_DELAY = 0.3
-
     def __init__(self, sock=None):
         super().__init__(sock or socket.socket(socket.AF_INET, socket.SOCK_STREAM))
 
-    def connect(self, host, port, retries=DEFAULT_CONNECT_RETRIES):
-        for attempt in range(retries):
-            try:
-                self._sock.connect((host, port))
-                return
-            except OSError:
-                if attempt == retries - 1:
-                    raise
-                time.sleep(self.CONNECT_RETRY_DELAY)
+    def connect(self, host, port):
+        self._sock.connect((host, port))
 
     def listen(self):
         self._sock.listen()

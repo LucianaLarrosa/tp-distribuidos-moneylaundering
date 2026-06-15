@@ -8,7 +8,9 @@ from common.socket import IncompleteReadError, SafeTCPSocket
 
 
 class PeerHandler:
-    _RECONNECT_DELAY = 1.0
+    _INITIAL_RECONNECT_DELAY = 1.0
+    _MAX_RECONNECT_DELAY = 30.0
+    _BACKOFF_FACTOR = 2.0
 
     def __init__(self, peer_id):
         self._peer_id = peer_id
@@ -49,16 +51,19 @@ class PeerHandler:
         sender.join()
 
     def _monitor_peer_status(self, host, port, my_id, on_message, on_disconnect):
+        delay = self._INITIAL_RECONNECT_DELAY
         while not self._closed:
             try:
                 sock = SafeTCPSocket()
                 sock.connect(host, port)
+                delay = self._INITIAL_RECONNECT_DELAY
                 election.send_peer_id(sock, my_id)
                 self._run(sock, on_message, on_disconnect)
             except OSError as e:
                 logging.warning("Could not connect to peer %d: %s", self._peer_id, e)
             if not self._closed:
-                time.sleep(self._RECONNECT_DELAY)
+                time.sleep(delay)
+                delay = min(delay * self._BACKOFF_FACTOR, self._MAX_RECONNECT_DELAY)
 
     def send(self, data):
         self._send_queue.put(data)
