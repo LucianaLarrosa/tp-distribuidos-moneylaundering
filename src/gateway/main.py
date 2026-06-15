@@ -48,7 +48,7 @@ def _run_results_consumer(rabbitmq_host, exchange_name, gateway_id, client_queue
         rabbitmq_host, exchange_name, [gateway_id]
     )
 
-    seen = set()  # (client_id, query_id, message_id) 
+    seen = set()  # (client_id, msg_type, message_id)
 
     def on_message(body, ack, _nack):
         msg_type, client_id, _, payload, message_id = internal.deserialize_msg(body)
@@ -62,8 +62,7 @@ def _run_results_consumer(rabbitmq_host, exchange_name, gateway_id, client_queue
             ack()
             return
         if message_id:
-            query_id = payload[0] if msg_type == internal.MsgType.QUERY_END else None
-            key = (client_id, query_id, message_id)
+            key = (client_id, msg_type, message_id)
             if key in seen:
                 ack()
                 return
