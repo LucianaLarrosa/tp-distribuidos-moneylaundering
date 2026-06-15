@@ -13,8 +13,7 @@ from config import Config
 
 class LowAmountAggregator(StatefulCoordinatedWorker):
     def __init__(self, config: Config):
-        self.config = config
-        super().__init__()
+        super().__init__(config)
         self._counts = {}  # (client_id, gateway_id) -> count
 
         self._input_queue = MessageMiddlewareExchangeDirectRabbitMQ(

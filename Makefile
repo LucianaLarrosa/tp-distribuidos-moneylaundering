@@ -8,6 +8,7 @@ N_CLIENTS ?= 2
 N_GATEWAYS ?= 2
 
 REPLICAS ?= 3
+
 TRANSACTIONS_FIELD_MAPPERS ?= $(REPLICAS)
 ACCOUNTS_FIELD_MAPPERS     ?= $(REPLICAS)
 DATE_FILTERS               ?= $(REPLICAS)
@@ -27,6 +28,7 @@ ACCOUNT_FREQUENCY_FILTERS  ?= $(REPLICAS)
 PATH_MAPPERS               ?= $(REPLICAS)
 PATH_FREQUENCY_FILTERS     ?= $(REPLICAS)
 DUPLICATE_ACCOUNT_FILTERS  ?= $(REPLICAS)
+WATCHDOGS                  ?= $(REPLICAS)
 
 COMPOSE_FILE ?= docker-compose.yaml
 
@@ -43,14 +45,12 @@ PANDAS_EXPECTED_DIR ?= ./pandas_expected_output
 SIZE              := $(patsubst HI-%_Trans.csv,%,$(TRANSACTIONS_FILE))
 EXPECTED_SIZE_DIR := $(EXPECTED_DIR)/$(SIZE)
 
-# Adjust this to ensure the containers have:
-# 1. Enough time to fully start before the tests run
-# 2. Enough time to gracefully stop running processes when interrupted
-SLEEP_TIME ?= 30
+PROTECTED_PREFIXES ?= rabbitmq gateway proxy client
 
 COMPOSE_ARGS = \
 	--clients                     $(N_CLIENTS) \
 	--gateways                    $(N_GATEWAYS) \
+	--protected-prefixes          "$(PROTECTED_PREFIXES)" \
 	--transactions-field-mappers  $(TRANSACTIONS_FIELD_MAPPERS) \
 	--accounts-field-mappers      $(ACCOUNTS_FIELD_MAPPERS) \
 	--date-filters                $(DATE_FILTERS) \
@@ -70,13 +70,14 @@ COMPOSE_ARGS = \
 	--path-mappers                $(PATH_MAPPERS) \
 	--path-frequency-filters      $(PATH_FREQUENCY_FILTERS) \
 	--duplicate-account-filters   $(DUPLICATE_ACCOUNT_FILTERS) \
+	--watchdogs                   $(WATCHDOGS) \
 	--output-file                 $(COMPOSE_FILE)
 
-.PHONY: compose build up down logs remove-output clean clean-all build-expected verify-output output-test up-and-stop verify-shutdown verify-exit-codes exit-test
+CHAOS_INTERVAL ?= 30
 
-all: compose build
-	$(MAKE) output-test
-	$(MAKE) exit-test
+.PHONY: compose build up down logs remove-output clean clean-all build-expected verify-output output-test chaos-kill chaos-monkey
+
+all: compose build output-test
 
 proto:
 	docker run --rm -v $(PWD):/w -w /w python:3.11-slim sh -c "\
@@ -86,7 +87,9 @@ proto:
 			--python_out=src \
 			src/common/protocol/common_protobuf/common_protobuf.proto \
 			src/common/protocol/internal/internal.proto \
-			src/common/protocol/external/external.proto"
+			src/common/protocol/external/external.proto \
+			src/common/protocol/health/health.proto \
+			src/common/protocol/election/election.proto"
 
 compose:
 	python3 compose_generator.py $(COMPOSE_ARGS)
@@ -103,18 +106,39 @@ down:
 logs:
 	docker compose -f $(COMPOSE_FILE) logs -f
 
+chaos-kill:
+	@if [ -n "$(NODE)" ]; then \
+		target="$(NODE)"; \
+	else \
+		protected_regex="^($$(echo $(PROTECTED_PREFIXES) | tr ' ' '|'))"; \
+		containers=$$(docker ps --format '{{.Names}}' | grep -vE "$$protected_regex"); \
+		if [ -z "$$containers" ]; then \
+			printf "$(RED)No killable containers found$(RESET)\n"; \
+			exit 1; \
+		fi; \
+		target=$$(echo "$$containers" | shuf -n 1); \
+	fi; \
+	printf "$(RED)chaos-kill: $$target$(RESET)\n"; \
+	docker kill $$target
+
+chaos-monkey:
+	while true; do \
+		$(MAKE) --no-print-directory chaos-kill; \
+		sleep $(CHAOS_INTERVAL); \
+	done
+
 remove-output:
 	rm -f $(COMPOSE_FILE)
 	rm -rf $(OUTPUT_DIR) $(EXPECTED_DIR) $(PANDAS_EXPECTED_DIR)
 
 clean:
 	docker compose -f $(COMPOSE_FILE) down -v --rmi local
-	$(MAKE) remove-output
+	$(MAKE) --no-print-directory remove-output
 
 clean-all:
 	docker compose -f $(COMPOSE_FILE) down -v --rmi local --remove-orphans
 	docker system prune -f
-	$(MAKE) remove-output
+	$(MAKE) --no-print-directory remove-output
 
 wait-clients:
 	@client_names=""; \
@@ -156,46 +180,3 @@ verify-output:
 	[ $$mismatch -eq 0 ]
 
 output-test: up wait-clients build-expected verify-output down
-
-up-and-stop: up
-	sleep $(SLEEP_TIME)
-	docker compose -f $(COMPOSE_FILE) stop --timeout 10
-
-verify-shutdown:
-	@all_shutdown=0; \
-	for name in $$(docker compose -f $(COMPOSE_FILE) ps --all --format '{{.Name}}'); do \
-		if [ "$$name" != "rabbitmq" ]; then \
-			logs=$$(docker logs $$name 2>&1); \
-			if echo "$$logs" | grep -Eq "Shutting down|Shutdown"; then \
-				printf "$(LIME)✓ %-45s shutdown detected$(RESET)\n" "$$name"; \
-			else \
-				printf "$(RED)✗ %-45s missing shutdown log$(RESET)\n" "$$name"; \
-				all_shutdown=1; \
-			fi; \
-		fi; \
-	done; \
-	[ $$all_shutdown -eq 0 ]
-
-verify-exit-codes:
-	@has_successful_exit=1; \
-	for name in $$(docker compose -f $(COMPOSE_FILE) ps --all --format '{{.Name}}'); do \
-		code=$$(docker inspect $$name --format='{{.State.ExitCode}}'); \
-		if [ "$$code" = "0" ]; then \
-			printf "$(LIME)✓ %-45s exit code 0$(RESET)\n" "$$name"; \
-			has_successful_exit=0; \
-		else \
-			printf "$(RED)✗ %-45s exit code $$code$(RESET)\n" "$$name"; \
-		fi; \
-	done; \
-	[ $$has_successful_exit -eq 0 ]
-
-exit-test: up-and-stop
-	@$(MAKE) verify-shutdown; all_shutdown=$$?; \
-	$(MAKE) verify-exit-codes; has_successful_exit=$$?; \
-	if [ $$all_shutdown -eq 0 ] && [ $$has_successful_exit -eq 0 ]; then \
-		printf "$(LIME)Graceful shutdown test passed$(RESET)\n"; \
-	else \
-		printf "$(RED)Graceful shutdown test failed$(RESET)\n"; \
-	fi; \
-	$(MAKE) down; \
-	[ $$all_shutdown -eq 0 ] && [ $$has_successful_exit -eq 0 ]

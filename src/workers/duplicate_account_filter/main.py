@@ -12,8 +12,7 @@ from config import Config
 
 class DuplicateAccountFilter(StatefulCoordinatedWorker):
     def __init__(self, config):
-        self.config = config
-        super().__init__()
+        super().__init__(config)
         self._unique_accounts = (
             {}
         )  # (client_id, gateway_id) -> {(bank, account) -> Q4Result}

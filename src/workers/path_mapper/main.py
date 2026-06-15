@@ -12,8 +12,7 @@ from config import Config
 
 class PathMapper(StatefulCoordinatedWorker):
     def __init__(self, config):
-        self.config = config
-        super().__init__()
+        super().__init__(config)
         self._account_edges = (
             {}
         )  # (client_id, gateway_id) -> {(bank, account): (in_accounts, out_accounts)}

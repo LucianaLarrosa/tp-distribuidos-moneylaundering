@@ -4,6 +4,7 @@ import signal
 import threading
 from abc import ABC, abstractmethod
 
+from common.health import HealthResponder
 from common.persistence.state_store import StateStore
 from common.protocol.internal import internal
 
@@ -16,7 +17,8 @@ SNAPSHOT = "snap"
 class Worker(ABC):
     _COMPACT_THRESHOLD = 10000
 
-    def __init__(self):
+    def __init__(self, config):
+        self.config = config
         self._closed = False
         self._current_message_id = ""
         self._state_lock = threading.Lock()
@@ -28,6 +30,10 @@ class Worker(ABC):
             StateStore(os.path.join(state_dir, "state.wal")) if state_dir else None
         )
         signal.signal(signal.SIGTERM, lambda *_: self.shutdown())
+        self._health_responder = HealthResponder(
+            config.node_name, config.ping_port, config.ping_pong_host
+        )
+        self._health_responder.start()
 
     @property
     @abstractmethod
@@ -192,6 +198,7 @@ class Worker(ABC):
             return
         self._closed = True
         logging.info("Shutting down worker...")
+        self._health_responder.stop()
         self._input_middleware.stop_consuming()
         self._input_middleware.close()
         self._output_middleware.close()

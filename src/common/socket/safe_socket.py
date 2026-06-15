@@ -1,4 +1,10 @@
 import socket
+import time
+from abc import ABC, abstractmethod
+
+
+class SocketTimeoutError(Exception):
+    pass
 
 
 class IncompleteReadError(Exception):
@@ -14,15 +20,67 @@ class IncompleteReadError(Exception):
         return (self.__class__, (self.partial, self.expected))
 
 
-class SafeSocket:
+class BaseSafeSocket(ABC):
     def __init__(self, sock):
         self._sock = sock
 
-    @classmethod
-    def connect(cls, host, port):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.connect((host, port))
-        return cls(sock)
+    def bind(self, host, port):
+        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._sock.bind((host, port))
+
+    @abstractmethod
+    def send(self, *args):
+        pass
+
+    @abstractmethod
+    def recv(self, *args):
+        pass
+
+    @abstractmethod
+    def close(self):
+        pass
+
+
+class SafeTCPSocket(BaseSafeSocket):
+    DEFAULT_CONNECT_RETRIES = 3
+    CONNECT_RETRY_DELAY = 0.3
+
+    def __init__(self, sock=None):
+        super().__init__(sock or socket.socket(socket.AF_INET, socket.SOCK_STREAM))
+
+    def connect(self, host, port, retries=DEFAULT_CONNECT_RETRIES):
+        for attempt in range(retries):
+            try:
+                self._sock.connect((host, port))
+                return
+            except OSError:
+                if attempt == retries - 1:
+                    raise
+                time.sleep(self.CONNECT_RETRY_DELAY)
+
+    def listen(self):
+        self._sock.listen()
+
+    def accept(self):
+        conn, address = self._sock.accept()
+        return SafeTCPSocket(conn), address
+
+    def send(self, data):
+        self._sock.sendall(data)
+
+    def recv(self, size, timeout=None):
+        self._sock.settimeout(timeout)
+        try:
+            buf = bytearray(size)
+            pos = 0
+            while pos < size:
+                n = self._sock.recv_into(memoryview(buf)[pos:])
+                if n == 0:
+                    raise IncompleteReadError(bytes(buf[:pos]), size)
+                pos += n
+            return bytes(buf)
+        except (socket.timeout, BlockingIOError):
+            raise SocketTimeoutError()
 
     def close(self):
         try:
@@ -31,15 +89,22 @@ class SafeSocket:
             pass
         self._sock.close()
 
-    def send_all(self, data):
-        self._sock.sendall(data)
 
-    def recv_exact(self, size):
-        buf = bytearray(size)
-        pos = 0
-        while pos < size:
-            n = self._sock.recv_into(memoryview(buf)[pos:])
-            if n == 0:
-                raise IncompleteReadError(bytes(buf[:pos]), size)
-            pos += n
-        return bytes(buf)
+class SafeUDPSocket(BaseSafeSocket):
+    BUF_SIZE = 1024
+
+    def __init__(self, sock=None):
+        super().__init__(sock or socket.socket(socket.AF_INET, socket.SOCK_DGRAM))
+
+    def send(self, data, address):
+        self._sock.sendto(data, address)
+
+    def recv(self, timeout=None):
+        self._sock.settimeout(timeout)
+        try:
+            return self._sock.recvfrom(self.BUF_SIZE)
+        except socket.timeout:
+            raise SocketTimeoutError()
+
+    def close(self):
+        self._sock.close()

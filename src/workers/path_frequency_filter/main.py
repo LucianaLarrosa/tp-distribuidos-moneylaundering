@@ -12,8 +12,7 @@ from config import Config
 
 class PathFrequencyFilter(StatefulCoordinatedWorker):
     def __init__(self, config):
-        self.config = config
-        super().__init__()
+        super().__init__(config)
         self._paths = (
             {}
         )  # (client_id, gateway_id) -> {(from_bank, from_account, to_bank, to_account): set((mid_bank, mid_account))}

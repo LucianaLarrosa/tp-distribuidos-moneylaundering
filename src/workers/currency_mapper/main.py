@@ -46,8 +46,7 @@ class CurrencyMapper(StatelessWorker):
     _DECIMAL_PLACES = 2
 
     def __init__(self, config: Config):
-        super().__init__()
-        self.config = config
+        super().__init__(config)
         self._rates = self._fetch_rates()
 
         self._input_queue = MessageMiddlewareQueueRabbitMQ(

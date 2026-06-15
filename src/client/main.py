@@ -7,7 +7,7 @@ import queue
 from dataclasses import asdict
 
 from client.config import Config
-from common.socket.safe_socket import SafeSocket, IncompleteReadError
+from common.socket.safe_socket import SafeTCPSocket, IncompleteReadError
 from common.models.raw_transaction import RawTransaction
 from common.models.raw_account import RawAccount
 from common.protocol.external import external
@@ -29,7 +29,8 @@ class Client:
     def run(self):
         gateway_host, gateway_port = self._resolve_gateway()
         logging.info("Connecting to gateway %s:%s", gateway_host, gateway_port)
-        self._sock = SafeSocket.connect(gateway_host, gateway_port)
+        self._sock = SafeTCPSocket()
+        self._sock.connect(gateway_host, gateway_port)
 
         self._receiver_thread = threading.Thread(target=self._receive_data, daemon=True)
         self._sender_thread = threading.Thread(target=self._send_data, daemon=True)
@@ -141,9 +142,8 @@ class Client:
 
     def _resolve_gateway(self):
         logging.info("Connecting to proxy")
-        self._proxy_sock = SafeSocket.connect(
-            self._config.proxy_host, self._config.proxy_port
-        )
+        self._proxy_sock = SafeTCPSocket()
+        self._proxy_sock.connect(self._config.proxy_host, self._config.proxy_port)
 
         try:
             msg_type, payload = external.recv_msg(self._proxy_sock)

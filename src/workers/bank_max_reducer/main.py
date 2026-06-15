@@ -13,8 +13,7 @@ from config import Config
 
 class BankMaxReducer(StatefulCoordinatedWorker):
     def __init__(self, config):
-        self.config = config
-        super().__init__()
+        super().__init__(config)
         self._global_max = {}  # (client_id, gateway_id) -> {from_bank: BankMaxPartial}
 
         self._input_exchange = MessageMiddlewareExchangeDirectRabbitMQ(

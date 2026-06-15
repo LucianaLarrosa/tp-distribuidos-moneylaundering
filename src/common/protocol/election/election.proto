@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package election;
+
+message Election    { int32 sender_id = 1; }
+message Answer      { int32 sender_id = 1; }
+message Coordinator { int32 leader_id = 1; }
+
+message ElectionMessage {
+  oneof msg {
+    Election    election    = 1;
+    Answer      answer      = 2;
+    Coordinator coordinator = 3;
+  }
+}

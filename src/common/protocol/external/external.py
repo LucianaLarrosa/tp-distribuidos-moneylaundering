@@ -7,17 +7,13 @@ from common.models.query_results import (
     Q4Result,
     Q5Result,
 )
+from common.protocol.length_prefix import (
+    UINT32_SIZE,
+    deserialize_uint32,
+    serialize_uint32,
+)
+
 from . import external_pb2 as pb
-
-UINT32_SIZE = 4
-
-
-def serialize_uint32(u):
-    return u.to_bytes(UINT32_SIZE, "big")
-
-
-def deserialize_uint32(b):
-    return int.from_bytes(b, byteorder="big", signed=False)
 
 
 class MsgType:
@@ -38,13 +34,13 @@ def send_msg(sock, msg_type, *args):
     env = pb.Envelope()
     SERIALIZERS[msg_type](env, *args)
     data = env.SerializeToString()
-    sock.send_all(serialize_uint32(len(data)) + data)
+    sock.send(serialize_uint32(len(data)) + data)
 
 
 def recv_msg(sock):
-    size = deserialize_uint32(sock.recv_exact(UINT32_SIZE))
+    size = deserialize_uint32(sock.recv(UINT32_SIZE))
     env = pb.Envelope()
-    env.ParseFromString(sock.recv_exact(size))
+    env.ParseFromString(sock.recv(size))
     payload_type = TYPES[env.WhichOneof("payload")]
     return payload_type, DESERIALIZERS[payload_type](env)
 

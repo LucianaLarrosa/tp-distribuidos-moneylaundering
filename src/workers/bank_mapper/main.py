@@ -20,8 +20,7 @@ from config import Config
 
 class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
     def __init__(self, config):
-        self.config = config
-        super().__init__()
+        super().__init__(config)
         self._bank_names_lock = threading.Lock()
         self._bank_names = {}
         self._flow_locks = {}

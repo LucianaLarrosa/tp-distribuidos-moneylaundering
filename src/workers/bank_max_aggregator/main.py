@@ -12,8 +12,7 @@ from config import Config
 
 class BankMaxAggregator(StatefulCoordinatedWorker):
     def __init__(self, config):
-        self.config = config
-        super().__init__()
+        super().__init__(config)
         self._local_max = (
             {}
         )  # (client_id, gateway_id) -> {from_bank: tx_with_max_amount}

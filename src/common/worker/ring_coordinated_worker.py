@@ -11,8 +11,8 @@ from common.ids import ring_id, ring_seq_of, RING_PHASE_COUNT, RING_PHASE_FLUSH
 
 
 class RingCoordinatedWorker(Worker):
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, config):
+        super().__init__(config)
         self._processed_counts = (
             {}
         )  # (client_id, gateway_id) -> processed_count | actual total processed count

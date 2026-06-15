@@ -8,8 +8,8 @@ from common.worker.ring_coordinated_worker import RingCoordinatedWorker
 
 
 class StatefulCoordinatedWorker(RingCoordinatedWorker):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, config):
+        super().__init__(config)
         self._sent_count = (
             {}
         )  # (client_id, gateway_id) -> sent_count | actual total sent count

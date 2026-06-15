@@ -15,8 +15,7 @@ from config import Config
 
 class PaymentFormatFilter(StatelessWorker):
     def __init__(self, config):
-        super().__init__()
-        self.config = config
+        super().__init__(config)
 
         self._input_exchange = MessageMiddlewareExchangeTopicRabbitMQ(
             host=config.rabbitmq_host,
@@ -59,7 +58,13 @@ class PaymentFormatFilter(StatelessWorker):
                 currency=transaction.currency,
             )
             for transaction in payload
-            if None not in (transaction.timestamp, transaction.payment_format, transaction.amount, transaction.currency)
+            if None
+            not in (
+                transaction.timestamp,
+                transaction.payment_format,
+                transaction.amount,
+                transaction.currency,
+            )
             and transaction.payment_format.lower() in self.config.valid_payment_formats
         ]
         self._send(

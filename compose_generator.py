@@ -33,6 +33,19 @@ EXCHANGE_LOW_AMOUNT_AGGREGATOR_INPUT = "low_amount_aggregator_input"
 QUEUE_LOW_AMOUNT_AGGREGATOR_OUTPUT = "low_amount_aggregator_output"
 QUEUE_BANK_MAX_RESULTS = "bank_max_results"
 
+# --- Watchdog / Health Configuration ---
+
+PING_PONG_HOST = "0.0.0.0"
+PING_PORT = "9001"
+PONG_PORT = "9000"
+PING_TIMEOUT_SECONDS = "2"
+CHECK_INTERVAL_SECONDS = "5"
+MAX_RETRIES = "3"
+ELECTION_PORT = "9002"
+ELECTION_TIMEOUT_SECONDS = "5"
+LEADER_PROBE_MISS_THRESHOLD = "3"
+DEFAULT_PROTECTED_PREFIXES = "rabbitmq gateway proxy client"
+
 # --- Query IDs ---
 
 QUERY_1_ID = 1
@@ -743,6 +756,38 @@ def _duplicate_account_filter(i, duplicate_account_filters):
     }
 
 
+def _watchdog(watchdog_id, watchdog_count, monitored_nodes):
+    return {
+        "build": {"context": ".", "dockerfile": "src/watchdog/Dockerfile"},
+        "container_name": f"watchdog_{watchdog_id}",
+        "volumes": ["/var/run/docker.sock:/var/run/docker.sock"],
+        "environment": {
+            "PING_PONG_HOST": PING_PONG_HOST,
+            "PING_PORT": PING_PORT,
+            "PONG_PORT": PONG_PORT,
+            "PING_TIMEOUT_SECONDS": PING_TIMEOUT_SECONDS,
+            "CHECK_INTERVAL_SECONDS": CHECK_INTERVAL_SECONDS,
+            "MAX_RETRIES": MAX_RETRIES,
+            "MONITORED_NODES": ",".join(monitored_nodes),
+            "WATCHDOG_ID": str(watchdog_id),
+            "WATCHDOG_COUNT": str(watchdog_count),
+            "ELECTION_PORT": ELECTION_PORT,
+            "ELECTION_TIMEOUT_SECONDS": ELECTION_TIMEOUT_SECONDS,
+            "LEADER_PROBE_MISS_THRESHOLD": LEADER_PROBE_MISS_THRESHOLD,
+        },
+    }
+
+
+def _enable_health(service):
+    service["environment"].update(
+        {
+            "PING_PONG_HOST": PING_PONG_HOST,
+            "PING_PORT": PING_PORT,
+            "NODE_NAME": service["container_name"],
+        }
+    )
+
+
 # --- Builder ---
 
 
@@ -768,6 +813,8 @@ def build_compose(
     path_mappers,
     path_frequency_filters,
     duplicate_account_filters,
+    watchdogs,
+    protected_prefixes,
 ):
     services = {}
     services["rabbitmq"] = _rabbitmq()
@@ -848,6 +895,15 @@ def build_compose(
         )
     for i in range(anomaly_filters):
         services[f"anomaly_filter_{i}"] = _anomaly_filter(i, anomaly_filters)
+    unmonitored_prefixes = tuple(protected_prefixes.split())
+    monitored_nodes = []
+    for name, service in services.items():
+        if name.startswith(unmonitored_prefixes):
+            continue
+        _enable_health(service)
+        monitored_nodes.append(service["container_name"])
+    for i in range(watchdogs):
+        services[f"watchdog_{i}"] = _watchdog(i, watchdogs, monitored_nodes)
     volumes = {f"anomaly_filter_spill_{i}": None for i in range(anomaly_filters)}
     volumes.update({f"bank_mapper_spill_{i}": None for i in range(bank_mappers)})
     volumes.update({f"anomaly_filter_state_{i}": None for i in range(anomaly_filters)})
@@ -963,6 +1019,12 @@ def main():
     parser.add_argument(
         "--duplicate-account-filters", type=int, default=DEFAULT_REPLICAS
     )
+    parser.add_argument("--watchdogs", type=int, default=DEFAULT_REPLICAS)
+    parser.add_argument(
+        "--protected-prefixes",
+        default=DEFAULT_PROTECTED_PREFIXES,
+        help="Space-separated service name prefixes that are neither health-monitored nor killed by chaos.",
+    )
     parser.add_argument("--output-file", required=True)
     args = parser.parse_args()
 
@@ -988,6 +1050,7 @@ def main():
         ("--path-mappers", args.path_mappers),
         ("--path-frequency-filters", args.path_frequency_filters),
         ("--duplicate-account-filters", args.duplicate_account_filters),
+        ("--watchdogs", args.watchdogs),
     ]
     for flag, value in counts:
         if value < 1:
@@ -1015,6 +1078,8 @@ def main():
         path_mappers=args.path_mappers,
         path_frequency_filters=args.path_frequency_filters,
         duplicate_account_filters=args.duplicate_account_filters,
+        watchdogs=args.watchdogs,
+        protected_prefixes=args.protected_prefixes,
     )
 
     output = yaml.safe_dump(compose, sort_keys=False, default_flow_style=False)
