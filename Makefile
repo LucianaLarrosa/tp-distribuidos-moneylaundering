@@ -2,6 +2,7 @@ SHELL := /bin/bash
 
 LIME  := \033[38;2;138;206;0m
 RED   := \033[31m
+CYAN  := \033[36m
 RESET := \033[0m
 
 N_CLIENTS ?= 2
@@ -73,11 +74,19 @@ COMPOSE_ARGS = \
 	--watchdogs                   $(WATCHDOGS) \
 	--output-file                 $(COMPOSE_FILE)
 
-CHAOS_INTERVAL ?= 30
+CHAOS_INTERVAL            ?= 30
+CHAOS_KILLS_PER_ROUND     ?= 3
+CHAOS_WATCHDOG_FLOOR      ?= 1
+CHAOS_INJECT_START_ROUND  ?= 3
+CHAOS_INJECT_CLIENT_COUNT ?= 3
+CHAOS_INJECT_DATASET_SIZE ?= Small
+CHAOS_REF_CLIENT          ?= client_1
 
-.PHONY: compose build up down logs remove-output clean clean-all build-expected verify-output output-test chaos-kill chaos-monkey
+.PHONY: compose build up down logs remove-output clean clean-all build-expected verify-output output-test chaos-kill chaos-check-client chaos-inject-client chaos-monkey chaos-output-test chaos-all
 
 all: compose build output-test
+
+chaos-all: compose build chaos-output-test
 
 proto:
 	docker run --rm -v $(PWD):/w -w /w python:3.11-slim sh -c "\
@@ -104,28 +113,85 @@ down:
 	docker compose -f $(COMPOSE_FILE) down -v
 
 logs:
-	docker compose -f $(COMPOSE_FILE) logs -f
+	@if [ -z "$(SERVICE)" ]; then \
+		docker compose -f $(COMPOSE_FILE) logs -f; \
+	else \
+		docker compose -f $(COMPOSE_FILE) logs -f $(SERVICE); \
+	fi
+
+chaos-check-client:
+	@if [ -z "$$(docker ps --format '{{.Names}}' | grep '^client_')" ]; then \
+		printf "$(RED)No clients running. Run 'make up' first.$(RESET)\n"; \
+		exit 1; \
+	fi
 
 chaos-kill:
-	@if [ -n "$(NODE)" ]; then \
+	@protected_regex="^($$(echo $(PROTECTED_PREFIXES) | tr ' ' '|'))"; \
+	running=$$(docker ps --format '{{.Names}}' | grep -vE "$$protected_regex"); \
+	running_watchdogs=$$(echo "$$running" | grep -cE '^watchdog_[0-9]+$$'); \
+	if [ -n "$(NODE)" ]; then \
+		case "$(NODE)" in watchdog_*) \
+			if [ "$$running_watchdogs" -le $(CHAOS_WATCHDOG_FLOOR) ]; then \
+				printf "$(RED)Skipping $(NODE) because it's the last watchdog alive$(RESET)\n"; \
+				exit 0; \
+			fi ;; \
+		esac; \
 		target="$(NODE)"; \
 	else \
-		protected_regex="^($$(echo $(PROTECTED_PREFIXES) | tr ' ' '|'))"; \
-		containers=$$(docker ps --format '{{.Names}}' | grep -vE "$$protected_regex"); \
-		if [ -z "$$containers" ]; then \
-			printf "$(RED)No killable containers found$(RESET)\n"; \
-			exit 1; \
+		if [ "$$running_watchdogs" -le $(CHAOS_WATCHDOG_FLOOR) ]; then \
+			pool=$$(echo "$$running" | grep -vE '^watchdog_'); \
+		else \
+			pool="$$running"; \
 		fi; \
-		target=$$(echo "$$containers" | shuf -n 1); \
+		if [ -z "$$pool" ]; then \
+			printf "$(RED)No victims available$(RESET)\n"; \
+			exit 0; \
+		fi; \
+		target=$$(echo "$$pool" | shuf -n 1); \
 	fi; \
-	printf "$(RED)chaos-kill: $$target$(RESET)\n"; \
-	docker kill $$target
+	printf "$(RED)Killing $$target...$(RESET)\n"; \
+	docker kill "$$target"
 
-chaos-monkey:
-	while true; do \
-		$(MAKE) --no-print-directory chaos-kill; \
+chaos-inject-client:
+	@trans="HI-$(CHAOS_INJECT_DATASET_SIZE)_Trans.csv"; \
+	accounts="HI-$(CHAOS_INJECT_DATASET_SIZE)_accounts.csv"; \
+	name="client_dyn_$(CHAOS_INJECT_IDX)"; \
+	img=$$(docker inspect $(CHAOS_REF_CLIENT) -f '{{.Config.Image}}' 2>/dev/null); \
+	net=$$(docker inspect proxy -f '{{range $$n,$$_ := .NetworkSettings.Networks}}{{$$n}}{{end}}' 2>/dev/null); \
+	docker rm -f "$$name" >/dev/null 2>&1 || true; \
+	if docker run -d --name "$$name" --network "$$net" \
+		-v "$(abspath $(DATASET_DIR))":/data:ro \
+		-v "$(abspath $(OUTPUT_DIR))":/output \
+		-e PROXY_HOST=proxy -e PROXY_PORT=6000 \
+		-e INPUT_CSV_TRANSACTIONS="/data/$$trans" \
+		-e INPUT_CSV_ACCOUNTS="/data/$$accounts" \
+		-e EXPECTED_QUERY_IDS=1,2,3,4,5 \
+		-e OUTPUT_DIR=/output \
+		-e CLIENT_ID="dyn_$(CHAOS_INJECT_IDX)" \
+		"$$img" >/dev/null 2>&1; then \
+		printf "$(LIME)  ＋ Inyected %s (%s)$(RESET)\n" "$$name" "$$trans"; \
+	else \
+		printf "$(RED)  ✗ Failed to inject %s$(RESET)\n" "$$name"; \
+	fi
+
+chaos-monkey: chaos-check-client
+	@printf "$(LIME)Chaos Monkey: %s kill(s)/round every %ss, keeping %s watchdog(s) alive; injecting %s client(s) in batches of %s starting from round %s$(RESET)\n" \
+    "$(CHAOS_KILLS_PER_ROUND)" "$(CHAOS_INTERVAL)" "$(CHAOS_WATCHDOG_FLOOR)" \
+    "$(CHAOS_INJECT_CLIENT_COUNT)" "$(CHAOS_INJECT_DATASET_SIZE)" "$(CHAOS_INJECT_START_ROUND)"; \
+	round=0; injected=0; \
+	while [ -n "$$(docker ps --format '{{.Names}}' | grep '^client_')" ]; do \
+		round=$$((round + 1)); \
+		printf "$(CYAN)Round %s$(RESET)\n" "$$round"; \
+		for i in $$(seq 1 $(CHAOS_KILLS_PER_ROUND)); do \
+			$(MAKE) --no-print-directory chaos-kill || true; \
+		done; \
+		if [ "$$round" -ge $(CHAOS_INJECT_START_ROUND) ] && [ "$$injected" -lt $(CHAOS_INJECT_CLIENT_COUNT) ]; then \
+			$(MAKE) --no-print-directory chaos-inject-client CHAOS_INJECT_IDX="$$injected" || true; \
+			injected=$$((injected + 1)); \
+		fi; \
 		sleep $(CHAOS_INTERVAL); \
-	done
+	done; \
+	printf "$(LIME)Chaos Monkey finished: %s round(s); %s client(s) injected$(RESET)\n" "$$round" "$$injected"
 
 remove-output:
 	rm -f $(COMPOSE_FILE)
@@ -180,3 +246,5 @@ verify-output:
 	[ $$mismatch -eq 0 ]
 
 output-test: up wait-clients build-expected verify-output down
+
+chaos-output-test: up build-expected chaos-monkey wait-clients verify-output down
