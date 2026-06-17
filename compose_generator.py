@@ -44,7 +44,7 @@ MAX_RETRIES = "3"
 ELECTION_PORT = "9002"
 ELECTION_TIMEOUT_SECONDS = "5"
 LEADER_PROBE_MISS_THRESHOLD = "3"
-DEFAULT_PROTECTED_PREFIXES = "rabbitmq gateway proxy client"
+DEFAULT_PROTECTED_PREFIXES = "rabbitmq proxy client"
 
 # --- Query IDs ---
 
@@ -915,10 +915,7 @@ def build_compose(
         }
     )
     volumes.update(
-        {
-            f"low_amount_reducer_state_{i}": None
-            for i in range(low_amount_reducers)
-        }
+        {f"low_amount_reducer_state_{i}": None for i in range(low_amount_reducers)}
     )
     volumes.update(
         {f"bank_max_aggregator_state_{i}": None for i in range(bank_max_aggregators)}
@@ -950,9 +947,7 @@ def build_compose(
             for i in range(account_frequency_filters)
         }
     )
-    volumes.update(
-        {f"path_mapper_state_{i}": None for i in range(path_mappers)}
-    )
+    volumes.update({f"path_mapper_state_{i}": None for i in range(path_mappers)})
     volumes.update(
         {
             f"path_frequency_filter_state_{i}": None

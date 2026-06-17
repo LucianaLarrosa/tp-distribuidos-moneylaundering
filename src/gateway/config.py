@@ -12,6 +12,9 @@ class Config:
     transaction_routing_key: str
     account_routing_key: str
     query_results_exchange: str
+    node_name: str
+    ping_port: int
+    ping_pong_host: str
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -28,4 +31,7 @@ class Config:
             query_results_exchange=os.environ.get(
                 "QUERY_RESULTS_EXCHANGE", "query_results"
             ),
+            node_name=os.environ.get("NODE_NAME", "gateway"),
+            ping_port=int(os.environ.get("PING_PORT", 9001)),
+            ping_pong_host=os.environ.get("PING_PONG_HOST", "0.0.0.0"),
         )

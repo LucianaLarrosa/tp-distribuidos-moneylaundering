@@ -15,36 +15,65 @@ from common.protocol.external.external import MsgType
 
 
 class Client:
+    _INITIAL_RECONNECT_DELAY = 1.0
+    _MAX_RECONNECT_DELAY = 30.0
+    _BACKOFF_FACTOR = 2.0
+
     def __init__(self, config):
         self._config = config
         self._sock = None
         self._proxy_sock = None
-        self._receiver_thread = None
-        self._receiver_queue = queue.Queue()
-        self._sender_thread = None
-        self._sender_queue = queue.Queue()
-        self._aborted = threading.Event()
+        self._receiver_queue = None
+        self._sender_queue = None
+        self._aborted = None
         self._closed = False
+        self._shutdown_event = threading.Event()
 
     def run(self):
-        gateway_host, gateway_port = self._resolve_gateway()
-        logging.info("Connecting to gateway %s:%s", gateway_host, gateway_port)
-        self._sock = SafeTCPSocket()
-        self._sock.connect(gateway_host, gateway_port)
-
-        self._receiver_thread = threading.Thread(target=self._receive_data, daemon=True)
-        self._sender_thread = threading.Thread(target=self._send_data, daemon=True)
-        self._receiver_thread.start()
-        self._sender_thread.start()
-
         try:
-            self._orchestrate()
+            gateway_host, gateway_port = self._resolve_gateway()
+        except OSError as e:
+            if self._closed:
+                return
+            raise
+        delay = self._INITIAL_RECONNECT_DELAY
+        while not self._closed:
+            try:
+                sock = SafeTCPSocket()
+                sock.connect(gateway_host, gateway_port)
+                delay = self._INITIAL_RECONNECT_DELAY
+                logging.info("Connected to gateway %s:%s", gateway_host, gateway_port)
+                if self._run_session(sock):
+                    logging.info("Shutdown: All expected query results received")
+                    return
+            except OSError as e:
+                logging.warning(
+                    "Could not connect to gateway %s:%s: %s",
+                    gateway_host,
+                    gateway_port,
+                    e,
+                )
+            if not self._closed:
+                logging.info("Reconnecting to gateway in %.1fs", delay)
+                self._shutdown_event.wait(delay)
+                delay = min(delay * self._BACKOFF_FACTOR, self._MAX_RECONNECT_DELAY)
+
+    def _run_session(self, sock):
+        self._sock = sock
+        self._aborted = False
+        self._receiver_queue = queue.Queue()
+        self._sender_queue = queue.Queue()
+        receiver_thread = threading.Thread(target=self._receive_data, daemon=True)
+        sender_thread = threading.Thread(target=self._send_data, daemon=True)
+        receiver_thread.start()
+        sender_thread.start()
+        try:
+            return self._orchestrate()
         finally:
-            self._disconnect()
-            if self._receiver_thread is not None:
-                self._receiver_thread.join()
-            if self._sender_thread is not None:
-                self._sender_thread.join()
+            sock.close()
+            self._sock = None
+            receiver_thread.join()
+            sender_thread.join()
 
     def _orchestrate(self):
         logging.info("Starting data transmission")
@@ -52,17 +81,17 @@ class Client:
         writers, totals, files = self._open_result_files(pending)
         try:
             self._produce_and_wait_acks(pending, writers, totals)
-            self._consume_remaining(pending, writers, totals)
+            if not self._aborted:
+                self._consume_remaining(pending, writers, totals)
         finally:
             for f in files.values():
                 f.close()
             self._sender_queue.put(None)
-        if not pending:
-            logging.info("Shutdown: All expected query results received")
+        return not pending
 
     def _produce_and_wait_acks(self, pending, writers, totals):
         for msg_type, payload in self._messages_to_send():
-            if self._aborted.is_set() or self._closed:
+            if self._aborted or self._closed:
                 return
             if payload is None:
                 self._sender_queue.put((msg_type,))
@@ -167,7 +196,7 @@ class Client:
                     logging.info("Receiver stopped: remote closed connection")
                 else:
                     logging.error("Error receiving data: %s", e)
-                self._aborted.set()
+                self._aborted = True
                 self._receiver_queue.put(None)
                 self._sender_queue.put(None)
                 return
@@ -176,7 +205,7 @@ class Client:
                     logging.info("Receiver stopped: socket closed")
                 else:
                     logging.error("Error receiving data: %s", e)
-                self._aborted.set()
+                self._aborted = True
                 self._receiver_queue.put(None)
                 self._sender_queue.put(None)
                 return
@@ -196,13 +225,18 @@ class Client:
                     return
                 external.send_msg(self._sock, *item)
         except Exception as e:
-            logging.error("Error sending data: %s", e)
-            self._disconnect()
+            if not self._closed:
+                logging.warning("Send failed, aborting session: %s", e)
+            self._aborted = True
         finally:
             self._receiver_queue.put(None)
 
     def _read_batches(self, csv_path, data_class_type):
-        batch_size = self._config.transactions_batch_size if data_class_type == RawTransaction else self._config.accounts_batch_size
+        batch_size = (
+            self._config.transactions_batch_size
+            if data_class_type == RawTransaction
+            else self._config.accounts_batch_size
+        )
         batch = []
         with open(csv_path) as f:
             next(f)
@@ -225,8 +259,11 @@ class Client:
         if self._sock is not None:
             self._sock.close()
             self._sock = None
-        self._sender_queue.put(None)
-        self._receiver_queue.put(None)
+        if self._sender_queue is not None:
+            self._sender_queue.put(None)
+        if self._receiver_queue is not None:
+            self._receiver_queue.put(None)
+        self._shutdown_event.set()
 
     def shutdown(self, signum=None, frame=None):
         logging.info("Shutdown requested")

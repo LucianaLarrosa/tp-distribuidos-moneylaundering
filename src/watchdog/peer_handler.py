@@ -48,7 +48,7 @@ class PeerHandler:
                 (self.EventType.MESSAGE, (self._peer_id, msg_type, node_id))
             )
 
-    def _run(self, sock):
+    def _run_session(self, sock):
         self._socket = sock
         sender = threading.Thread(target=self._sender_loop, args=(sock,), daemon=True)
         sender.start()
@@ -57,7 +57,7 @@ class PeerHandler:
         sock.close()
         sender.join()
 
-    def _monitor_peer_status(self, host, port, my_id):
+    def _run(self, host, port, my_id):
         delay = self._INITIAL_RECONNECT_DELAY
         while not self._closed:
             try:
@@ -65,10 +65,11 @@ class PeerHandler:
                 sock.connect(host, port)
                 delay = self._INITIAL_RECONNECT_DELAY
                 election.send_peer_id(sock, my_id)
-                self._run(sock)
+                self._run_session(sock)
             except OSError as e:
                 logging.warning("Could not connect to peer %d: %s", self._peer_id, e)
             if not self._closed:
+                logging.info("Reconnecting to peer %d in %.1fs", self._peer_id, delay)
                 time.sleep(delay)
                 delay = min(delay * self._BACKOFF_FACTOR, self._MAX_RECONNECT_DELAY)
 
@@ -79,14 +80,14 @@ class PeerHandler:
         """
         Start a thread to manage a newly accepted connection to a peer, running until the connection is lost or the handler is closed.
         """
-        threading.Thread(target=self._run, args=(sock,), daemon=True).start()
+        threading.Thread(target=self._run_session, args=(sock,), daemon=True).start()
 
     def connect(self, host, port, my_id):
         """
         Start a thread to manage the connection to a peer, attempting to connect immediately, running and then retrying with a delay if it fails, until the handler is closed.
         """
         threading.Thread(
-            target=self._monitor_peer_status,
+            target=self._run,
             args=(host, port, my_id),
             daemon=True,
         ).start()

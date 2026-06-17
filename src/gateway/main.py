@@ -6,6 +6,7 @@ import uuid
 from gateway.config import Config
 from gateway.internal.client_handler import ClientHandler
 from gateway.internal.internal_router import InternalRouter
+from common.health import HealthResponder
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
@@ -97,6 +98,9 @@ class Gateway:
             ),
             daemon=True,
         )
+        self._health_responder = HealthResponder(
+            config.node_name, config.ping_port, config.ping_pong_host
+        )
         self._closed = False
 
     def run(self):
@@ -106,6 +110,7 @@ class Gateway:
             self._config.listen_port,
             self._config.pool_size,
         )
+        self._health_responder.start()
         self._results_consumer.start()
 
         try:
@@ -143,6 +148,7 @@ class Gateway:
             return
         self._closed = True
         logging.info("Shutdown requested")
+        self._health_responder.stop()
         self._server_sock.close()
         if self._results_consumer.is_alive():
             self._results_consumer.terminate()

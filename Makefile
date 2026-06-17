@@ -46,7 +46,7 @@ PANDAS_EXPECTED_DIR ?= ./pandas_expected_output
 SIZE              := $(patsubst HI-%_Trans.csv,%,$(TRANSACTIONS_FILE))
 EXPECTED_SIZE_DIR := $(EXPECTED_DIR)/$(SIZE)
 
-PROTECTED_PREFIXES ?= rabbitmq gateway proxy client
+PROTECTED_PREFIXES ?= rabbitmq proxy client
 
 COMPOSE_ARGS = \
 	--clients                     $(N_CLIENTS) \
