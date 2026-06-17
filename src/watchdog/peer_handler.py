@@ -12,8 +12,13 @@ class PeerHandler:
     _MAX_RECONNECT_DELAY = 30.0
     _BACKOFF_FACTOR = 2.0
 
-    def __init__(self, peer_id):
+    class EventType:
+        MESSAGE = "MESSAGE"
+        DISCONNECT = "DISCONNECT"
+
+    def __init__(self, peer_id, events):
         self._peer_id = peer_id
+        self._events = events
         self._send_queue = queue.Queue()
         self._socket = None
         self._closed = False
@@ -30,27 +35,29 @@ class PeerHandler:
                 sock.close()
                 break
 
-    def _receiver_loop(self, sock, on_message, on_disconnect):
+    def _receiver_loop(self, sock):
         while True:
             try:
                 msg_type, node_id = election.recv_msg(sock)
             except (OSError, IncompleteReadError) as e:
                 logging.warning("Lost connection to peer %d: %s", self._peer_id, e)
-                on_disconnect(self._peer_id)
+                self._events.put((self.EventType.DISCONNECT, self._peer_id))
                 self._send_queue.put(None)
                 return
-            on_message(self._peer_id, msg_type, node_id)
+            self._events.put(
+                (self.EventType.MESSAGE, (self._peer_id, msg_type, node_id))
+            )
 
-    def _run(self, sock, on_message, on_disconnect):
+    def _run(self, sock):
         self._socket = sock
         sender = threading.Thread(target=self._sender_loop, args=(sock,), daemon=True)
         sender.start()
-        self._receiver_loop(sock, on_message, on_disconnect)
+        self._receiver_loop(sock)
         self._socket = None
         sock.close()
         sender.join()
 
-    def _monitor_peer_status(self, host, port, my_id, on_message, on_disconnect):
+    def _monitor_peer_status(self, host, port, my_id):
         delay = self._INITIAL_RECONNECT_DELAY
         while not self._closed:
             try:
@@ -58,7 +65,7 @@ class PeerHandler:
                 sock.connect(host, port)
                 delay = self._INITIAL_RECONNECT_DELAY
                 election.send_peer_id(sock, my_id)
-                self._run(sock, on_message, on_disconnect)
+                self._run(sock)
             except OSError as e:
                 logging.warning("Could not connect to peer %d: %s", self._peer_id, e)
             if not self._closed:
@@ -68,21 +75,19 @@ class PeerHandler:
     def send(self, data):
         self._send_queue.put(data)
 
-    def accept(self, sock, on_message, on_disconnect):
+    def accept(self, sock):
         """
         Start a thread to manage a newly accepted connection to a peer, running until the connection is lost or the handler is closed.
         """
-        threading.Thread(
-            target=self._run, args=(sock, on_message, on_disconnect), daemon=True
-        ).start()
+        threading.Thread(target=self._run, args=(sock,), daemon=True).start()
 
-    def connect(self, host, port, my_id, on_message, on_disconnect):
+    def connect(self, host, port, my_id):
         """
         Start a thread to manage the connection to a peer, attempting to connect immediately, running and then retrying with a delay if it fails, until the handler is closed.
         """
         threading.Thread(
             target=self._monitor_peer_status,
-            args=(host, port, my_id, on_message, on_disconnect),
+            args=(host, port, my_id),
             daemon=True,
         ).start()
 

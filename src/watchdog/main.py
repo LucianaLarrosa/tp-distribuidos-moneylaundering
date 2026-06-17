@@ -1,6 +1,8 @@
 import logging
+import queue
 import signal
 import threading
+import time
 
 from common.health import HealthResponder
 from common.protocol.election import election
@@ -16,19 +18,23 @@ class Watchdog:
         FOLLOWER = "FOLLOWER"
         LEADER = "LEADER"
 
+    class Phase:
+        IDLE = "IDLE"
+        AWAITING_ANSWER = "AWAITING_ANSWER"
+        AWAITING_COORDINATOR = "AWAITING_COORDINATOR"
+
     def __init__(self, config):
         self._config = config
         self._closed = False
 
         self._role = Watchdog.Role.FOLLOWER
         self._leader_id = None
-        self._election_needed = threading.Event()
-        self._answer_received = threading.Event()
-        self._coordinator_received = threading.Event()
+        self._phase = Watchdog.Phase.IDLE
+        self._deadline = 0.0
+        self._events = queue.Queue()
 
-        self._peer_lock = threading.Lock()
         self._peer_handlers = {
-            peer_id: PeerHandler(peer_id)
+            peer_id: PeerHandler(peer_id, self._events)
             for peer_id in config.peers
             if peer_id != config.watchdog_id
         }
@@ -71,9 +77,7 @@ class Watchdog:
                 sock.close()
                 continue
             logging.info("Accepted connection from peer %d", peer_id)
-            self._peer_handlers[peer_id].accept(
-                sock, self._on_peer_message, self._on_peer_disconnect
-            )
+            self._peer_handlers[peer_id].accept(sock)
 
     def _connect_to_higher_peers(self):
         for peer_id, host in self._config.peers.items():
@@ -82,8 +86,6 @@ class Watchdog:
                     host,
                     self._config.election_port,
                     self._config.watchdog_id,
-                    self._on_peer_message,
-                    self._on_peer_disconnect,
                 )
 
     # --- Election ---
@@ -105,77 +107,90 @@ class Watchdog:
         if leader_id is None:
             leader_id = self._config.watchdog_id
         logging.info("Becoming %s (leader=%d)", new_role, leader_id)
-        with self._peer_lock:
-            self._role = new_role
-            self._leader_id = leader_id
-        self._election_needed.clear()
+        self._role = new_role
+        self._leader_id = leader_id
+        self._phase = Watchdog.Phase.IDLE
         if new_role == Watchdog.Role.LEADER:
             self._broadcast_coordinator()
             self._health_monitor.start()
         else:
             self._health_monitor.stop()
 
-    def _on_election_received(self, peer_id):
-        self._send_to_peer(peer_id, election.serialize_answer(self._config.watchdog_id))
-        with self._peer_lock:
-            role = self._role
-        if role == Watchdog.Role.LEADER:
-            self._broadcast_coordinator()
-        else:
-            self._election_needed.set()
+    def _enter_phase(self, phase):
+        self._phase = phase
+        self._deadline = time.monotonic() + self._config.election_timeout_seconds
 
-    def _on_coordinator_received(self, leader_id):
-        if leader_id < self._config.watchdog_id:
-            self._election_needed.set()
-        else:
-            self._become_role(Watchdog.Role.FOLLOWER, leader_id)
-            self._coordinator_received.set()
-
-    def _on_peer_message(self, peer_id, msg_type, node_id):
-        """
-        Bully algorithm: if an election message is received, answer and trigger an election if not already a leader; if an answer message is received, mark that an answer was received for the current election; if a coordinator message is received, become a follower if the leader ID is higher, or trigger an election if it's lower.
-        """
-        if msg_type == MsgType.ELECTION:
-            self._on_election_received(peer_id)
-        elif msg_type == MsgType.ANSWER:
-            self._answer_received.set()
-        elif msg_type == MsgType.COORDINATOR:
-            self._on_coordinator_received(node_id)
-
-    def _on_peer_disconnect(self, peer_id):
-        if self._closed:
-            return
-        with self._peer_lock:
-            if peer_id == self._leader_id:
-                logging.warning("Leader %d disconnected, triggering election", peer_id)
-                self._election_needed.set()
-
-    def _run_election(self):
-        """
-        Start an election, sending election messages to all higher-ID peers and waiting for answers, and if none are received within the timeout, becoming the leader.
-        """
+    def _start_election(self):
         if self._closed:
             return
         logging.info("Starting election...")
-        self._answer_received.clear()
-        self._coordinator_received.clear()
-        with self._peer_lock:
-            self._leader_id = None
+        self._leader_id = None
         if not self._higher_peer_ids:
             self._become_role(Watchdog.Role.LEADER)
             return
         self._send_to_peers(
             self._higher_peer_ids, election.serialize_election(self._config.watchdog_id)
         )
-        if not self._answer_received.wait(
-            timeout=self._config.election_timeout_seconds
-        ):
+        self._enter_phase(Watchdog.Phase.AWAITING_ANSWER)
+
+    def _handle_election_timeout(self):
+        if self._phase == Watchdog.Phase.AWAITING_ANSWER:
             self._become_role(Watchdog.Role.LEADER)
+        elif self._phase == Watchdog.Phase.AWAITING_COORDINATOR:
+            self._start_election()
+
+    def _handle_election_message(self, peer_id):
+        self._send_to_peer(peer_id, election.serialize_answer(self._config.watchdog_id))
+        if self._role == Watchdog.Role.LEADER:
+            self._broadcast_coordinator()
         else:
-            if not self._coordinator_received.wait(
-                timeout=self._config.election_timeout_seconds
-            ):
-                self._election_needed.set()
+            self._start_election()
+
+    def _handle_coordinator_message(self, leader_id):
+        if leader_id < self._config.watchdog_id:
+            self._start_election()
+        else:
+            self._become_role(Watchdog.Role.FOLLOWER, leader_id)
+
+    def _handle_message(self, peer_id, msg_type, node_id):
+        """
+        Bully algorithm: if an election message is received, answer and trigger an election if not already a leader; if an answer message is received, enter to the awaiting coordinator phase; if a coordinator message is received, become a follower if the leader ID is higher, or trigger an election if it's lower.
+        """
+        if msg_type == MsgType.ELECTION:
+            self._handle_election_message(peer_id)
+        elif msg_type == MsgType.ANSWER:
+            if self._phase == Watchdog.Phase.AWAITING_ANSWER:
+                self._enter_phase(Watchdog.Phase.AWAITING_COORDINATOR)
+        elif msg_type == MsgType.COORDINATOR:
+            self._handle_coordinator_message(node_id)
+
+    def _handle_disconnect(self, peer_id):
+        if peer_id == self._leader_id:
+            logging.warning("Leader %d disconnected, triggering election", peer_id)
+            self._start_election()
+
+    # --- Event loop ---
+
+    def _seconds_until_deadline(self):
+        if self._phase == Watchdog.Phase.IDLE:
+            return None
+        return max(0.0, self._deadline - time.monotonic())
+
+    def _event_loop(self):
+        self._start_election()
+        while not self._closed:
+            try:
+                event = self._events.get(timeout=self._seconds_until_deadline())
+            except queue.Empty:
+                self._handle_election_timeout()
+                continue
+            if event is None:
+                break
+            event_type, event_data = event
+            if event_type == PeerHandler.EventType.MESSAGE:
+                self._handle_message(*event_data)
+            elif event_type == PeerHandler.EventType.DISCONNECT:
+                self._handle_disconnect(event_data)
 
     # --- Lifecycle ---
 
@@ -186,19 +201,14 @@ class Watchdog:
             target=self._accept_lower_peer_connections, daemon=True
         ).start()
         self._connect_to_higher_peers()
-        self._run_election()
-        while not self._closed:
-            if self._election_needed.wait():
-                self._run_election()
+        self._event_loop()
 
     def shutdown(self):
         if self._closed:
             return
         self._closed = True
         logging.info("Shutting down watchdog %d...", self._config.watchdog_id)
-        self._election_needed.set()
-        self._answer_received.set()
-        self._coordinator_received.set()
+        self._events.put(None)
         self._health_responder.stop()
         self._health_monitor.close()
         self._server_socket.close()
