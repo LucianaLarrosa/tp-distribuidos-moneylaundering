@@ -48,8 +48,10 @@ class HealthMonitor:
                 break
             try:
                 data, _ = self._udp_socket.recv(timeout=remaining)
-            except (SocketTimeoutError, OSError):
+            except SocketTimeoutError:
                 break
+            except OSError:
+                continue
             try:
                 node_name = health.deserialize_pong(data)
                 if node_name:
