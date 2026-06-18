@@ -4,10 +4,12 @@ from abc import abstractmethod
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
-from common.worker.worker import Worker, MAIN_CHANNEL, CONTROL_CHANNEL
+from common.worker.worker import Worker, MAIN_CHANNEL
 from common.protocol.internal import internal
 from common.models.eof import EOF, RingEOF
 from common.ids import ring_id, ring_seq_of, RING_PHASE_COUNT, RING_PHASE_FLUSH
+
+CONTROL_CHANNEL = "control"
 
 
 class RingCoordinatedWorker(Worker):

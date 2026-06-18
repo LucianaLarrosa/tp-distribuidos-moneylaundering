@@ -9,8 +9,8 @@ from common.protocol.internal import internal
 from common.models.eof import EOF, RingEOF
 from common.utils import SideInputTracker
 from common.worker.ring_coordinated_worker import RingCoordinatedWorker
-from common.worker.worker import SIDE_CHANNEL
 
+SIDE_CHANNEL = "side"
 DEFER_CHANNEL = "defer"
 UNDEFER_CHANNEL = "undefer"
 
