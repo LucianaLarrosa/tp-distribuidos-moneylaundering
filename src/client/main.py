@@ -28,6 +28,8 @@ class Client:
         self._aborted = None
         self._closed = False
         self._shutdown_event = threading.Event()
+        self._message_iter = None
+        self._pending_msg = None
 
     def run(self):
         try:
@@ -90,14 +92,22 @@ class Client:
         return not pending
 
     def _produce_and_wait_acks(self, pending, writers, totals):
-        for msg_type, payload in self._messages_to_send():
-            if self._aborted or self._closed:
-                return
+        if self._message_iter is None:
+            self._message_iter = self._messages_to_send()
+        while not (self._aborted or self._closed):
+            if self._pending_msg is None:
+                try:
+                    self._pending_msg = next(self._message_iter)
+                except StopIteration:
+                    return
+            msg_type, payload = self._pending_msg
             if payload is None:
                 self._sender_queue.put((msg_type,))
             else:
                 self._sender_queue.put((msg_type, payload))
-            self._wait_ack(pending, writers, totals)
+            if not self._wait_ack(pending, writers, totals):
+                return
+            self._pending_msg = None
 
     def _messages_to_send(self):
         for batch in self._read_batches(
@@ -113,16 +123,17 @@ class Client:
         while not self._closed:
             item = self._receiver_queue.get()
             if item is None:
-                return
+                return False
             msg_type, payload = item
             if msg_type == MsgType.ACK:
-                return
+                return True
             elif msg_type == MsgType.QUERY_RESULT:
                 self._handle_query_result(payload, writers, totals)
             elif msg_type == MsgType.QUERY_END:
                 self._handle_query_end(payload, pending, totals)
             else:
                 logging.warning("Unexpected msg_type=%s in orchestrator", msg_type)
+        return False
 
     def _consume_remaining(self, pending, writers, totals):
         while pending and not self._closed:
