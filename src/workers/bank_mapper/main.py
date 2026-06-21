@@ -6,19 +6,18 @@ from dataclasses import asdict
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
-from common.ids import eof_id, final_eof_id
+from common.ids import final_eof_id
 from common.models.bank_max_partial import BankMaxPartial
 from common.models.query_results import Q2Result
 from common.protocol.internal import internal
 from common.utils import BatchSpill
-from common.worker.side_input_stateless_coordinated_worker import (
-    SideInputStatelessCoordinatedWorker,
+from common.worker.side_input_stateless_worker import (
+    SideInputStatelessWorker,
 )
-from common.worker.safe_output_capable import SafeOutputCapable
 from config import Config
 
 
-class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
+class BankMapper(SideInputStatelessWorker):
     def __init__(self, config):
         super().__init__(config)
         self._bank_names_lock = threading.Lock()
@@ -51,11 +50,6 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
             exchange_name=config.output_exchange,
             routing_keys=[],
         )
-        self._control_output_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
-            host=config.rabbitmq_host,
-            exchange_name=config.output_exchange,
-            routing_keys=[],
-        )
         self._side_output_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
             exchange_name=config.output_exchange,
@@ -71,36 +65,12 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
         return self._output_exchange
 
     @property
-    def _rabbitmq_host(self):
-        return self.config.rabbitmq_host
-
-    @property
-    def _control_exchange_name(self):
-        return self.config.control_exchange
-
-    @property
-    def _node_prefix(self):
-        return self.config.node_prefix
-
-    @property
-    def _node_id(self):
-        return self.config.node_id
-
-    @property
-    def _ring_size(self):
-        return self.config.ring_size
-
-    @property
     def _input_side_middleware(self):
         return self._input_banks_exchange
 
     @property
     def _side_batch_msg_type(self):
         return internal.MsgType.BANK_BATCH
-
-    @property
-    def _control_output_middleware(self):
-        return self._control_output_exchange
 
     def _side_input_prefix_key(self, node_id):
         return f"{self.config.side_input_node_prefix}{node_id}"
@@ -170,7 +140,6 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
     def _handle_data_message(self, _, client_id, gateway_id, bank_max_batch):
         key = self._flow_key(client_id, gateway_id)
         with self._get_flow_lock(key):
-            super()._handle_data_message(_, client_id, gateway_id, bank_max_batch)
             if not self._side_input.is_ready(key):
                 self._spill.write(key, (self._current_message_id, bank_max_batch))
                 return
@@ -203,31 +172,11 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
             self._spill.discard(key)
             with self._bank_names_lock:
                 self._bank_names.pop(key, None)
-            self._side_input.drop(key)
-            with self._flow_locks_guard:
-                self._flow_locks.pop(key, None)
-
-    def _flush_data(self, client_id, gateway_id):
-        key = self._flow_key(client_id, gateway_id)
-        with self._get_flow_lock(key):
-            self._spill.drain(
-                key,
-                lambda entry: self._map_and_emit(
-                    client_id,
-                    gateway_id,
-                    entry[1],
-                    self._control_output_exchange,
-                    message_id=entry[0],
-                ),
-            )
-            with self._bank_names_lock:
-                self._bank_names.pop(key, None)
-            self._side_input.drop(key)
             with self._flow_locks_guard:
                 self._flow_locks.pop(key, None)
 
     def _send_final_eof(self, client_id, gateway_id, eof):
-        self._control_output_exchange.send(
+        self._output_exchange.send(
             internal.serialize_msg(
                 internal.MsgType.QUERY_END,
                 client_id,
@@ -242,7 +191,6 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
     def shutdown(self):
         super().shutdown()
         self._side_output_exchange.close()
-        self._control_output_exchange.close()
         self._spill.close_all()
 
 
