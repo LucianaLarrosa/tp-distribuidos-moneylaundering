@@ -11,10 +11,9 @@ _SENDER_STOP = "__sender_stop__"
 
 
 class ClientHandler:
-    def __init__(self, sock, client_id, gateway_id, router, results):
+    def __init__(self, sock, client_id, router, results):
         self._sock = sock
         self._client_id = client_id
-        self._gateway_id = gateway_id
         self._router = router
         self._results = results
         self._queue = queue.Queue()
@@ -57,20 +56,20 @@ class ClientHandler:
         if msg_type == MsgType.TRANSACTION_BATCH:
             records, _, message_id = payload
             self._router.forward_raw_transactions(
-                self._client_id, self._gateway_id, records, message_id
+                self._client_id, records, message_id
             )
             self._queue.put(("ack",))
         elif msg_type == MsgType.ACCOUNT_BATCH:
             records, _, message_id = payload
             self._router.forward_raw_accounts(
-                self._client_id, self._gateway_id, records, message_id
+                self._client_id, records, message_id
             )
             self._queue.put(("ack",))
         elif msg_type == MsgType.EOF_TRANSACTIONS:
             _, message_id = payload
             logging.info("[%s] EOF_TRANSACTIONS received", self._client_id)
             self._router.forward_eof_transactions(
-                self._client_id, self._gateway_id, int(message_id)
+                self._client_id, int(message_id)
             )
             self._queue.put(("ack",))
             got_eof_tx = True
@@ -78,7 +77,7 @@ class ClientHandler:
             _, message_id = payload
             logging.info("[%s] EOF_ACCOUNTS received", self._client_id)
             self._router.forward_eof_accounts(
-                self._client_id, self._gateway_id, int(message_id)
+                self._client_id, int(message_id)
             )
             self._queue.put(("ack",))
             got_eof_acc = True
@@ -104,9 +103,7 @@ class ClientHandler:
                 pass
 
     def _on_result(self, body, ack, _nack):
-        msg_type, _, _, payload, message_id = (
-            internal.deserialize_msg(body)
-        )
+        msg_type, _, payload, message_id = internal.deserialize_msg(body)
         self._queue.put((msg_type, payload, message_id, ack))
 
     def _sender_loop(self):

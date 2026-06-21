@@ -55,11 +55,11 @@ class PaymentFormatReducer(StatefulCoordinatedWorker):
     def _ring_size(self):
         return self.config.ring_size
 
-    def _flow_key(self, client_id, gateway_id):
-        return (client_id, gateway_id)
+    def _flow_key(self, client_id):
+        return client_id
 
-    def _handle_data_message(self, _, client_id, gateway_id, partial_batch):
-        super()._handle_data_message(_, client_id, gateway_id, partial_batch)
+    def _handle_data_message(self, _, client_id, partial_batch):
+        super()._handle_data_message(_, client_id, partial_batch)
         delta = {}
         for partial in partial_batch:
             total_amount, count = delta.get(partial.payment_format, (0.0, 0))
@@ -67,25 +67,25 @@ class PaymentFormatReducer(StatefulCoordinatedWorker):
                 total_amount + partial.total_amount,
                 count + partial.count,
             ]
-        self._apply_delta(client_id, gateway_id, delta)
+        self._apply_delta(client_id, delta)
         return delta
 
-    def _apply_delta(self, client_id, gateway_id, delta):
-        flow_totals = self._totals.setdefault(self._flow_key(client_id, gateway_id), {})
+    def _apply_delta(self, client_id, delta):
+        flow_totals = self._totals.setdefault(self._flow_key(client_id), {})
         for payment_format, (total_amount, count) in delta.items():
             cur_total, cur_count = flow_totals.get(payment_format, (0.0, 0))
             flow_totals[payment_format] = (cur_total + total_amount, cur_count + count)
 
-    def _state_as_delta(self, client_id, gateway_id):
+    def _state_as_delta(self, client_id):
         return {
             payment_format: [total_amount, count]
             for payment_format, (total_amount, count) in self._totals.get(
-                self._flow_key(client_id, gateway_id), {}
+                self._flow_key(client_id), {}
             ).items()
         }
 
-    def _flush_data(self, client_id, gateway_id):
-        flow_totals = self._totals.pop(self._flow_key(client_id, gateway_id), {})
+    def _flush_data(self, client_id):
+        flow_totals = self._totals.pop(self._flow_key(client_id), {})
         batch = []
         for payment_format, totals in flow_totals.items():
             total_amount, count = totals
@@ -97,27 +97,25 @@ class PaymentFormatReducer(StatefulCoordinatedWorker):
                     average_amount=total_amount / count,
                 )
             )
-        self._send_average_batch(client_id, gateway_id, batch)
+        self._send_average_batch(client_id, batch)
 
-    def _send_average_batch(self, client_id, gateway_id, batch):
+    def _send_average_batch(self, client_id, batch):
         self._send(
             self._output_exchange,
             internal.MsgType.PAYMENT_FORMAT_AVERAGE_BATCH,
             client_id,
-            gateway_id,
             batch,
-            message_id=flush_id(self.config.node_id, client_id, gateway_id, 0),
+            message_id=flush_id(self.config.node_id, client_id, 0),
         )
-        self._increment_sent_count(client_id, gateway_id)
+        self._increment_sent_count(client_id)
 
-    def _send_final_eof(self, client_id, gateway_id, eof):
+    def _send_final_eof(self, client_id, eof):
         self._output_exchange.send(
             internal.serialize_msg(
                 internal.MsgType.EOF,
                 client_id,
-                gateway_id,
                 eof,
-                message_id=eof_id(client_id, gateway_id),
+                message_id=eof_id(client_id),
             )
         )
 

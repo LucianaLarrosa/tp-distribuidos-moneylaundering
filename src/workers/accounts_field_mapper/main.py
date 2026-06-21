@@ -35,20 +35,19 @@ class AccountsFieldMapper(StatelessWorker):
     def _output_middleware(self):
         return self._output_exchange
 
-    def _send_final_eof(self, client_id, gateway_id, eof):
+    def _send_final_eof(self, client_id, eof):
         for rk in self.config.output_routing_keys:
             self._output_exchange.send(
                 internal.serialize_msg(
                     internal.MsgType.EOF,
                     client_id,
-                    gateway_id,
                     eof,
-                    message_id=eof_id(client_id, gateway_id),
+                    message_id=eof_id(client_id),
                 ),
                 routing_key=self._output_prefix_routing_key(rk),
             )
 
-    def _handle_data_message(self, _, client_id, gateway_id, payload):
+    def _handle_data_message(self, _, client_id, payload):
         """
         Parse each raw CSV line into a Bank and send one batch to every shard.
         The input id is forwarded unchanged (pass-through): each shard goes to a
@@ -69,7 +68,6 @@ class AccountsFieldMapper(StatelessWorker):
                 self._output_exchange,
                 internal.MsgType.BANK_BATCH,
                 client_id,
-                gateway_id,
                 bank_list,
                 routing_key=self._output_prefix_routing_key(node_id),
             )

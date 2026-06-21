@@ -15,7 +15,7 @@ class DuplicateAccountFilter(StatefulCoordinatedWorker):
         super().__init__(config)
         self._unique_accounts = (
             {}
-        )  # (client_id, gateway_id) -> {(bank, account) -> Q4Result}
+        )  # (client_id) -> {(bank, account) -> Q4Result}
 
         self._input_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
@@ -57,13 +57,12 @@ class DuplicateAccountFilter(StatefulCoordinatedWorker):
     def _ring_size(self):
         return self.config.ring_size
 
-    def _flush_data(self, client_id, gateway_id):
-        unique_accounts = self._unique_accounts.pop((client_id, gateway_id), {})
+    def _flush_data(self, client_id):
+        unique_accounts = self._unique_accounts.pop(client_id, {})
         self._flush_sharded(
             self._output_exchange,
             internal.MsgType.Q4_RESULT_BATCH,
             client_id,
-            gateway_id,
             list(unique_accounts.values()),
             key_of=lambda result: f"{result.bank}.{result.account}",
             num_shards=1,
@@ -71,38 +70,37 @@ class DuplicateAccountFilter(StatefulCoordinatedWorker):
             routing_key_for=lambda _shard: client_id,
         )
 
-    def _send_final_eof(self, client_id, gateway_id, eof):
+    def _send_final_eof(self, client_id, eof):
         self._output_exchange.send(
             internal.serialize_msg(
                 internal.MsgType.QUERY_END,
                 client_id,
-                gateway_id,
                 self.config.query_id,
                 eof.message_count,
-                message_id=eof_id(client_id, gateway_id, self.config.query_id),
+                message_id=eof_id(client_id, self.config.query_id),
             ),
             routing_key=client_id,
         )
 
-    def _handle_data_message(self, _, client_id, gateway_id, payload):
+    def _handle_data_message(self, _, client_id, payload):
         """
         Handle incoming data messages by storing unique (bank, account) pairs for each client and gateway.
         """
-        super()._handle_data_message(_, client_id, gateway_id, payload)
+        super()._handle_data_message(_, client_id, payload)
         delta = [[account.bank, account.account] for account in payload]
-        self._apply_delta(client_id, gateway_id, delta)
+        self._apply_delta(client_id, delta)
         return delta
 
-    def _apply_delta(self, client_id, gateway_id, delta):
-        unique_accounts = self._unique_accounts.setdefault((client_id, gateway_id), {})
+    def _apply_delta(self, client_id, delta):
+        unique_accounts = self._unique_accounts.setdefault(client_id, {})
         for bank, account in delta:
             unique_accounts[(bank, account)] = Q4Result(bank, account)
 
-    def _state_as_delta(self, client_id, gateway_id):
+    def _state_as_delta(self, client_id):
         return [
             [result.bank, result.account]
             for result in self._unique_accounts.get(
-                (client_id, gateway_id), {}
+                (client_id), {}
             ).values()
         ]
 

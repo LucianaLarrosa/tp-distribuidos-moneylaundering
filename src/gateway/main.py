@@ -1,7 +1,6 @@
 import logging
 import multiprocessing
 import signal
-import uuid
 
 from gateway.config import Config
 from gateway.internal.client_handler import ClientHandler
@@ -15,7 +14,7 @@ from common.protocol.external.external import MsgType
 from common.socket.safe_socket import SafeTCPSocket
 
 
-def _handle_client_process(sock, client_id, gateway_id, config):
+def _handle_client_process(sock, client_id, config):
     try:
         exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             config.rabbitmq_host,
@@ -44,7 +43,7 @@ def _handle_client_process(sock, client_id, gateway_id, config):
         exchange, config.transaction_routing_key, config.account_routing_key
     )
     try:
-        ClientHandler(sock, client_id, gateway_id, router, results).run()
+        ClientHandler(sock, client_id, router, results).run()
     except Exception:
         logging.exception("[%s] handler crashed", client_id)
         raise
@@ -59,7 +58,6 @@ def _worker_init():
 class Gateway:
     def __init__(self, config):
         self._config = config
-        self._gateway_id = str(uuid.uuid4())
         self._server_sock = SafeTCPSocket()
         self._server_sock.bind(config.listen_host, config.listen_port)
         self._server_sock.listen()
@@ -73,8 +71,7 @@ class Gateway:
 
     def run(self):
         logging.info(
-            "Gateway %s listening on port %s (pool size: %s)",
-            self._gateway_id,
+            "Gateway listening on port %s (pool size: %s)",
             self._config.listen_port,
             self._config.pool_size,
         )
@@ -97,7 +94,6 @@ class Gateway:
                     args=(
                         client_sock,
                         client_id,
-                        self._gateway_id,
                         self._config,
                     ),
                     error_callback=self._on_client_error,

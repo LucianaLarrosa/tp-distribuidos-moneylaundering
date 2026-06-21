@@ -22,7 +22,7 @@ class Worker(ABC):
         self._closed = False
         self._current_message_id = ""
         self._state_lock = threading.Lock()
-        self._seen = {}  # (channel, client_id, gateway_id) -> set of message_id
+        self._seen = {}  # (channel, client_id) -> set of message_id
         self._recovered = False
         self._appends_since_compact = 0
         state_dir = os.environ.get("STATE_DIR")
@@ -46,50 +46,49 @@ class Worker(ABC):
         pass
 
     @abstractmethod
-    def _handle_eof_message(self, client_id, gateway_id, eof):
+    def _handle_eof_message(self, client_id, eof):
         pass
 
     @abstractmethod
-    def _handle_data_message(self, msg_type, client_id, gateway_id, payload):
+    def _handle_data_message(self, msg_type, client_id, payload):
         pass
 
     @abstractmethod
-    def _send_final_eof(self, client_id, gateway_id, eof):
+    def _send_final_eof(self, client_id, eof):
         pass
 
-    def _apply_delta(self, client_id, gateway_id, delta):
+    def _apply_delta(self, client_id, delta):
         raise NotImplementedError
 
-    def _state_as_delta(self, client_id, gateway_id):
+    def _state_as_delta(self, client_id):
         return None
 
     def _flow_keys(self):
-        return {(c, g) for (_, c, g) in self._seen}
+        return {c for (_, c) in self._seen}
 
-    def _snapshot_flow(self, client_id, gateway_id):
+    def _snapshot_flow(self, client_id):
         seen = {}
-        for (ch, c, g), mids in self._seen.items():
-            if (c, g) == (client_id, gateway_id):
+        for (ch, c), mids in self._seen.items():
+            if c == client_id:
                 seen[ch] = list(mids)
         return {
             "ch": SNAPSHOT,
             "c": client_id,
-            "g": gateway_id,
             "seen": seen,
-            "delta": self._state_as_delta(client_id, gateway_id),
+            "delta": self._state_as_delta(client_id),
         }
 
     def _restore_snapshot(self, record):
-        client_id, gateway_id = record["c"], record["g"]
+        client_id = record["c"]
         for ch, mids in record["seen"].items():
-            self._seen.setdefault((ch, client_id, gateway_id), set()).update(mids)
+            self._seen.setdefault((ch, client_id), set()).update(mids)
         if record.get("delta") is not None:
-            self._apply_delta(client_id, gateway_id, record["delta"])
+            self._apply_delta(client_id, record["delta"])
 
     def _compact(self):
         if self._state_store is None:
             return
-        records = [self._snapshot_flow(c, g) for (c, g) in self._flow_keys()]
+        records = [self._snapshot_flow(c) for c in self._flow_keys()]
         self._state_store.compact(records)
         self._appends_since_compact = 0
 
@@ -105,11 +104,9 @@ class Worker(ABC):
             return
         mid = record.get("mid")
         if mid is not None:
-            self._seen.setdefault((record["ch"], record["c"], record["g"]), set()).add(
-                mid
-            )
+            self._seen.setdefault((record["ch"], record["c"]), set()).add(mid)
         if record.get("delta") is not None:
-            self._apply_delta(record["c"], record["g"], record["delta"])
+            self._apply_delta(record["c"], record["delta"])
 
     def _recover(self):
         if self._state_store is None or self._recovered:
@@ -125,38 +122,31 @@ class Worker(ABC):
 
     def _handle_message(self, message, ack, nack):
         try:
-            msg_type, client_id, gateway_id, payload, message_id = (
-                internal.deserialize_msg(message)
-            )
+            msg_type, client_id, payload, message_id = internal.deserialize_msg(message)
             self._current_message_id = message_id
             if self._state_store is None:
                 if msg_type == internal.MsgType.EOF:
-                    self._handle_eof_message(client_id, gateway_id, payload)
+                    self._handle_eof_message(client_id, payload)
                 else:
-                    self._handle_data_message(msg_type, client_id, gateway_id, payload)
+                    self._handle_data_message(msg_type, client_id, payload)
                 ack()
                 return
             with self._state_lock:
-                seen = self._seen.setdefault(
-                    (MAIN_CHANNEL, client_id, gateway_id), set()
-                )
+                seen = self._seen.setdefault((MAIN_CHANNEL, client_id), set())
                 if message_id in seen:
                     ack()
                     return
                 if msg_type == internal.MsgType.EOF:
-                    self._handle_eof_message(client_id, gateway_id, payload)
+                    self._handle_eof_message(client_id, payload)
                     delta = None
                 else:
-                    delta = self._handle_data_message(
-                        msg_type, client_id, gateway_id, payload
-                    )
+                    delta = self._handle_data_message(msg_type, client_id, payload)
                 seen.add(message_id)
                 self._state_store.append(
                     {
                         "ch": MAIN_CHANNEL,
                         "mid": message_id,
                         "c": client_id,
-                        "g": gateway_id,
                         "delta": delta,
                         "eof": msg_type == internal.MsgType.EOF,
                     }
@@ -173,7 +163,6 @@ class Worker(ABC):
         out_middleware,
         msg_type,
         client_id,
-        gateway_id,
         payload,
         routing_key=None,
         message_id=None,
@@ -181,7 +170,7 @@ class Worker(ABC):
         if message_id is None:
             message_id = self._current_message_id
         msg = internal.serialize_msg(
-            msg_type, client_id, gateway_id, payload, message_id=message_id
+            msg_type, client_id, payload, message_id=message_id
         )
         if routing_key is not None:
             out_middleware.send(msg, routing_key=routing_key)

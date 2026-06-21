@@ -15,7 +15,7 @@ class PathMapper(StatefulCoordinatedWorker):
         super().__init__(config)
         self._account_edges = (
             {}
-        )  # (client_id, gateway_id) -> {(bank, account): (in_accounts, out_accounts)}
+        )  # (client_id) -> {(bank, account): (in_accounts, out_accounts)}
 
         self._input_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
@@ -83,13 +83,12 @@ class PathMapper(StatefulCoordinatedWorker):
                     )
         return paths
 
-    def _flush_data(self, client_id, gateway_id):
-        account_edges = self._account_edges.pop((client_id, gateway_id), {})
+    def _flush_data(self, client_id):
+        account_edges = self._account_edges.pop(client_id, {})
         self._flush_sharded(
             self._output_exchange,
             internal.MsgType.PATH_BATCH,
             client_id,
-            gateway_id,
             self._create_paths(account_edges),
             key_of=lambda path: f"{path.from_bank}.{path.from_account}.{path.to_bank}.{path.to_account}",
             num_shards=self.config.output_node_count,
@@ -97,48 +96,47 @@ class PathMapper(StatefulCoordinatedWorker):
             routing_key_for=lambda shard: f"{self.config.output_node_prefix}{shard}",
         )
 
-    def _send_final_eof(self, client_id, gateway_id, eof):
+    def _send_final_eof(self, client_id, eof):
         self._output_exchange.send(
             internal.serialize_msg(
                 internal.MsgType.EOF,
                 client_id,
-                gateway_id,
                 eof,
-                message_id=eof_id(client_id, gateway_id),
+                message_id=eof_id(client_id),
             ),
             routing_key=f"{self.config.output_node_prefix}0",
         )
 
     def _add_edge(
-        self, client_id, gateway_id, bank, account, other_bank, other_account, is_sender
+        self, client_id, bank, account, other_bank, other_account, is_sender
     ):
         in_accounts, out_accounts = self._account_edges.setdefault(
-            (client_id, gateway_id), {}
+            (client_id), {}
         ).setdefault((bank, account), (set(), set()))
         if is_sender:
             out_accounts.add((other_bank, other_account))
         else:
             in_accounts.add((other_bank, other_account))
 
-    def _handle_data_message(self, _, client_id, gateway_id, payload):
-        super()._handle_data_message(_, client_id, gateway_id, payload)
+    def _handle_data_message(self, _, client_id, payload):
+        super()._handle_data_message(_, client_id, payload)
         delta = [
             [e.bank, e.account, e.other_bank, e.other_account, e.is_sender]
             for e in payload
         ]
-        self._apply_delta(client_id, gateway_id, delta)
+        self._apply_delta(client_id, delta)
         return delta
 
-    def _apply_delta(self, client_id, gateway_id, delta):
+    def _apply_delta(self, client_id, delta):
         for bank, account, other_bank, other_account, is_sender in delta:
             self._add_edge(
-                client_id, gateway_id, bank, account, other_bank, other_account, is_sender
+                client_id, bank, account, other_bank, other_account, is_sender
             )
 
-    def _state_as_delta(self, client_id, gateway_id):
+    def _state_as_delta(self, client_id):
         edges = []
         for (bank, account), (in_accounts, out_accounts) in self._account_edges.get(
-            (client_id, gateway_id), {}
+            (client_id), {}
         ).items():
             for other_bank, other_account in in_accounts:
                 edges.append([bank, account, other_bank, other_account, False])

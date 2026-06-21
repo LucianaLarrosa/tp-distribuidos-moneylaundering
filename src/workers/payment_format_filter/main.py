@@ -36,18 +36,17 @@ class PaymentFormatFilter(StatelessWorker):
     def _output_middleware(self):
         return self._output_queue
 
-    def _send_final_eof(self, client_id, gateway_id, eof):
+    def _send_final_eof(self, client_id, eof):
         self._output_queue.send(
             internal.serialize_msg(
                 internal.MsgType.EOF,
                 client_id,
-                gateway_id,
                 eof,
-                message_id=eof_id(client_id, gateway_id),
+                message_id=eof_id(client_id),
             )
         )
 
-    def _handle_data_message(self, _, client_id, gateway_id, payload):
+    def _handle_data_message(self, _, client_id, payload):
         """
         Handle incoming data messages by filtering transactions based on their payment format and sending the valid transactions to the output queue.
         """
@@ -71,7 +70,6 @@ class PaymentFormatFilter(StatelessWorker):
             self._output_queue,
             internal.MsgType.CURRENCY_CONVERSION_BATCH,
             client_id,
-            gateway_id,
             filtered,
         )
 

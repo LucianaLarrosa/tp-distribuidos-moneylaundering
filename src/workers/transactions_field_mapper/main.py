@@ -44,13 +44,12 @@ class TransactionsFieldMapper(StatelessWorker):
     def _output_middleware(self):
         return self._output_exchange
 
-    def _send_final_eof(self, client_id, gateway_id, eof):
+    def _send_final_eof(self, client_id, eof):
         msg = internal.serialize_msg(
             internal.MsgType.EOF,
             client_id,
-            gateway_id,
             eof,
-            message_id=eof_id(client_id, gateway_id),
+            message_id=eof_id(client_id),
         )
         self._output_exchange.send(msg, routing_key=self.config.output_routing_key_eof)
         self._bank_max_exchange.send(msg, routing_key=BANK_MAX_EOF_SHARD)
@@ -59,7 +58,7 @@ class TransactionsFieldMapper(StatelessWorker):
         super().shutdown()
         self._bank_max_exchange.close()
 
-    def _handle_data_message(self, _, client_id, gateway_id, payload):
+    def _handle_data_message(self, _, client_id, payload):
         """
         Parse the raw batch into Transactions and publish it to the USD-only
         route and the all-transactions route.
@@ -75,7 +74,6 @@ class TransactionsFieldMapper(StatelessWorker):
             self._output_exchange,
             internal.MsgType.TRANSACTION_BATCH,
             client_id,
-            gateway_id,
             usd_transactions,
             routing_key=self.config.output_routing_key_usd,
         )
@@ -83,7 +81,6 @@ class TransactionsFieldMapper(StatelessWorker):
             self._output_exchange,
             internal.MsgType.TRANSACTION_BATCH,
             client_id,
-            gateway_id,
             transactions,
             routing_key=self.config.output_routing_key_all,
         )
@@ -91,7 +88,6 @@ class TransactionsFieldMapper(StatelessWorker):
             self._bank_max_exchange,
             internal.MsgType.TRANSACTION_BATCH,
             client_id,
-            gateway_id,
             usd_transactions,
             routing_key=str(
                 shard_of(self._current_message_id, self.config.bank_max_node_count)

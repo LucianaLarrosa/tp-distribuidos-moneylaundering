@@ -14,7 +14,7 @@ from config import Config
 class LowAmountAggregator(StatefulCoordinatedWorker):
     def __init__(self, config: Config):
         super().__init__(config)
-        self._counts = {}  # (client_id, gateway_id) -> count
+        self._counts = {}  # (client_id) -> count
 
         self._input_queue = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
@@ -55,56 +55,52 @@ class LowAmountAggregator(StatefulCoordinatedWorker):
     def _ring_size(self):
         return self.config.ring_size
 
-    def _flush_data(self, client_id, gateway_id):
+    def _flush_data(self, client_id):
         """
-        Flush any buffered data by sending the count of low amount transactions for the given client_id and gateway_id to the output queue.
+        Flush any buffered data by sending the count of low amount transactions for the given client_id to the output queue.
         """
-        count = self._counts.pop((client_id, gateway_id), 0)
+        count = self._counts.pop(client_id, 0)
         self._send(
             self._output_queue,
             internal.MsgType.COUNT,
             client_id,
-            gateway_id,
             Count(count=count),
-            message_id=flush_id(self.config.node_id, client_id, gateway_id, 0),
+            message_id=flush_id(self.config.node_id, client_id, 0),
         )
-        self._increment_sent_count(client_id, gateway_id)
+        self._increment_sent_count(client_id)
 
-    def _send_final_eof(self, client_id, gateway_id, eof):
+    def _send_final_eof(self, client_id, eof):
         self._output_queue.send(
             internal.serialize_msg(
                 internal.MsgType.EOF,
                 client_id,
-                gateway_id,
                 eof,
-                message_id=eof_id(client_id, gateway_id),
+                message_id=eof_id(client_id),
             )
         )
 
-    def _handle_data_message(self, _, client_id, gateway_id, payload):
+    def _handle_data_message(self, _, client_id, payload):
         """
         Handle incoming data messages by counting the number of transactions with amounts below the configured maximum amount.
         """
-        client_gateway_key = (client_id, gateway_id)
         transaction_count = sum(
             1
             for transaction in payload
             if transaction.amount < self.config.amount_threshold
         )
-        self._counts[client_gateway_key] = (
-            self._counts.get(client_gateway_key, 0) + transaction_count
+        self._counts[client_id] = (
+            self._counts.get(client_id, 0) + transaction_count
         )
-        super()._handle_data_message(_, client_id, gateway_id, payload)
+        super()._handle_data_message(_, client_id, payload)
         return {"count": transaction_count}
 
-    def _apply_delta(self, client_id, gateway_id, delta):
-        client_gateway_key = (client_id, gateway_id)
-        self._counts[client_gateway_key] = (
-            self._counts.get(client_gateway_key, 0) + delta["count"]
+    def _apply_delta(self, client_id, delta):
+        self._counts[client_id] = (
+            self._counts.get(client_id, 0) + delta["count"]
         )
 
-    def _state_as_delta(self, client_id, gateway_id):
-        return {"count": self._counts.get((client_id, gateway_id), 0)}
+    def _state_as_delta(self, client_id):
+        return {"count": self._counts.get(client_id, 0)}
 
 
 def main():

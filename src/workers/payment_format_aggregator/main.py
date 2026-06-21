@@ -58,8 +58,8 @@ class PaymentFormatAggregator(StatefulCoordinatedWorker):
     def _shard_routing_key(self, shard_id):
         return str(shard_id)
 
-    def _flow_key(self, client_id, gateway_id):
-        return (client_id, gateway_id)
+    def _flow_key(self, client_id):
+        return client_id
 
     def _payment_format_key(self, payment_format):
         return payment_format.strip().lower()
@@ -67,8 +67,8 @@ class PaymentFormatAggregator(StatefulCoordinatedWorker):
     def _has_required_fields(self, tx):
         return tx.payment_format is not None and tx.amount is not None
 
-    def _handle_data_message(self, _, client_id, gateway_id, transaction_batch):
-        super()._handle_data_message(_, client_id, gateway_id, transaction_batch)
+    def _handle_data_message(self, _, client_id, transaction_batch):
+        super()._handle_data_message(_, client_id, transaction_batch)
         delta = {}
         for transaction in transaction_batch:
             if not self._has_required_fields(transaction):
@@ -76,25 +76,25 @@ class PaymentFormatAggregator(StatefulCoordinatedWorker):
             payment_format = self._payment_format_key(transaction.payment_format)
             total_amount, count = delta.get(payment_format, (0.0, 0))
             delta[payment_format] = [total_amount + transaction.amount, count + 1]
-        self._apply_delta(client_id, gateway_id, delta)
+        self._apply_delta(client_id, delta)
         return delta
 
-    def _apply_delta(self, client_id, gateway_id, delta):
-        flow_totals = self._totals.setdefault(self._flow_key(client_id, gateway_id), {})
+    def _apply_delta(self, client_id, delta):
+        flow_totals = self._totals.setdefault(self._flow_key(client_id), {})
         for payment_format, (total_amount, count) in delta.items():
             cur_total, cur_count = flow_totals.get(payment_format, (0.0, 0))
             flow_totals[payment_format] = (cur_total + total_amount, cur_count + count)
 
-    def _state_as_delta(self, client_id, gateway_id):
+    def _state_as_delta(self, client_id):
         return {
             payment_format: [total_amount, count]
             for payment_format, (total_amount, count) in self._totals.get(
-                self._flow_key(client_id, gateway_id), {}
+                self._flow_key(client_id), {}
             ).items()
         }
 
-    def _flush_data(self, client_id, gateway_id):
-        flow_totals = self._totals.pop(self._flow_key(client_id, gateway_id), {})
+    def _flush_data(self, client_id):
+        flow_totals = self._totals.pop(self._flow_key(client_id), {})
         partials = [
             PaymentFormatPartial(
                 payment_format=payment_format,
@@ -107,21 +107,19 @@ class PaymentFormatAggregator(StatefulCoordinatedWorker):
             self._output_exchange,
             internal.MsgType.PAYMENT_FORMAT_PARTIAL_BATCH,
             client_id,
-            gateway_id,
             partials,
             key_of=lambda partial: partial.payment_format,
             num_shards=self.config.num_shards,
             batch_size=self.config.batch_size,
         )
 
-    def _send_final_eof(self, client_id, gateway_id, eof):
+    def _send_final_eof(self, client_id, eof):
         self._output_exchange.send(
             internal.serialize_msg(
                 internal.MsgType.EOF,
                 client_id,
-                gateway_id,
                 eof,
-                message_id=eof_id(client_id, gateway_id),
+                message_id=eof_id(client_id),
             ),
             routing_key=self._shard_routing_key(0),
         )

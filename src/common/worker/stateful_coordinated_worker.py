@@ -12,18 +12,18 @@ class StatefulCoordinatedWorker(RingCoordinatedWorker):
         super().__init__(config)
         self._sent_count = (
             {}
-        )  # (client_id, gateway_id) -> sent_count | actual total sent count
+        )  # client_id -> sent_count | actual total sent count
         self._partial_sent_count = (
             {}
-        )  # (client_id, gateway_id) -> partial_sent_count | previous sent count sent to ring
+        )  # client_id -> partial_sent_count | previous sent count sent to ring
         self._sent_count_lock = threading.Lock()
 
-    def _get_total_sent_count(self, client_id, gateway_id, current_total):
+    def _get_total_sent_count(self, client_id, current_total):
         """
-        Get the total sent count for the given client_id and gateway_id. A stateful-coordinated worker tracks sent counts, so this method returns the calculated total sent count.
+        Get the total sent count for the given client_id. A stateful-coordinated worker tracks sent counts, so this method returns the calculated total sent count.
         """
         return self._get_total_count(
-            (client_id, gateway_id),
+            client_id,
             self._sent_count,
             self._partial_sent_count,
             self._sent_count_lock,
@@ -36,39 +36,36 @@ class StatefulCoordinatedWorker(RingCoordinatedWorker):
         """
         return ring_eof.total_sent_count
 
-    def _increment_sent_count(self, client_id, gateway_id):
+    def _increment_sent_count(self, client_id):
         with self._sent_count_lock:
-            self._sent_count[(client_id, gateway_id)] = (
-                self._sent_count.get((client_id, gateway_id), 0) + 1
+            self._sent_count[client_id] = (
+                self._sent_count.get(client_id, 0) + 1
             )
 
-    def _control_state_snapshot(self, client_id, gateway_id):
-        snapshot = super()._control_state_snapshot(client_id, gateway_id)
-        key = (client_id, gateway_id)
-        snapshot["sent_count"] = self._sent_count.get(key, 0)
-        snapshot["partial_sent"] = self._partial_sent_count.get(key, 0)
+    def _control_state_snapshot(self, client_id):
+        snapshot = super()._control_state_snapshot(client_id)
+        snapshot["sent_count"] = self._sent_count.get(client_id, 0)
+        snapshot["partial_sent"] = self._partial_sent_count.get(client_id, 0)
         return snapshot
 
-    def _restore_control_state(self, client_id, gateway_id, snapshot):
-        super()._restore_control_state(client_id, gateway_id, snapshot)
-        key = (client_id, gateway_id)
-        self._sent_count[key] = snapshot["sent_count"]
-        self._partial_sent_count[key] = snapshot["partial_sent"]
+    def _restore_control_state(self, client_id, snapshot):
+        super()._restore_control_state(client_id, snapshot)
+        self._sent_count[client_id] = snapshot["sent_count"]
+        self._partial_sent_count[client_id] = snapshot["partial_sent"]
 
     def _flow_keys(self):
         keys = super()._flow_keys()
         return keys | set(self._sent_count) | set(self._partial_sent_count)
 
-    def _snapshot_flow(self, client_id, gateway_id):
-        record = super()._snapshot_flow(client_id, gateway_id)
-        key = (client_id, gateway_id)
-        record["sent"] = self._sent_count.get(key, 0)
-        record["partial_sent"] = self._partial_sent_count.get(key, 0)
+    def _snapshot_flow(self, client_id):
+        record = super()._snapshot_flow(client_id)
+        record["sent"] = self._sent_count.get(client_id, 0)
+        record["partial_sent"] = self._partial_sent_count.get(client_id, 0)
         return record
 
     def _restore_snapshot(self, record):
         super()._restore_snapshot(record)
-        key = (record["c"], record["g"])
+        key = record["c"]
         self._sent_count[key] = record["sent"]
         self._partial_sent_count[key] = record["partial_sent"]
 
@@ -77,7 +74,6 @@ class StatefulCoordinatedWorker(RingCoordinatedWorker):
         out_middleware,
         msg_type,
         client_id,
-        gateway_id,
         items,
         key_of,
         num_shards,
@@ -104,9 +100,8 @@ class StatefulCoordinatedWorker(RingCoordinatedWorker):
                     out_middleware,
                     msg_type,
                     client_id,
-                    gateway_id,
                     batch,
                     routing_key=routing_key_for(shard),
-                    message_id=flush_id(self._node_id, client_id, gateway_id, bucket),
+                    message_id=flush_id(self._node_id, client_id, bucket),
                 )
-                self._increment_sent_count(client_id, gateway_id)
+                self._increment_sent_count(client_id)

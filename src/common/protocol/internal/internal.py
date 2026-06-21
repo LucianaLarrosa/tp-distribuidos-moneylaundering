@@ -46,10 +46,8 @@ class MsgType:
 # ---------- API ----------
 
 
-def serialize_msg(msg_type, client_id, gateway_id, *args, message_id=""):
-    env = pb.Envelope(
-        client_id=client_id, gateway_id=gateway_id, message_id=message_id
-    )
+def serialize_msg(msg_type, client_id, *args, message_id=""):
+    env = pb.Envelope(client_id=client_id, message_id=message_id)
     SERIALIZERS[msg_type](env, *args)
     return env.SerializeToString()
 
@@ -59,7 +57,7 @@ def deserialize_msg(data):
     env.ParseFromString(data)
     payload_type = TYPES[env.WhichOneof("payload")]
     payload = DESERIALIZERS[payload_type](env)
-    return payload_type, env.client_id, env.gateway_id, payload, env.message_id
+    return payload_type, env.client_id, payload, env.message_id
 
 
 # ---------- traducción de batches ----------

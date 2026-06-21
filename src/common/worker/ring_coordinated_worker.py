@@ -15,10 +15,10 @@ class RingCoordinatedWorker(Worker):
         super().__init__(config)
         self._processed_counts = (
             {}
-        )  # (client_id, gateway_id) -> processed_count | actual total processed count
+        )  # client_id -> processed_count | actual total processed count
         self._partial_processed_count = (
             {}
-        )  # (client_id, gateway_id) -> partial_processed_count | previous process count sent to ring
+        )  # client_id -> partial_processed_count | previous process count sent to ring
         self._processed_counts_lock = threading.Lock()
         self._control_thread = None
 
@@ -65,11 +65,11 @@ class RingCoordinatedWorker(Worker):
         pass
 
     @abstractmethod
-    def _get_total_sent_count(self, _client_id, _gateway_id, current_total):
+    def _get_total_sent_count(self, _client_id, current_total):
         pass
 
     @abstractmethod
-    def _flush_data(self, client_id, gateway_id):
+    def _flush_data(self, client_id):
         pass
 
     @abstractmethod
@@ -98,18 +98,18 @@ class RingCoordinatedWorker(Worker):
             partial_dict[key] = count
         return current_total + count - partial
 
-    def _increment_processed_count(self, client_id, gateway_id):
+    def _increment_processed_count(self, client_id):
         with self._processed_counts_lock:
-            self._processed_counts[(client_id, gateway_id)] = (
-                self._processed_counts.get((client_id, gateway_id), 0) + 1
+            self._processed_counts[client_id] = (
+                self._processed_counts.get(client_id, 0) + 1
             )
 
-    def _update_ring_eof(self, client_id, gateway_id, ring_eof):
+    def _update_ring_eof(self, client_id, ring_eof):
         """
         Update the RING_EOF message with the processed and sent counts and determine if this node should be the coordinator.
         """
         total_processed_count = self._get_total_count(
-            (client_id, gateway_id),
+            client_id,
             self._processed_counts,
             self._partial_processed_count,
             self._processed_counts_lock,
@@ -123,12 +123,12 @@ class RingCoordinatedWorker(Worker):
             total_processed_count=total_processed_count,
             coordinator_id=coordinator_id,
             total_sent_count=self._get_total_sent_count(
-                client_id, gateway_id, ring_eof.total_sent_count or 0
+                client_id, ring_eof.total_sent_count or 0
             ),
         )
 
     def _handle_control_eof_message(
-        self, client_id, gateway_id, ring_eof, in_message_id="", output_exchange=None
+        self, client_id, ring_eof, in_message_id="", output_exchange=None
     ):
         """
         Handle a RING_EOF message by either forwarding it to the next node in the ring, flushing data and sending an EOF to the output middleware if this node is the coordinator.
@@ -137,35 +137,33 @@ class RingCoordinatedWorker(Worker):
             output_exchange = self._control_output_control_middleware
 
         if ring_eof.coordinator_id is None:
-            ring_eof = self._update_ring_eof(client_id, gateway_id, ring_eof)
+            ring_eof = self._update_ring_eof(client_id, ring_eof)
             if ring_eof.coordinator_id == self._node_id:
                 # counting -> became coordinator: start the flush phase
-                out_message_id = ring_id(client_id, gateway_id, RING_PHASE_FLUSH, 0)
+                out_message_id = ring_id(client_id, RING_PHASE_FLUSH, 0)
             else:
                 out_message_id = ring_id(
                     client_id,
-                    gateway_id,
                     RING_PHASE_COUNT,
                     ring_seq_of(in_message_id) + 1,
                 )
         else:
-            self._flush_data(client_id, gateway_id)
+            self._flush_data(client_id)
             ring_eof.total_sent_count = self._get_total_sent_count(
-                client_id, gateway_id, ring_eof.total_sent_count or 0
+                client_id, ring_eof.total_sent_count or 0
             )
             if ring_eof.coordinator_id == self._node_id:
                 self._send_final_eof(
-                    client_id, gateway_id, EOF(self._get_final_eof_count(ring_eof))
+                    client_id, EOF(self._get_final_eof_count(ring_eof))
                 )
                 return
             out_message_id = ring_id(
-                client_id, gateway_id, RING_PHASE_FLUSH, ring_seq_of(in_message_id) + 1
+                client_id, RING_PHASE_FLUSH, ring_seq_of(in_message_id) + 1
             )
         output_exchange.send(
             internal.serialize_msg(
                 internal.MsgType.RING_EOF,
                 client_id,
-                gateway_id,
                 ring_eof,
                 message_id=out_message_id,
             ),
@@ -174,27 +172,20 @@ class RingCoordinatedWorker(Worker):
 
     def _handle_control_message(self, message, ack, nack):
         try:
-            _, client_id, gateway_id, ring_eof, message_id = internal.deserialize_msg(
-                message
-            )
+            _, client_id, ring_eof, message_id = internal.deserialize_msg(message)
             with self._state_lock:
-                seen = self._seen.setdefault(
-                    (CONTROL_CHANNEL, client_id, gateway_id), set()
-                )
+                seen = self._seen.setdefault((CONTROL_CHANNEL, client_id), set())
                 if message_id in seen:
                     ack()
                     return
-                self._handle_control_eof_message(
-                    client_id, gateway_id, ring_eof, message_id
-                )
+                self._handle_control_eof_message(client_id, ring_eof, message_id)
                 seen.add(message_id)
                 self._state_store.append(
                     {
                         "ch": CONTROL_CHANNEL,
                         "mid": message_id,
                         "c": client_id,
-                        "g": gateway_id,
-                        "ring": self._control_state_snapshot(client_id, gateway_id),
+                        "ring": self._control_state_snapshot(client_id),
                     }
                 )
                 self._note_append()
@@ -203,39 +194,34 @@ class RingCoordinatedWorker(Worker):
             nack()
             raise
 
-    def _control_state_snapshot(self, client_id, gateway_id):
+    def _control_state_snapshot(self, client_id):
         return {
-            "partial_processed": self._partial_processed_count.get(
-                (client_id, gateway_id), 0
-            )
+            "partial_processed": self._partial_processed_count.get(client_id, 0)
         }
 
-    def _restore_control_state(self, client_id, gateway_id, snapshot):
-        self._partial_processed_count[(client_id, gateway_id)] = snapshot[
-            "partial_processed"
-        ]
+    def _restore_control_state(self, client_id, snapshot):
+        self._partial_processed_count[client_id] = snapshot["partial_processed"]
 
     def _flow_keys(self):
         keys = super()._flow_keys()
         return keys | set(self._partial_processed_count) | set(self._processed_counts)
 
-    def _snapshot_flow(self, client_id, gateway_id):
-        record = super()._snapshot_flow(client_id, gateway_id)
-        key = (client_id, gateway_id)
-        record["processed"] = self._processed_counts.get(key, 0)
-        record["partial_processed"] = self._partial_processed_count.get(key, 0)
+    def _snapshot_flow(self, client_id):
+        record = super()._snapshot_flow(client_id)
+        record["processed"] = self._processed_counts.get(client_id, 0)
+        record["partial_processed"] = self._partial_processed_count.get(client_id, 0)
         return record
 
     def _restore_snapshot(self, record):
         super()._restore_snapshot(record)
-        key = (record["c"], record["g"])
+        key = record["c"]
         self._processed_counts[key] = record["processed"]
         self._partial_processed_count[key] = record["partial_processed"]
 
     def _get_next_node_id(self):
         return (self._node_id + 1) % self._ring_size
 
-    def _handle_eof_message(self, client_id, gateway_id, eof, output_exchange=None):
+    def _handle_eof_message(self, client_id, eof, output_exchange=None):
         """
         Handle an EOF message by sending a RING_EOF to the next node in the ring.
         """
@@ -243,7 +229,7 @@ class RingCoordinatedWorker(Worker):
             output_exchange = self._output_control_middleware
 
         total_processed_count = self._get_total_count(
-            (client_id, gateway_id),
+            client_id,
             self._processed_counts,
             self._partial_processed_count,
             self._processed_counts_lock,
@@ -253,28 +239,25 @@ class RingCoordinatedWorker(Worker):
             internal.serialize_msg(
                 internal.MsgType.RING_EOF,
                 client_id,
-                gateway_id,
                 RingEOF(
                     expected_count=eof.message_count,
                     total_processed_count=total_processed_count,
-                    total_sent_count=self._get_total_sent_count(
-                        client_id, gateway_id, 0
-                    ),
+                    total_sent_count=self._get_total_sent_count(client_id, 0),
                 ),
-                message_id=ring_id(client_id, gateway_id, RING_PHASE_COUNT, 0),
+                message_id=ring_id(client_id, RING_PHASE_COUNT, 0),
             ),
             routing_key=self._get_ring_routing_key(self._get_next_node_id()),
         )
 
-    def _handle_data_message(self, msg_type, client_id, gateway_id, payload):
-        self._increment_processed_count(client_id, gateway_id)
+    def _handle_data_message(self, msg_type, client_id, payload):
+        self._increment_processed_count(client_id)
 
     def _replay_record(self, record):
         super()._replay_record(record)
         if record["ch"] == MAIN_CHANNEL and not record.get("eof"):
-            self._increment_processed_count(record["c"], record["g"])
+            self._increment_processed_count(record["c"])
         elif record["ch"] == CONTROL_CHANNEL:
-            self._restore_control_state(record["c"], record["g"], record["ring"])
+            self._restore_control_state(record["c"], record["ring"])
 
     def start(self):
         self._recover()

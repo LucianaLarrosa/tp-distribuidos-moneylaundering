@@ -103,8 +103,8 @@ class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
     def _control_output_middleware(self):
         return self._control_output_exchange
 
-    def _flow_key(self, client_id, gateway_id):
-        return (client_id, gateway_id)
+    def _flow_key(self, client_id):
+        return client_id
 
     def _get_flow_lock(self, key):
         with self._flow_locks_guard:
@@ -137,7 +137,7 @@ class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
         return payment_format.strip().lower()
 
     def _filter_and_emit(
-        self, client_id, gateway_id, transactions, avgs, exchange, message_id
+        self, client_id, transactions, avgs, exchange, message_id
     ):
         result_batch = []
         for tx in transactions:
@@ -153,7 +153,6 @@ class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
             exchange,
             internal.MsgType.Q3_RESULT_BATCH,
             client_id,
-            gateway_id,
             result_batch,
             routing_key=client_id,
             message_id=message_id,
@@ -167,12 +166,12 @@ class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
             and tx.from_account is not None
         )
 
-    def _handle_data_message(self, _, client_id, gateway_id, batch):
+    def _handle_data_message(self, _, client_id, batch):
         batch = [tx for tx in batch if self._has_required_anomaly_fields(tx)]
-        key = self._flow_key(client_id, gateway_id)
+        key = self._flow_key(client_id)
         avgs = None
         with self._get_flow_lock(key):
-            super()._handle_data_message(_, client_id, gateway_id, batch)
+            super()._handle_data_message(_, client_id, batch)
             if self._side_input.is_ready(key):
                 avgs = self._avgs.get(key, {})
             else:
@@ -180,7 +179,6 @@ class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
                 return
         self._filter_and_emit(
             client_id,
-            gateway_id,
             batch,
             avgs,
             self._output_exchange,
@@ -193,22 +191,21 @@ class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
             for entry in payload
         ]
 
-    def _apply_side_delta(self, client_id, gateway_id, delta):
-        key = self._flow_key(client_id, gateway_id)
+    def _apply_side_delta(self, client_id, delta):
+        key = self._flow_key(client_id)
         with self._get_flow_lock(key):
             table = self._avgs.setdefault(key, {})
             for payment_format, avg in delta:
                 table[payment_format] = avg
 
-    def _on_side_input_ready(self, client_id, gateway_id):
-        key = self._flow_key(client_id, gateway_id)
+    def _on_side_input_ready(self, client_id):
+        key = self._flow_key(client_id)
         with self._get_flow_lock(key):
             avgs = self._avgs.get(key, {})
             self._spill.drain(
                 key,
                 lambda entry: self._filter_and_emit(
                     client_id,
-                    gateway_id,
                     entry[1],
                     avgs,
                     self._side_output_exchange,
@@ -222,15 +219,14 @@ class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
         with self._flow_locks_guard:
             self._flow_locks.pop(key, None)
 
-    def _flush_data(self, client_id, gateway_id):
-        key = self._flow_key(client_id, gateway_id)
+    def _flush_data(self, client_id):
+        key = self._flow_key(client_id)
         with self._get_flow_lock(key):
             avgs = self._avgs.get(key, {})
             self._spill.drain(
                 key,
                 lambda entry: self._filter_and_emit(
                     client_id,
-                    gateway_id,
                     entry[1],
                     avgs,
                     self._control_output_exchange,
@@ -239,15 +235,14 @@ class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
             )
             self._drop_flow_state(key)
 
-    def _send_final_eof(self, client_id, gateway_id, eof):
+    def _send_final_eof(self, client_id, eof):
         self._control_output_exchange.send(
             internal.serialize_msg(
                 internal.MsgType.QUERY_END,
                 client_id,
-                gateway_id,
                 self.config.query_id,
                 eof.message_count,
-                message_id=eof_id(client_id, gateway_id, self.config.query_id),
+                message_id=eof_id(client_id, self.config.query_id),
             ),
             routing_key=client_id,
         )

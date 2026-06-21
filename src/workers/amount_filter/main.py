@@ -48,7 +48,7 @@ class AmountFilter(StatelessWorker):
         ]
         return all(getattr(data_record, field) is not None for field in required_fields)
 
-    def _handle_data_message(self, _, client_id, gateway_id, payload):
+    def _handle_data_message(self, _, client_id, payload):
         filtered = []
         for tx in payload:
             if not self._has_required_fields(tx):
@@ -67,20 +67,18 @@ class AmountFilter(StatelessWorker):
             self._output_exchange,
             internal.MsgType.Q1_RESULT_BATCH,
             client_id,
-            gateway_id,
             filtered,
             routing_key=client_id,
         )
 
-    def _send_final_eof(self, client_id, gateway_id, eof):
+    def _send_final_eof(self, client_id, eof):
         self._output_exchange.send(
             internal.serialize_msg(
                 internal.MsgType.QUERY_END,
                 client_id,
-                gateway_id,
                 self.config.query_id,
                 eof.message_count,
-                message_id=eof_id(client_id, gateway_id, self.config.query_id),
+                message_id=eof_id(client_id, self.config.query_id),
             ),
             routing_key=client_id,
         )

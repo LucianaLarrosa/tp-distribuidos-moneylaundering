@@ -105,8 +105,8 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
     def _side_input_prefix_key(self, node_id):
         return f"{self.config.side_input_node_prefix}{node_id}"
 
-    def _flow_key(self, client_id, gateway_id):
-        return (client_id, gateway_id)
+    def _flow_key(self, client_id):
+        return client_id
 
     def _deserialize_entry(self, line):
         obj = json.loads(line)
@@ -123,8 +123,8 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
     def _side_delta(self, payload):
         return [[str(int(bank.bank_id)), bank.name] for bank in payload]
 
-    def _apply_side_delta(self, client_id, gateway_id, delta):
-        key = self._flow_key(client_id, gateway_id)
+    def _apply_side_delta(self, client_id, delta):
+        key = self._flow_key(client_id)
         with self._bank_names_lock:
             bank_names = self._bank_names.setdefault(key, {})
             for bank_id, name in delta:
@@ -133,18 +133,17 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
                     bank_names[bank_id] = name
                 elif current != name:
                     logging.warning(
-                        "Bank id %s arrived with conflicting names for client %s/%s: %s / %s",
+                        "Bank id %s arrived with conflicting names for client %s: %s / %s",
                         bank_id,
                         client_id,
-                        gateway_id,
                         current,
                         name,
                     )
 
     def _map_and_emit(
-        self, client_id, gateway_id, bank_max_batch, exchange, message_id
+        self, client_id, bank_max_batch, exchange, message_id
     ):
-        key = self._flow_key(client_id, gateway_id)
+        key = self._flow_key(client_id)
         with self._bank_names_lock:
             bank_names = dict(self._bank_names.get(key, {}))
         mapped_batch = []
@@ -161,49 +160,45 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
             exchange,
             internal.MsgType.Q2_RESULT_BATCH,
             client_id,
-            gateway_id,
             mapped_batch,
             routing_key=client_id,
             message_id=message_id,
         )
 
-    def _handle_data_message(self, _, client_id, gateway_id, bank_max_batch):
-        key = self._flow_key(client_id, gateway_id)
+    def _handle_data_message(self, _, client_id, bank_max_batch):
+        key = self._flow_key(client_id)
         with self._get_flow_lock(key):
-            super()._handle_data_message(_, client_id, gateway_id, bank_max_batch)
+            super()._handle_data_message(_, client_id, bank_max_batch)
             if not self._side_input.is_ready(key):
                 self._spill.write(key, (self._current_message_id, bank_max_batch))
                 return
             self._map_and_emit(
                 client_id,
-                gateway_id,
                 bank_max_batch,
                 self._output_exchange,
                 message_id=self._current_message_id,
             )
 
-    def _on_side_input_ready(self, client_id, gateway_id):
-        key = self._flow_key(client_id, gateway_id)
+    def _on_side_input_ready(self, client_id):
+        key = self._flow_key(client_id)
         with self._get_flow_lock(key):
             self._spill.drain(
                 key,
                 lambda entry: self._map_and_emit(
                     client_id,
-                    gateway_id,
                     entry[1],
                     self._side_output_exchange,
                     message_id=entry[0],
                 ),
             )
 
-    def _flush_data(self, client_id, gateway_id):
-        key = self._flow_key(client_id, gateway_id)
+    def _flush_data(self, client_id):
+        key = self._flow_key(client_id)
         with self._get_flow_lock(key):
             self._spill.drain(
                 key,
                 lambda entry: self._map_and_emit(
                     client_id,
-                    gateway_id,
                     entry[1],
                     self._control_output_exchange,
                     message_id=entry[0],
@@ -215,15 +210,14 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
             with self._flow_locks_guard:
                 self._flow_locks.pop(key, None)
 
-    def _send_final_eof(self, client_id, gateway_id, eof):
+    def _send_final_eof(self, client_id, eof):
         self._control_output_exchange.send(
             internal.serialize_msg(
                 internal.MsgType.QUERY_END,
                 client_id,
-                gateway_id,
                 self.config.query_id,
                 eof.message_count,
-                message_id=eof_id(client_id, gateway_id, self.config.query_id),
+                message_id=eof_id(client_id, self.config.query_id),
             ),
             routing_key=client_id,
         )

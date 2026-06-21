@@ -15,7 +15,7 @@ class PathFrequencyFilter(StatefulCoordinatedWorker):
         super().__init__(config)
         self._paths = (
             {}
-        )  # (client_id, gateway_id) -> {(from_bank, from_account, to_bank, to_account): set((mid_bank, mid_account))}
+        )  # (client_id) -> {(from_bank, from_account, to_bank, to_account): set((mid_bank, mid_account))}
 
         self._input_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
@@ -75,13 +75,12 @@ class PathFrequencyFilter(StatefulCoordinatedWorker):
                 results.append(Q4Result(bank, account))
         return results
 
-    def _flush_data(self, client_id, gateway_id):
-        paths = self._paths.pop((client_id, gateway_id), {})
+    def _flush_data(self, client_id):
+        paths = self._paths.pop(client_id, {})
         self._flush_sharded(
             self._output_exchange,
             internal.MsgType.Q4_RESULT_BATCH,
             client_id,
-            gateway_id,
             self._create_results(paths),
             key_of=lambda result: f"{result.bank}.{result.account}",
             num_shards=self.config.output_node_count,
@@ -89,14 +88,13 @@ class PathFrequencyFilter(StatefulCoordinatedWorker):
             routing_key_for=lambda shard: f"{self.config.output_node_prefix}{shard}",
         )
 
-    def _send_final_eof(self, client_id, gateway_id, eof):
+    def _send_final_eof(self, client_id, eof):
         self._output_exchange.send(
             internal.serialize_msg(
                 internal.MsgType.EOF,
                 client_id,
-                gateway_id,
                 eof,
-                message_id=eof_id(client_id, gateway_id),
+                message_id=eof_id(client_id),
             ),
             routing_key=f"{self.config.output_node_prefix}0",
         )
@@ -104,7 +102,6 @@ class PathFrequencyFilter(StatefulCoordinatedWorker):
     def _add_path(
         self,
         client_id,
-        gateway_id,
         from_bank,
         from_account,
         to_bank,
@@ -112,24 +109,23 @@ class PathFrequencyFilter(StatefulCoordinatedWorker):
         mid_bank,
         mid_account,
     ):
-        self._paths.setdefault((client_id, gateway_id), {}).setdefault(
+        self._paths.setdefault(client_id, {}).setdefault(
             (from_bank, from_account, to_bank, to_account), set()
         ).add((mid_bank, mid_account))
 
-    def _handle_data_message(self, _, client_id, gateway_id, payload):
-        super()._handle_data_message(_, client_id, gateway_id, payload)
+    def _handle_data_message(self, _, client_id, payload):
+        super()._handle_data_message(_, client_id, payload)
         delta = [
             [p.from_bank, p.from_account, p.to_bank, p.to_account, p.mid_bank, p.mid_account]
             for p in payload
         ]
-        self._apply_delta(client_id, gateway_id, delta)
+        self._apply_delta(client_id, delta)
         return delta
 
-    def _apply_delta(self, client_id, gateway_id, delta):
+    def _apply_delta(self, client_id, delta):
         for from_bank, from_account, to_bank, to_account, mid_bank, mid_account in delta:
             self._add_path(
                 client_id,
-                gateway_id,
                 from_bank,
                 from_account,
                 to_bank,
@@ -138,14 +134,14 @@ class PathFrequencyFilter(StatefulCoordinatedWorker):
                 mid_account,
             )
 
-    def _state_as_delta(self, client_id, gateway_id):
+    def _state_as_delta(self, client_id):
         out = []
         for (
             from_bank,
             from_account,
             to_bank,
             to_account,
-        ), mid_accounts in self._paths.get((client_id, gateway_id), {}).items():
+        ), mid_accounts in self._paths.get(client_id, {}).items():
             for mid_bank, mid_account in mid_accounts:
                 out.append(
                     [from_bank, from_account, to_bank, to_account, mid_bank, mid_account]

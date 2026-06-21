@@ -100,18 +100,17 @@ class CurrencyMapper(StatelessWorker):
         )
         return round(float(amount) * (1.0 / rate), self._DECIMAL_PLACES)
 
-    def _send_final_eof(self, client_id, gateway_id, eof):
+    def _send_final_eof(self, client_id, eof):
         self._send(
             self._output_exchange,
             internal.MsgType.EOF,
             client_id,
-            gateway_id,
             eof,
             routing_key=EOF_SHARD,
-            message_id=eof_id(client_id, gateway_id),
+            message_id=eof_id(client_id),
         )
 
-    def _handle_data_message(self, _, client_id, gateway_id, payload):
+    def _handle_data_message(self, _, client_id, payload):
         converted = [
             TransactionAmount(
                 amount=self._resolve_rate(
@@ -125,7 +124,6 @@ class CurrencyMapper(StatelessWorker):
             self._output_exchange,
             internal.MsgType.AMOUNT_TRANSACTION_BATCH,
             client_id,
-            gateway_id,
             converted,
             routing_key=str(shard),
         )

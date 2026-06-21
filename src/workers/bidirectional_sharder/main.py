@@ -70,17 +70,16 @@ class BidirectionalSharder(SafeOutputCapable, StatefulCoordinatedWorker):
     def _shard_for(self, bank, account):
         return shard_of(f"{bank}.{account}", self.config.output_node_count)
 
-    def _flush_data(self, _client_id, _gateway_id):
+    def _flush_data(self, _client_id):
         pass
 
-    def _send_final_eof(self, client_id, gateway_id, eof):
+    def _send_final_eof(self, client_id, eof):
         self._control_output_exchange.send(
             internal.serialize_msg(
                 internal.MsgType.EOF,
                 client_id,
-                gateway_id,
                 eof,
-                message_id=eof_id(client_id, gateway_id),
+                message_id=eof_id(client_id),
             ),
             routing_key=f"{self.config.output_node_prefix}0",
         )
@@ -119,26 +118,25 @@ class BidirectionalSharder(SafeOutputCapable, StatefulCoordinatedWorker):
                 )
         return edges_by_shard
 
-    def _handle_data_message(self, msg_type, client_id, gateway_id, payload):
+    def _handle_data_message(self, msg_type, client_id, payload):
         sent = 0
         for shard, edges in self._create_edges_by_shard(payload).items():
             self._send(
                 self._output_exchange,
                 internal.MsgType.ACCOUNT_EDGE_BATCH,
                 client_id,
-                gateway_id,
                 edges,
                 routing_key=f"{self.config.output_node_prefix}{shard}",
             )
-            self._increment_sent_count(client_id, gateway_id)
+            self._increment_sent_count(client_id)
             sent += 1
-        super()._handle_data_message(msg_type, client_id, gateway_id, payload)
+        super()._handle_data_message(msg_type, client_id, payload)
         return {"sent": sent}
 
-    def _apply_delta(self, client_id, gateway_id, delta):
+    def _apply_delta(self, client_id, delta):
         with self._sent_count_lock:
-            self._sent_count[(client_id, gateway_id)] = (
-                self._sent_count.get((client_id, gateway_id), 0) + delta["sent"]
+            self._sent_count[client_id] = (
+                self._sent_count.get(client_id, 0) + delta["sent"]
             )
 
 

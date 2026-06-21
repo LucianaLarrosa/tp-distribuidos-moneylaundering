@@ -15,7 +15,7 @@ class BankMaxAggregator(StatefulCoordinatedWorker):
         super().__init__(config)
         self._local_max = (
             {}
-        )  # (client_id, gateway_id) -> {from_bank: tx_with_max_amount}
+        )  # (client_id) -> {from_bank: tx_with_max_amount}
 
         self._input_queue = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
@@ -71,8 +71,8 @@ class BankMaxAggregator(StatefulCoordinatedWorker):
     def _beats(amount, account, cur_amount, cur_account):
         return amount > cur_amount or (amount == cur_amount and account < cur_account)
 
-    def _handle_data_message(self, _, client_id, gateway_id, transaction_batch):
-        super()._handle_data_message(_, client_id, gateway_id, transaction_batch)
+    def _handle_data_message(self, _, client_id, transaction_batch):
+        super()._handle_data_message(_, client_id, transaction_batch)
         delta = {}
         for transaction in transaction_batch:
             if not self.__has_required_anomaly_fields(transaction):
@@ -83,11 +83,11 @@ class BankMaxAggregator(StatefulCoordinatedWorker):
                 transaction.amount, transaction.from_account, current[1], current[0]
             ):
                 delta[from_bank] = [transaction.from_account, transaction.amount]
-        self._apply_delta(client_id, gateway_id, delta)
+        self._apply_delta(client_id, delta)
         return delta
 
-    def _apply_delta(self, client_id, gateway_id, delta):
-        flow_max = self._local_max.setdefault((client_id, gateway_id), {})
+    def _apply_delta(self, client_id, delta):
+        flow_max = self._local_max.setdefault(client_id, {})
         for from_bank, (from_account, amount) in delta.items():
             current = flow_max.get(from_bank)
             if current is None or self._beats(
@@ -99,35 +99,33 @@ class BankMaxAggregator(StatefulCoordinatedWorker):
                     amount=amount,
                 )
 
-    def _state_as_delta(self, client_id, gateway_id):
+    def _state_as_delta(self, client_id):
         return {
             from_bank: [bank_max.from_account, bank_max.amount]
             for from_bank, bank_max in self._local_max.get(
-                (client_id, gateway_id), {}
+                (client_id), {}
             ).items()
         }
 
-    def _flush_data(self, client_id, gateway_id):
-        flow_max = self._local_max.pop((client_id, gateway_id), {})
+    def _flush_data(self, client_id):
+        flow_max = self._local_max.pop(client_id, {})
         self._flush_sharded(
             self._output_exchange,
             internal.MsgType.BANK_MAX_PARTIAL_BATCH,
             client_id,
-            gateway_id,
             list(flow_max.values()),
             key_of=lambda bank_max: bank_max.from_bank,
             num_shards=self.config.num_shards,
             batch_size=self.config.batch_size,
         )
 
-    def _send_final_eof(self, client_id, gateway_id, eof):
+    def _send_final_eof(self, client_id, eof):
         self._output_exchange.send(
             internal.serialize_msg(
                 internal.MsgType.EOF,
                 client_id,
-                gateway_id,
                 eof,
-                message_id=eof_id(client_id, gateway_id),
+                message_id=eof_id(client_id),
             ),
             routing_key=self._shard_routing_key(0),
         )

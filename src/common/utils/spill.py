@@ -10,8 +10,7 @@ class BatchSpill:
         os.makedirs(spill_dir, exist_ok=True)
 
     def _path(self, key):
-        a, b = key
-        return os.path.join(self._dir, f"{a}__{b}.jsonl")
+        return os.path.join(self._dir, f"{key}.jsonl")
 
     def _open(self, key):
         f = self._files.get(key)

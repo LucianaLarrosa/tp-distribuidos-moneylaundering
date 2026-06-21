@@ -43,16 +43,16 @@ class SideInputStatelessCoordinatedWorker(RingCoordinatedWorker):
         pass
 
     @abstractmethod
-    def _apply_side_delta(self, client_id, gateway_id, delta):
+    def _apply_side_delta(self, client_id, delta):
         pass
 
-    def _on_side_input_ready(self, client_id, gateway_id):
+    def _on_side_input_ready(self, client_id):
         pass
 
     def _compact(self):
         pass
 
-    def _get_total_sent_count(self, _client_id, _gateway_id, current_total):
+    def _get_total_sent_count(self, _client_id, current_total):
         return current_total
 
     def _get_final_eof_count(self, ring_eof):
@@ -60,38 +60,33 @@ class SideInputStatelessCoordinatedWorker(RingCoordinatedWorker):
 
     def _handle_side_message(self, message, ack, nack):
         try:
-            msg_type, client_id, gateway_id, payload, message_id = (
-                internal.deserialize_msg(message)
+            msg_type, client_id, payload, message_id = internal.deserialize_msg(
+                message
             )
-            key = (client_id, gateway_id)
             became_ready = False
             with self._state_lock:
-                seen = self._seen.setdefault(
-                    (SIDE_CHANNEL, client_id, gateway_id), set()
-                )
+                seen = self._seen.setdefault((SIDE_CHANNEL, client_id), set())
                 if message_id in seen:
                     ack()
                     return
                 if msg_type == self._side_batch_msg_type:
                     delta = self._side_delta(payload)
-                    self._apply_side_delta(client_id, gateway_id, delta)
-                    became_ready = self._side_input.track_batch(key)
+                    self._apply_side_delta(client_id, delta)
+                    became_ready = self._side_input.track_batch(client_id)
                     record = {
                         "ch": SIDE_CHANNEL,
                         "mid": message_id,
                         "c": client_id,
-                        "g": gateway_id,
                         "side": delta,
                     }
                 elif msg_type == internal.MsgType.EOF:
                     became_ready = self._side_input.set_expected(
-                        key, payload.message_count
+                        client_id, payload.message_count
                     )
                     record = {
                         "ch": SIDE_CHANNEL,
                         "mid": message_id,
                         "c": client_id,
-                        "g": gateway_id,
                         "side_eof": payload.message_count,
                     }
                 else:
@@ -102,39 +97,35 @@ class SideInputStatelessCoordinatedWorker(RingCoordinatedWorker):
                 self._state_store.append(record)
             ack()
             if became_ready:
-                self._mark_side_input_ready(client_id, gateway_id)
+                self._mark_side_input_ready(client_id)
         except Exception as e:
             logging.error("Error handling side-input message: %s", e)
             nack()
             raise
 
-    def _handle_eof_message(self, client_id, gateway_id, eof):
-        key = (client_id, gateway_id)
-        if not self._side_input.is_ready(key):
-            self._deferred_data_eofs[key] = eof
+    def _handle_eof_message(self, client_id, eof):
+        if not self._side_input.is_ready(client_id):
+            self._deferred_data_eofs[client_id] = eof
             self._state_store.append(
                 {
                     "ch": DEFER_CHANNEL,
                     "c": client_id,
-                    "g": gateway_id,
                     "kind": "data_eof",
                     "count": eof.message_count,
                 }
             )
             return
-        super()._handle_eof_message(client_id, gateway_id, eof)
+        super()._handle_eof_message(client_id, eof)
 
     def _handle_control_eof_message(
-        self, client_id, gateway_id, ring_eof, in_message_id="", output_exchange=None
+        self, client_id, ring_eof, in_message_id="", output_exchange=None
     ):
-        key = (client_id, gateway_id)
-        if not self._side_input.is_ready(key):
-            self._deferred_ring_eofs[key] = (ring_eof, in_message_id)
+        if not self._side_input.is_ready(client_id):
+            self._deferred_ring_eofs[client_id] = (ring_eof, in_message_id)
             self._state_store.append(
                 {
                     "ch": DEFER_CHANNEL,
                     "c": client_id,
-                    "g": gateway_id,
                     "kind": "ring",
                     "ring_eof": {
                         "expected_count": ring_eof.expected_count,
@@ -147,29 +138,27 @@ class SideInputStatelessCoordinatedWorker(RingCoordinatedWorker):
             )
             return
         super()._handle_control_eof_message(
-            client_id, gateway_id, ring_eof, in_message_id, output_exchange
+            client_id, ring_eof, in_message_id, output_exchange
         )
 
-    def _mark_side_input_ready(self, client_id, gateway_id):
-        self._on_side_input_ready(client_id, gateway_id)
-        self._flush_deferred(client_id, gateway_id)
+    def _mark_side_input_ready(self, client_id):
+        self._on_side_input_ready(client_id)
+        self._flush_deferred(client_id)
 
-    def _flush_deferred(self, client_id, gateway_id):
-        key = (client_id, gateway_id)
+    def _flush_deferred(self, client_id):
         with self._state_lock:
-            eof = self._deferred_data_eofs.pop(key, None)
-            deferred_ring = self._deferred_ring_eofs.pop(key, None)
+            eof = self._deferred_data_eofs.pop(client_id, None)
+            deferred_ring = self._deferred_ring_eofs.pop(client_id, None)
             if eof is None and deferred_ring is None:
                 return
             if eof is not None:
                 super()._handle_eof_message(
-                    client_id, gateway_id, eof, self._side_output_control_exchange
+                    client_id, eof, self._side_output_control_exchange
                 )
             if deferred_ring is not None:
                 ring_eof, in_message_id = deferred_ring
                 super()._handle_control_eof_message(
                     client_id,
-                    gateway_id,
                     ring_eof,
                     in_message_id,
                     self._side_output_control_exchange,
@@ -178,20 +167,19 @@ class SideInputStatelessCoordinatedWorker(RingCoordinatedWorker):
                 {
                     "ch": UNDEFER_CHANNEL,
                     "c": client_id,
-                    "g": gateway_id,
-                    "ring": self._control_state_snapshot(client_id, gateway_id),
+                    "ring": self._control_state_snapshot(client_id),
                 }
             )
 
     def _replay_record(self, record):
         super()._replay_record(record)
         ch = record["ch"]
-        key = (record["c"], record["g"])
+        key = record["c"]
         if ch == SIDE_CHANNEL:
             if "side_eof" in record:
                 self._side_input.set_expected(key, record["side_eof"])
             else:
-                self._apply_side_delta(record["c"], record["g"], record["side"])
+                self._apply_side_delta(record["c"], record["side"])
                 self._side_input.track_batch(key)
         elif ch == DEFER_CHANNEL:
             if record["kind"] == "data_eof":
@@ -204,14 +192,14 @@ class SideInputStatelessCoordinatedWorker(RingCoordinatedWorker):
         elif ch == UNDEFER_CHANNEL:
             self._deferred_data_eofs.pop(key, None)
             self._deferred_ring_eofs.pop(key, None)
-            self._restore_control_state(record["c"], record["g"], record["ring"])
+            self._restore_control_state(record["c"], record["ring"])
 
     def _reprocess_ready_deferred(self):
         keys = set(self._deferred_data_eofs) | set(self._deferred_ring_eofs)
-        for client_id, gateway_id in keys:
-            if self._side_input.is_ready((client_id, gateway_id)):
-                self._on_side_input_ready(client_id, gateway_id)
-                self._flush_deferred(client_id, gateway_id)
+        for client_id in keys:
+            if self._side_input.is_ready(client_id):
+                self._on_side_input_ready(client_id)
+                self._flush_deferred(client_id)
 
     def start(self):
         self._recover()

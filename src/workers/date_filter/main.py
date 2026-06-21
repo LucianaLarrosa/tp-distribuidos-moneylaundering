@@ -52,13 +52,12 @@ class DateFilter(StatelessWorker):
     def _output_middleware(self):
         return self._output_exchange
 
-    def _send_final_eof(self, client_id, gateway_id, eof):
+    def _send_final_eof(self, client_id, eof):
         msg = internal.serialize_msg(
             internal.MsgType.EOF,
             client_id,
-            gateway_id,
             eof,
-            message_id=eof_id(client_id, gateway_id),
+            message_id=eof_id(client_id),
         )
         self._output_exchange.send(msg, routing_key=self.config.output_routing_key_eof)
         self._payment_format_exchange.send(msg, routing_key=EOF_SHARD)
@@ -98,7 +97,7 @@ class DateFilter(StatelessWorker):
     def _shard_routing_key(self, node_count):
         return str(shard_of(self._current_message_id, node_count))
 
-    def _handle_data_message(self, _, client_id, gateway_id, payload):
+    def _handle_data_message(self, _, client_id, payload):
         usd_period_1_key = (
             f"{self.config.output_routing_key_usd}."
             f"{self.config.output_routing_key_period_1}"
@@ -123,7 +122,6 @@ class DateFilter(StatelessWorker):
             self._output_exchange,
             internal.MsgType.TRANSACTION_BATCH,
             client_id,
-            gateway_id,
             transactions_by_routing_key[all_period_1_key],
             routing_key=all_period_1_key,
         )
@@ -131,7 +129,6 @@ class DateFilter(StatelessWorker):
             self._bidirectional_sharder_exchange,
             internal.MsgType.TRANSACTION_BATCH,
             client_id,
-            gateway_id,
             transactions_by_routing_key[usd_period_1_key],
             routing_key=self._shard_routing_key(
                 self.config.bidirectional_sharder_node_count
@@ -141,7 +138,6 @@ class DateFilter(StatelessWorker):
             self._anomaly_filter_exchange,
             internal.MsgType.TRANSACTION_BATCH,
             client_id,
-            gateway_id,
             transactions_by_routing_key[usd_period_2_key],
             routing_key=self._shard_routing_key(self.config.anomaly_filter_node_count),
         )
@@ -149,7 +145,6 @@ class DateFilter(StatelessWorker):
             self._payment_format_exchange,
             internal.MsgType.TRANSACTION_BATCH,
             client_id,
-            gateway_id,
             transactions_by_routing_key[usd_period_1_key],
             routing_key=self._shard_routing_key(self.config.payment_format_node_count),
         )
