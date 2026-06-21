@@ -10,13 +10,12 @@ from common.health import HealthResponder
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
-from common.protocol.internal import internal
 from common.protocol.external import external
 from common.protocol.external.external import MsgType
 from common.socket.safe_socket import SafeTCPSocket
 
 
-def _handle_client_process(sock, client_id, gateway_id, config, results_queue):
+def _handle_client_process(sock, client_id, gateway_id, config):
     try:
         exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             config.rabbitmq_host,
@@ -28,11 +27,24 @@ def _handle_client_process(sock, client_id, gateway_id, config, results_queue):
         sock.close()
         raise
 
+    try:
+        results = MessageMiddlewareExchangeDirectRabbitMQ(
+            config.rabbitmq_host,
+            config.query_results_exchange,
+            [client_id],
+            queue_name=f"{config.results_queue_prefix}.{client_id}",
+        )
+    except Exception:
+        logging.exception("[%s] failed to connect to results queue", client_id)
+        exchange.close()
+        sock.close()
+        raise
+
     router = InternalRouter(
         exchange, config.transaction_routing_key, config.account_routing_key
     )
     try:
-        ClientHandler(sock, client_id, gateway_id, router, results_queue).run()
+        ClientHandler(sock, client_id, gateway_id, router, results).run()
     except Exception:
         logging.exception("[%s] handler crashed", client_id)
         raise
@@ -44,32 +56,6 @@ def _worker_init():
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
 
-def _run_results_consumer(rabbitmq_host, exchange_name, gateway_id, client_queues):
-    signal.signal(signal.SIGTERM, signal.SIG_DFL)
-    middleware = MessageMiddlewareExchangeDirectRabbitMQ(
-        rabbitmq_host, exchange_name, [gateway_id]
-    )
-
-    def on_message(body, ack, _nack):
-        msg_type, client_id, _, payload, message_id = internal.deserialize_msg(body)
-        handler_queue = client_queues.get(client_id)
-        if handler_queue is None:
-            logging.warning(
-                "[results_consumer] no handler queue for client_id=%s, dropping %s",
-                client_id,
-                msg_type,
-            )
-            ack()
-            return
-        handler_queue.put((msg_type, payload, message_id))
-        ack()
-
-    try:
-        middleware.start_consuming(on_message)
-    finally:
-        middleware.close()
-
-
 class Gateway:
     def __init__(self, config):
         self._config = config
@@ -79,18 +65,6 @@ class Gateway:
         self._server_sock.listen()
         self._pool = multiprocessing.Pool(
             processes=config.pool_size, initializer=_worker_init
-        )
-        self._manager = multiprocessing.Manager()
-        self._client_queues = self._manager.dict()
-        self._results_consumer = multiprocessing.Process(
-            target=_run_results_consumer,
-            args=(
-                config.rabbitmq_host,
-                config.query_results_exchange,
-                self._gateway_id,
-                self._client_queues,
-            ),
-            daemon=True,
         )
         self._health_responder = HealthResponder(
             config.node_name, config.ping_port, config.ping_pong_host
@@ -105,7 +79,6 @@ class Gateway:
             self._config.pool_size,
         )
         self._health_responder.start()
-        self._results_consumer.start()
 
         try:
             while True:
@@ -117,8 +90,6 @@ class Gateway:
                     )
                     client_sock.close()
                     continue
-                results_queue = self._manager.Queue()
-                self._client_queues[client_id] = results_queue
                 logging.info("Client %s connected from %s", client_id, addr)
 
                 self._pool.apply_async(
@@ -128,20 +99,15 @@ class Gateway:
                         client_id,
                         self._gateway_id,
                         self._config,
-                        results_queue,
                     ),
-                    callback=self._make_client_cleanup(client_id),
-                    error_callback=self._make_client_cleanup(client_id),
+                    error_callback=self._on_client_error,
                 )
         except OSError:
             if not self._closed:
                 raise
 
-    def _make_client_cleanup(self, client_id):
-        def _cleanup(_result_or_error):
-            self._client_queues.pop(client_id, None)
-
-        return _cleanup
+    def _on_client_error(self, error):
+        logging.error("client handler process error: %s", error)
 
     def shutdown(self, signum=None, frame=None):
         if self._closed:
@@ -150,12 +116,8 @@ class Gateway:
         logging.info("Shutdown requested")
         self._health_responder.stop()
         self._server_sock.close()
-        if self._results_consumer.is_alive():
-            self._results_consumer.terminate()
-            self._results_consumer.join()
         self._pool.terminate()
         self._pool.join()
-        self._manager.shutdown()
 
 
 def main():

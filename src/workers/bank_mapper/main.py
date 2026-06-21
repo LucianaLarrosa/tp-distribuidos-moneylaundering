@@ -163,7 +163,7 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
             client_id,
             gateway_id,
             mapped_batch,
-            routing_key=gateway_id,
+            routing_key=client_id,
             message_id=message_id,
         )
 
@@ -225,7 +225,7 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
                 eof.message_count,
                 message_id=eof_id(client_id, gateway_id, self.config.query_id),
             ),
-            routing_key=gateway_id,
+            routing_key=client_id,
         )
 
     def shutdown(self):

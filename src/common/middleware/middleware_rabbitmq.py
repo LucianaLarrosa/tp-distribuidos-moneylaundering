@@ -69,6 +69,19 @@ class MessageMiddlewareRabbitMQBase:
                 f"The connection to the middleware was lost: {e}"
             )
 
+    def delete_queue(self):
+        """
+        Deletes the queue this middleware consumes from.
+        Must be called from the thread that owns the connection, since pika channels are not thread-safe.
+        If the connection to the middleware is lost, it raises MessageMiddlewareDisconnectedError.
+        """
+        try:
+            self.channel.queue_delete(queue=self.queue_name)
+        except pika.exceptions.AMQPConnectionError as e:
+            raise MessageMiddlewareDisconnectedError(
+                f"The connection to the middleware was lost: {e}"
+            )
+
     def close(self):
         """
         Closes the connection to the RabbitMQ server.

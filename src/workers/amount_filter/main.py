@@ -69,7 +69,7 @@ class AmountFilter(StatelessWorker):
             client_id,
             gateway_id,
             filtered,
-            routing_key=gateway_id,
+            routing_key=client_id,
         )
 
     def _send_final_eof(self, client_id, gateway_id, eof):
@@ -82,7 +82,7 @@ class AmountFilter(StatelessWorker):
                 eof.message_count,
                 message_id=eof_id(client_id, gateway_id, self.config.query_id),
             ),
-            routing_key=gateway_id,
+            routing_key=client_id,
         )
 
 

@@ -65,7 +65,7 @@ class LowAmountReducer(StatefulCoordinatedWorker):
             client_id,
             gateway_id,
             [Q5Result(count=count)],
-            routing_key=gateway_id,
+            routing_key=client_id,
             message_id=flush_id(self.config.node_id, client_id, gateway_id, 0),
         )
         self._increment_sent_count(client_id, gateway_id)
@@ -80,7 +80,7 @@ class LowAmountReducer(StatefulCoordinatedWorker):
                 eof.message_count,
                 message_id=eof_id(client_id, gateway_id, self.config.query_id),
             ),
-            routing_key=gateway_id,
+            routing_key=client_id,
         )
 
     def _handle_data_message(self, msg_type, client_id, gateway_id, payload):

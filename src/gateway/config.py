@@ -12,6 +12,7 @@ class Config:
     transaction_routing_key: str
     account_routing_key: str
     query_results_exchange: str
+    results_queue_prefix: str
     node_name: str
     ping_port: int
     ping_pong_host: str
@@ -31,6 +32,7 @@ class Config:
             query_results_exchange=os.environ.get(
                 "QUERY_RESULTS_EXCHANGE", "query_results"
             ),
+            results_queue_prefix=os.environ.get("RESULTS_QUEUE_PREFIX", "results"),
             node_name=os.environ.get("NODE_NAME", "gateway"),
             ping_port=int(os.environ.get("PING_PORT", 9001)),
             ping_pong_host=os.environ.get("PING_PONG_HOST", "0.0.0.0"),

@@ -68,7 +68,7 @@ class DuplicateAccountFilter(StatefulCoordinatedWorker):
             key_of=lambda result: f"{result.bank}.{result.account}",
             num_shards=1,
             batch_size=self.config.batch_size,
-            routing_key_for=lambda _shard: gateway_id,
+            routing_key_for=lambda _shard: client_id,
         )
 
     def _send_final_eof(self, client_id, gateway_id, eof):
@@ -81,7 +81,7 @@ class DuplicateAccountFilter(StatefulCoordinatedWorker):
                 eof.message_count,
                 message_id=eof_id(client_id, gateway_id, self.config.query_id),
             ),
-            routing_key=gateway_id,
+            routing_key=client_id,
         )
 
     def _handle_data_message(self, _, client_id, gateway_id, payload):
