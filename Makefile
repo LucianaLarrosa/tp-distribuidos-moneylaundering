@@ -82,11 +82,13 @@ CHAOS_INJECT_CLIENT_COUNT ?= 3
 CHAOS_INJECT_DATASET_SIZE ?= Small
 CHAOS_REF_CLIENT          ?= client_1
 
-.PHONY: compose build up down logs remove-output clean clean-all build-expected verify-output output-test chaos-kill chaos-check-client chaos-inject-client chaos-monkey chaos-output-test chaos-all
+.PHONY: compose build up down logs remove-output clean clean-all build-expected verify-output output-test chaos-check-client chaos-kill chaos-kill-all chaos-inject-client chaos-monkey-round chaos-monkey chaos-monkey-cli chaos-output-test all chaos-all chaos-cli-all
 
 all: compose build output-test
 
 chaos-all: compose build chaos-output-test
+
+chaos-cli-all: up build-expected chaos-monkey-cli wait-clients verify-output down
 
 proto:
 	docker run --rm -v $(PWD):/w -w /w python:3.11-slim sh -c "\
@@ -152,6 +154,26 @@ chaos-kill:
 	printf "$(RED)Killing $$target...$(RESET)\n"; \
 	docker kill "$$target"
 
+chaos-kill-all:
+	@protected_regex="^($$(echo $(PROTECTED_PREFIXES) | tr ' ' '|'))"; \
+	running=$$(docker ps --format '{{.Names}}' | grep -vE "$$protected_regex"); \
+	running_watchdogs=$$(echo "$$running" | grep -cE '^watchdog_[0-9]+$$'); \
+	if [ "$$running_watchdogs" -le $(CHAOS_WATCHDOG_FLOOR) ]; then \
+		pool=$$(echo "$$running" | grep -vE '^watchdog_'); \
+	else \
+		to_kill=$$((running_watchdogs - $(CHAOS_WATCHDOG_FLOOR))); \
+		pool=$$(echo "$$running" | grep -vE '^watchdog_'; echo "$$running" | grep -E '^watchdog_' | head -n "$$to_kill"); \
+	fi; \
+	if [ -z "$$pool" ]; then \
+		printf "$(RED)No victims available$(RESET)\n"; \
+	else \
+		echo "$$pool" | while read -r target; do \
+			[ -z "$$target" ] && continue; \
+			printf "$(RED)Killing $$target...$(RESET)\n"; \
+			docker kill "$$target"; \
+		done; \
+	fi
+
 chaos-inject-client:
 	@trans="HI-$(CHAOS_INJECT_DATASET_SIZE)_Trans.csv"; \
 	accounts="HI-$(CHAOS_INJECT_DATASET_SIZE)_accounts.csv"; \
@@ -174,6 +196,12 @@ chaos-inject-client:
 		printf "$(RED)  ✗ Failed to inject %s$(RESET)\n" "$$name"; \
 	fi
 
+chaos-monkey-round:
+	@printf "$(CYAN)Round: killing $(CHAOS_KILLS_PER_ROUND) node(s)$(RESET)\n"; \
+	for i in $$(seq 1 $(CHAOS_KILLS_PER_ROUND)); do \
+		$(MAKE) --no-print-directory chaos-kill || true; \
+	done
+
 chaos-monkey: chaos-check-client
 	@printf "$(LIME)Chaos Monkey: %s kill(s)/round every %ss, keeping %s watchdog(s) alive; injecting %s client(s) in batches of %s starting from round %s$(RESET)\n" \
     "$(CHAOS_KILLS_PER_ROUND)" "$(CHAOS_INTERVAL)" "$(CHAOS_WATCHDOG_FLOOR)" \
@@ -181,10 +209,7 @@ chaos-monkey: chaos-check-client
 	round=0; injected=0; \
 	while [ -n "$$(docker ps --format '{{.Names}}' | grep '^client_')" ]; do \
 		round=$$((round + 1)); \
-		printf "$(CYAN)Round %s$(RESET)\n" "$$round"; \
-		for i in $$(seq 1 $(CHAOS_KILLS_PER_ROUND)); do \
-			$(MAKE) --no-print-directory chaos-kill || true; \
-		done; \
+		$(MAKE) --no-print-directory chaos-monkey-round || true; \
 		if [ "$$round" -ge $(CHAOS_INJECT_START_ROUND) ] && [ "$$injected" -lt $(CHAOS_INJECT_CLIENT_COUNT) ]; then \
 			$(MAKE) --no-print-directory chaos-inject-client CHAOS_INJECT_IDX="$$injected" || true; \
 			injected=$$((injected + 1)); \
@@ -192,6 +217,34 @@ chaos-monkey: chaos-check-client
 		sleep $(CHAOS_INTERVAL); \
 	done; \
 	printf "$(LIME)Chaos Monkey finished: %s round(s); %s client(s) injected$(RESET)\n" "$$round" "$$injected"
+
+chaos-monkey-cli: chaos-check-client
+	@injected=0; \
+	while true; do \
+		protected_regex="^($$(echo $(PROTECTED_PREFIXES) | tr ' ' '|'))"; \
+		running=$$(docker ps --format '{{.Names}}' | grep -vE "$$protected_regex" | tr '\n' ' '); \
+		printf "\n$(CYAN)Chaos Monkey CLI$(RESET)\n"; \
+		printf "Active killable nodes: %s\n" "$${running:-(none)}"; \
+		printf "  1) Run round (%s kills, floor %s watchdog)\n" "$(CHAOS_KILLS_PER_ROUND)" "$(CHAOS_WATCHDOG_FLOOR)"; \
+		printf "  2) Inject dynamic client\n"; \
+		printf "  3) Kill all nodes\n"; \
+		printf "  4) Kill specific node\n"; \
+		printf "  q) Quit\n"; \
+		printf "Option: "; \
+		read -r option </dev/tty; \
+		case "$$option" in \
+			1) $(MAKE) --no-print-directory chaos-monkey-round ;; \
+			2) $(MAKE) --no-print-directory chaos-inject-client CHAOS_INJECT_IDX="$$injected"; injected=$$((injected + 1)) ;; \
+			3) $(MAKE) --no-print-directory chaos-kill-all ;; \
+			4) \
+				printf "Node name: "; \
+				read -r node </dev/tty; \
+				$(MAKE) --no-print-directory chaos-kill NODE="$$node" ;; \
+			q|Q) break ;; \
+			*) printf "$(RED)Invalid option: %s$(RESET)\n" "$$option" ;; \
+		esac; \
+	done; \
+	printf "$(LIME)CLI done. Dynamic clients injected: %s$(RESET)\n" "$$injected"
 
 remove-output:
 	rm -f $(COMPOSE_FILE)
