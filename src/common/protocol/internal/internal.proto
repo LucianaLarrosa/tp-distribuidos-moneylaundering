@@ -70,11 +70,11 @@ message Path {
 }
 
 message EOF {
-  uint32 message_count = 1;
+  int32 message_count = 1;
 }
 
 message RingEOF {
-  uint32          expected_count        = 1;
+  int32           expected_count        = 1;
   uint32          total_processed_count = 2;
   optional uint32 coordinator_id        = 3;
   optional uint32 total_sent_count      = 4;
@@ -82,7 +82,7 @@ message RingEOF {
 
 message QueryEnd {
   uint32 query_id      = 1;
-  uint32 message_count = 2;
+  int32  message_count = 2;
 }
 
 message TransactionBatch           { repeated Transaction                      items = 1; }

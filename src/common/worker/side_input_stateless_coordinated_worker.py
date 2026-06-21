@@ -6,7 +6,7 @@ from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
 from common.protocol.internal import internal
-from common.models.eof import EOF, RingEOF
+from common.models.eof import EOF, RingEOF, CLEANUP_EXPECTED_COUNT
 from common.utils import SideInputTracker
 from common.worker.ring_coordinated_worker import RingCoordinatedWorker
 
@@ -58,6 +58,13 @@ class SideInputStatelessCoordinatedWorker(RingCoordinatedWorker):
     def _get_final_eof_count(self, ring_eof):
         return ring_eof.total_processed_count
 
+    def _cleanup_state(self, client_id, gateway_id):
+        super()._cleanup_state(client_id, gateway_id)
+        key = (client_id, gateway_id)
+        self._deferred_data_eofs.pop(key, None)
+        self._deferred_ring_eofs.pop(key, None)
+        self._side_input.drop(key)
+
     def _handle_side_message(self, message, ack, nack):
         try:
             msg_type, client_id, gateway_id, payload, message_id = (
@@ -84,6 +91,10 @@ class SideInputStatelessCoordinatedWorker(RingCoordinatedWorker):
                         "side": delta,
                     }
                 elif msg_type == internal.MsgType.EOF:
+                    if payload.message_count == CLEANUP_EXPECTED_COUNT:
+                        self._cleanup_flow(client_id, gateway_id)
+                        ack()
+                        return
                     became_ready = self._side_input.set_expected(
                         key, payload.message_count
                     )
@@ -110,7 +121,8 @@ class SideInputStatelessCoordinatedWorker(RingCoordinatedWorker):
 
     def _handle_eof_message(self, client_id, gateway_id, eof):
         key = (client_id, gateway_id)
-        if not self._side_input.is_ready(key):
+        cleanup = eof.message_count == CLEANUP_EXPECTED_COUNT
+        if not cleanup and not self._side_input.is_ready(key):
             self._deferred_data_eofs[key] = eof
             self._state_store.append(
                 {
@@ -128,7 +140,8 @@ class SideInputStatelessCoordinatedWorker(RingCoordinatedWorker):
         self, client_id, gateway_id, ring_eof, in_message_id="", output_exchange=None
     ):
         key = (client_id, gateway_id)
-        if not self._side_input.is_ready(key):
+        cleanup = ring_eof.expected_count == CLEANUP_EXPECTED_COUNT
+        if not cleanup and not self._side_input.is_ready(key):
             self._deferred_ring_eofs[key] = (ring_eof, in_message_id)
             self._state_store.append(
                 {

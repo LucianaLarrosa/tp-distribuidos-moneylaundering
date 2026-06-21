@@ -1,6 +1,6 @@
 import logging
 
-from common.ids import flush_id, eof_id
+from common.ids import flush_id, eof_id, final_eof_id
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
     MessageMiddlewareQueueRabbitMQ,
@@ -78,7 +78,7 @@ class LowAmountReducer(StatefulCoordinatedWorker):
                 gateway_id,
                 self.config.query_id,
                 eof.message_count,
-                message_id=eof_id(client_id, gateway_id, self.config.query_id),
+                message_id=final_eof_id(client_id, gateway_id, eof, self.config.query_id),
             ),
             routing_key=gateway_id,
         )
@@ -93,6 +93,10 @@ class LowAmountReducer(StatefulCoordinatedWorker):
         )
         super()._handle_data_message(msg_type, client_id, gateway_id, payload)
         return {"count": payload.count}
+
+    def _cleanup_state(self, client_id, gateway_id):
+        super()._cleanup_state(client_id, gateway_id)
+        self._counts.pop((client_id, gateway_id), None)
 
     def _apply_delta(self, client_id, gateway_id, delta):
         client_gateway_key = (client_id, gateway_id)

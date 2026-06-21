@@ -8,7 +8,7 @@ from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
     MessageMiddlewareExchangeFanoutRabbitMQ,
 )
-from common.ids import eof_id
+from common.ids import eof_id, final_eof_id
 from common.models.query_results import Q3Result
 from common.models.transaction import Transaction
 from common.protocol.internal import internal
@@ -222,6 +222,13 @@ class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
         with self._flow_locks_guard:
             self._flow_locks.pop(key, None)
 
+    def _cleanup_state(self, client_id, gateway_id):
+        super()._cleanup_state(client_id, gateway_id)
+        key = self._flow_key(client_id, gateway_id)
+        with self._get_flow_lock(key):
+            self._spill.discard(key)
+            self._drop_flow_state(key)
+
     def _flush_data(self, client_id, gateway_id):
         key = self._flow_key(client_id, gateway_id)
         with self._get_flow_lock(key):
@@ -247,7 +254,7 @@ class AnomalyFilter(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
                 gateway_id,
                 self.config.query_id,
                 eof.message_count,
-                message_id=eof_id(client_id, gateway_id, self.config.query_id),
+                message_id=final_eof_id(client_id, gateway_id, eof, self.config.query_id),
             ),
             routing_key=gateway_id,
         )

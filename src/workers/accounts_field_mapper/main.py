@@ -1,6 +1,6 @@
 import logging
 
-from common.ids import eof_id
+from common.ids import eof_id, final_eof_id
 from common.models.bank import Bank
 from common.protocol.internal import internal
 from common.middleware.middleware_rabbitmq import (
@@ -43,7 +43,7 @@ class AccountsFieldMapper(StatelessWorker):
                     client_id,
                     gateway_id,
                     eof,
-                    message_id=eof_id(client_id, gateway_id),
+                    message_id=final_eof_id(client_id, gateway_id, eof),
                 ),
                 routing_key=self._output_prefix_routing_key(rk),
             )

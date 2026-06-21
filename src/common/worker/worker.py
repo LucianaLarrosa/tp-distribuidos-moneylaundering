@@ -70,7 +70,9 @@ class Worker(StateLog, ABC):
                     delta = self._handle_data_message(
                         msg_type, client_id, gateway_id, payload
                     )
-                seen.add(message_id)
+                self._seen.setdefault(
+                    (MAIN_CHANNEL, client_id, gateway_id), set()
+                ).add(message_id)
                 self._state_store.append(
                     {
                         "ch": MAIN_CHANNEL,

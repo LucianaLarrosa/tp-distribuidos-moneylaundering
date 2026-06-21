@@ -6,7 +6,7 @@ from dataclasses import asdict
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
-from common.ids import eof_id
+from common.ids import eof_id, final_eof_id
 from common.models.bank_max_partial import BankMaxPartial
 from common.models.query_results import Q2Result
 from common.protocol.internal import internal
@@ -196,6 +196,17 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
                 ),
             )
 
+    def _cleanup_state(self, client_id, gateway_id):
+        super()._cleanup_state(client_id, gateway_id)
+        key = self._flow_key(client_id, gateway_id)
+        with self._get_flow_lock(key):
+            self._spill.discard(key)
+            with self._bank_names_lock:
+                self._bank_names.pop(key, None)
+            self._side_input.drop(key)
+            with self._flow_locks_guard:
+                self._flow_locks.pop(key, None)
+
     def _flush_data(self, client_id, gateway_id):
         key = self._flow_key(client_id, gateway_id)
         with self._get_flow_lock(key):
@@ -223,7 +234,7 @@ class BankMapper(SafeOutputCapable, SideInputStatelessCoordinatedWorker):
                 gateway_id,
                 self.config.query_id,
                 eof.message_count,
-                message_id=eof_id(client_id, gateway_id, self.config.query_id),
+                message_id=final_eof_id(client_id, gateway_id, eof, self.config.query_id),
             ),
             routing_key=gateway_id,
         )

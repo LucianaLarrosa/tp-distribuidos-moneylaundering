@@ -3,7 +3,7 @@ import logging
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
-from common.ids import eof_id
+from common.ids import eof_id, final_eof_id
 from common.models.account_edge import AccountEdge
 from common.protocol.internal import internal
 from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
@@ -103,7 +103,7 @@ class AccountFrequencyFilter(StatefulCoordinatedWorker):
                 client_id,
                 gateway_id,
                 eof,
-                message_id=eof_id(client_id, gateway_id),
+                message_id=final_eof_id(client_id, gateway_id, eof),
             ),
             routing_key=f"{self.config.output_node_prefix}0",
         )
@@ -127,6 +127,10 @@ class AccountFrequencyFilter(StatefulCoordinatedWorker):
         ]
         self._apply_delta(client_id, gateway_id, delta)
         return delta
+
+    def _cleanup_state(self, client_id, gateway_id):
+        super()._cleanup_state(client_id, gateway_id)
+        self._account_edges.pop((client_id, gateway_id), None)
 
     def _apply_delta(self, client_id, gateway_id, delta):
         for bank, account, other_bank, other_account, is_sender in delta:

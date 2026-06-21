@@ -15,6 +15,9 @@ class Config:
     node_name: str
     ping_port: int
     ping_pong_host: str
+    state_dir: str
+    reaper_interval: float
+    reaper_timeout: float
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -34,4 +37,7 @@ class Config:
             node_name=os.environ.get("NODE_NAME", "gateway"),
             ping_port=int(os.environ.get("PING_PORT", 9001)),
             ping_pong_host=os.environ.get("PING_PONG_HOST", "0.0.0.0"),
+            state_dir=os.environ.get("STATE_DIR", ""),
+            reaper_interval=float(os.environ.get("REAPER_INTERVAL", 5)),
+            reaper_timeout=float(os.environ.get("REAPER_TIMEOUT", 30)),
         )

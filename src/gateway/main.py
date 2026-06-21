@@ -5,16 +5,19 @@ import uuid
 
 from gateway.config import Config
 from gateway.internal.client_handler import ClientHandler
+from gateway.internal.client_registry import ClientRegistry
 from gateway.internal.internal_router import InternalRouter
+from gateway.internal.reaper import Reaper
 from common.health import HealthResponder
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
+from common.models.eof import CLEANUP_EXPECTED_COUNT
 from common.protocol.internal import internal
 from common.socket.safe_socket import SafeTCPSocket
 
 
-def _handle_client_process(sock, client_id, gateway_id, config, results_queue):
+def _handle_client_process(sock, client_id, gateway_id, config, results_queue, registry):
     try:
         exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             config.rabbitmq_host,
@@ -30,7 +33,9 @@ def _handle_client_process(sock, client_id, gateway_id, config, results_queue):
         exchange, config.transaction_routing_key, config.account_routing_key
     )
     try:
-        ClientHandler(sock, client_id, gateway_id, router, results_queue).run()
+        ClientHandler(
+            sock, client_id, gateway_id, router, results_queue, registry
+        ).run()
     except Exception:
         logging.exception("[%s] handler crashed", client_id)
         raise
@@ -52,6 +57,17 @@ def _run_results_consumer(rabbitmq_host, exchange_name, gateway_id, client_queue
 
     def on_message(body, ack, _nack):
         msg_type, client_id, _, payload, message_id = internal.deserialize_msg(body)
+        if (
+            msg_type == internal.MsgType.QUERY_END
+            and payload[1] == CLEANUP_EXPECTED_COUNT
+        ):
+            stale = set()
+            for key in seen:
+                if key[0] == client_id:
+                    stale.add(key)
+            seen.difference_update(stale)
+            ack()
+            return
         handler_queue = client_queues.get(client_id)
         if handler_queue is None:
             logging.warning(
@@ -88,6 +104,7 @@ class Gateway:
         )
         self._manager = multiprocessing.Manager()
         self._client_queues = self._manager.dict()
+        self._registry = ClientRegistry(self._manager, config.state_dir)
         self._results_consumer = multiprocessing.Process(
             target=_run_results_consumer,
             args=(
@@ -101,6 +118,7 @@ class Gateway:
         self._health_responder = HealthResponder(
             config.node_name, config.ping_port, config.ping_pong_host
         )
+        self._reaper = None
         self._closed = False
 
     def run(self):
@@ -112,6 +130,8 @@ class Gateway:
         )
         self._health_responder.start()
         self._results_consumer.start()
+        self._registry.load()
+        self._start_reaper()
 
         try:
             while True:
@@ -129,6 +149,7 @@ class Gateway:
                         self._gateway_id,
                         self._config,
                         results_queue,
+                        self._registry,
                     ),
                     callback=self._make_client_cleanup(client_id),
                     error_callback=self._make_client_cleanup(client_id),
@@ -136,6 +157,10 @@ class Gateway:
         except OSError:
             if not self._closed:
                 raise
+
+    def _start_reaper(self):
+        self._reaper = Reaper(self._registry, self._config)
+        self._reaper.start()
 
     def _make_client_cleanup(self, client_id):
         def _cleanup(_result_or_error):
@@ -149,6 +174,8 @@ class Gateway:
         self._closed = True
         logging.info("Shutdown requested")
         self._health_responder.stop()
+        if self._reaper is not None:
+            self._reaper.stop()
         self._server_sock.close()
         if self._results_consumer.is_alive():
             self._results_consumer.terminate()

@@ -5,6 +5,7 @@ import threading
 from common.persistence.state_store import StateStore
 
 SNAPSHOT = "snap"
+CLEANUP = "cleanup"
 
 
 class StateLog:
@@ -25,6 +26,26 @@ class StateLog:
 
     def _state_as_delta(self, client_id, gateway_id):
         return None
+
+    def _cleanup_state(self, client_id, gateway_id):
+        pass
+
+    def _forget_flow(self, client_id, gateway_id):
+        stale = set()
+        for key in self._seen:
+            if key[1:] == (client_id, gateway_id):
+                stale.add(key)
+        for key in stale:
+            del self._seen[key]
+        self._cleanup_state(client_id, gateway_id)
+
+    def _cleanup_flow(self, client_id, gateway_id):
+        logging.info("[cleanup] dropping flow %s:%s", client_id, gateway_id)
+        self._forget_flow(client_id, gateway_id)
+        if self._state_store is not None:
+            self._state_store.append(
+                {"ch": CLEANUP, "c": client_id, "g": gateway_id}
+            )
 
     def _flow_keys(self):
         return {(c, g) for (_, c, g) in self._seen}
@@ -65,6 +86,9 @@ class StateLog:
     def _replay_record(self, record):
         if record["ch"] == SNAPSHOT:
             self._restore_snapshot(record)
+            return
+        if record["ch"] == CLEANUP:
+            self._forget_flow(record["c"], record["g"])
             return
         mid = record.get("mid")
         if mid is not None:

@@ -42,6 +42,13 @@ class StatefulCoordinatedWorker(RingCoordinatedWorker):
                 self._sent_count.get((client_id, gateway_id), 0) + 1
             )
 
+    def _cleanup_state(self, client_id, gateway_id):
+        super()._cleanup_state(client_id, gateway_id)
+        key = (client_id, gateway_id)
+        with self._sent_count_lock:
+            self._sent_count.pop(key, None)
+            self._partial_sent_count.pop(key, None)
+
     def _control_state_snapshot(self, client_id, gateway_id):
         snapshot = super()._control_state_snapshot(client_id, gateway_id)
         key = (client_id, gateway_id)

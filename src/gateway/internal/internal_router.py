@@ -1,6 +1,6 @@
-from common.ids import root_id, eof_id
+from common.ids import root_id, eof_id, final_eof_id
 from common.protocol.internal import internal
-from common.models.eof import EOF
+from common.models.eof import EOF, CLEANUP_EXPECTED_COUNT
 
 
 class InternalRouter:
@@ -47,6 +47,26 @@ class InternalRouter:
             EOF(message_count=batch_count),
             self._account_rk,
             message_id=eof_id(client_id, gateway_id),
+        )
+
+    def forward_cleanup_eof(self, client_id, gateway_id):
+        eof = EOF(message_count=CLEANUP_EXPECTED_COUNT)
+        message_id = final_eof_id(client_id, gateway_id, eof)
+        self._send(
+            internal.MsgType.EOF,
+            client_id,
+            gateway_id,
+            eof,
+            self._transaction_rk,
+            message_id=message_id,
+        )
+        self._send(
+            internal.MsgType.EOF,
+            client_id,
+            gateway_id,
+            eof,
+            self._account_rk,
+            message_id=message_id,
         )
 
     def _send(self, msg_type, client_id, gateway_id, payload, routing_key, message_id=""):

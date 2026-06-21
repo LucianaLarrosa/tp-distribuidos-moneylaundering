@@ -11,17 +11,19 @@ _SENDER_STOP = "__sender_stop__"
 
 
 class ClientHandler:
-    def __init__(self, sock, client_id, gateway_id, router, results_queue):
+    def __init__(self, sock, client_id, gateway_id, router, results_queue, registry):
         self._sock = sock
         self._client_id = client_id
         self._gateway_id = gateway_id
         self._router = router
         self._results_queue = results_queue
+        self._registry = registry
         self._tx_batch_count = 0
         self._acc_batch_count = 0
 
     def run(self):
         logging.info("[%s] handler started", self._client_id)
+        self._registry.connect(self._client_id, self._gateway_id)
 
         sender = threading.Thread(target=self._sender_loop, daemon=True)
         sender.start()
@@ -34,6 +36,7 @@ class ClientHandler:
             sender.join()
             raise
         finally:
+            self._registry.disconnect(self._client_id)
             self._sock.close()
 
     def _receive_loop(self):
@@ -41,6 +44,7 @@ class ClientHandler:
         got_eof_acc = False
         while not (got_eof_tx and got_eof_acc):
             msg_type, payload = external.recv_msg(self._sock)
+            self._registry.touch(self._client_id)
 
             if msg_type == MsgType.TRANSACTION_BATCH:
                 self._router.forward_raw_transactions(

@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime
 
-from common.ids import eof_id
+from common.ids import eof_id, final_eof_id
 from common.models.transaction import Transaction
 from common.protocol.internal import internal
 from common.middleware.middleware_rabbitmq import (
@@ -50,7 +50,7 @@ class TransactionsFieldMapper(StatelessWorker):
             client_id,
             gateway_id,
             eof,
-            message_id=eof_id(client_id, gateway_id),
+            message_id=final_eof_id(client_id, gateway_id, eof),
         )
         self._output_exchange.send(msg, routing_key=self.config.output_routing_key_eof)
         self._bank_max_exchange.send(msg, routing_key=BANK_MAX_EOF_SHARD)

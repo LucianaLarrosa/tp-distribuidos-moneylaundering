@@ -7,7 +7,7 @@ from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
     MessageMiddlewareQueueRabbitMQ,
 )
-from common.ids import eof_id
+from common.ids import eof_id, final_eof_id
 from common.models.transaction_amount import TransactionAmount
 from common.protocol.internal import internal
 from common.sharding import shard_of
@@ -108,7 +108,7 @@ class CurrencyMapper(StatelessWorker):
             gateway_id,
             eof,
             routing_key=EOF_SHARD,
-            message_id=eof_id(client_id, gateway_id),
+            message_id=final_eof_id(client_id, gateway_id, eof),
         )
 
     def _handle_data_message(self, _, client_id, gateway_id, payload):

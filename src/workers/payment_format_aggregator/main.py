@@ -3,7 +3,7 @@ import logging
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
-from common.ids import eof_id
+from common.ids import eof_id, final_eof_id
 from common.models.payment_format_partial import PaymentFormatPartial
 from common.protocol.internal import internal
 from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
@@ -79,6 +79,10 @@ class PaymentFormatAggregator(StatefulCoordinatedWorker):
         self._apply_delta(client_id, gateway_id, delta)
         return delta
 
+    def _cleanup_state(self, client_id, gateway_id):
+        super()._cleanup_state(client_id, gateway_id)
+        self._totals.pop((client_id, gateway_id), None)
+
     def _apply_delta(self, client_id, gateway_id, delta):
         flow_totals = self._totals.setdefault(self._flow_key(client_id, gateway_id), {})
         for payment_format, (total_amount, count) in delta.items():
@@ -121,7 +125,7 @@ class PaymentFormatAggregator(StatefulCoordinatedWorker):
                 client_id,
                 gateway_id,
                 eof,
-                message_id=eof_id(client_id, gateway_id),
+                message_id=final_eof_id(client_id, gateway_id, eof),
             ),
             routing_key=self._shard_routing_key(0),
         )

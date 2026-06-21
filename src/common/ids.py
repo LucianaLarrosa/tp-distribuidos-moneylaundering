@@ -1,6 +1,10 @@
+from common.models.eof import is_cleanup_eof
+
 SEPARATOR = ":"
 RING_PHASE_COUNT = "count"
 RING_PHASE_FLUSH = "flush"
+RING_PHASE_CLEANUP = "cleanup"
+EOF_CLEANUP_DISC = "cleanup"
 
 
 def root_id(client_id, gateway_id, batch_index):
@@ -39,3 +43,13 @@ def eof_id(client_id, gateway_id, disc=None):
     if disc is not None:
         parts.append(str(disc))
     return SEPARATOR.join(parts)
+
+
+def final_eof_id(client_id, gateway_id, eof, disc=None):
+    if is_cleanup_eof(eof):
+        disc = (
+            EOF_CLEANUP_DISC
+            if disc is None
+            else f"{disc}{SEPARATOR}{EOF_CLEANUP_DISC}"
+        )
+    return eof_id(client_id, gateway_id, disc)
