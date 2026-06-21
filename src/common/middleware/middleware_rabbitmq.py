@@ -12,7 +12,7 @@ from .middleware import (
 
 class MessageMiddlewareRabbitMQBase:
     _HEARTBEAT_INTERVAL = 1200
-    _PREFETCH_COUNT = 100  
+    _PREFETCH_COUNT = 100
 
     def start_consuming(self, on_message_callback):
         """
@@ -129,9 +129,6 @@ class MessageMiddlewareQueueRabbitMQ(
                 exchange="",
                 routing_key=self.queue_name,
                 body=message,
-                properties=pika.BasicProperties(
-                    delivery_mode=pika.DeliveryMode.Persistent
-                ),
             )
         except pika.exceptions.AMQPConnectionError as e:
             raise MessageMiddlewareDisconnectedError(
@@ -195,9 +192,6 @@ class MessageMiddlewareExchangeDirectRabbitMQ(
                     exchange=self.exchange_name,
                     routing_key=key,
                     body=message,
-                    properties=pika.BasicProperties(
-                        delivery_mode=pika.DeliveryMode.Persistent
-                    ),
                 )
         except pika.exceptions.AMQPConnectionError as e:
             raise MessageMiddlewareDisconnectedError(
@@ -253,9 +247,6 @@ class MessageMiddlewareExchangeFanoutRabbitMQ(
                 exchange=self.exchange_name,
                 routing_key="",
                 body=message,
-                properties=pika.BasicProperties(
-                    delivery_mode=pika.DeliveryMode.Persistent
-                ),
             )
         except pika.exceptions.AMQPConnectionError as e:
             raise MessageMiddlewareDisconnectedError(
@@ -321,9 +312,6 @@ class MessageMiddlewareExchangeTopicRabbitMQ(
                 exchange=self.exchange_name,
                 routing_key=routing_key,
                 body=message,
-                properties=pika.BasicProperties(
-                    delivery_mode=pika.DeliveryMode.Persistent
-                ),
             )
         except pika.exceptions.AMQPConnectionError as e:
             raise MessageMiddlewareDisconnectedError(

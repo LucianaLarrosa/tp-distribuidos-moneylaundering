@@ -46,6 +46,9 @@ PANDAS_EXPECTED_DIR ?= ./pandas_expected_output
 SIZE              := $(patsubst HI-%_Trans.csv,%,$(TRANSACTIONS_FILE))
 EXPECTED_SIZE_DIR := $(EXPECTED_DIR)/$(SIZE)
 
+# Expected output for the dataset size injected by the chaos monkey (dynamic clients).
+INJECT_SIZE_DIR    = $(EXPECTED_DIR)/$(CHAOS_INJECT_DATASET_SIZE)
+
 PROTECTED_PREFIXES ?= rabbitmq gateway proxy client
 
 COMPOSE_ARGS = \
@@ -82,7 +85,7 @@ CHAOS_INJECT_CLIENT_COUNT ?= 3
 CHAOS_INJECT_DATASET_SIZE ?= Small
 CHAOS_REF_CLIENT          ?= client_1
 
-.PHONY: compose build up down logs remove-output clean clean-all build-expected verify-output output-test chaos-check-client chaos-kill chaos-kill-all chaos-inject-client chaos-monkey-round chaos-monkey chaos-monkey-cli chaos-output-test all chaos-all chaos-cli-all
+.PHONY: compose build up down logs remove-output clean clean-all build-expected verify-output output-test chaos-check-client chaos-kill chaos-kill-all chaos-inject-client chaos-monkey-round chaos-monkey chaos-monkey-cli verify-dyn chaos-output-test all chaos-all chaos-cli-all
 
 all: compose build output-test
 
@@ -113,6 +116,11 @@ up:
 
 down:
 	docker compose -f $(COMPOSE_FILE) down -v
+	@dyn=$$(docker ps -a --format '{{.Names}}' | grep '^client_dyn_' || true); \
+	if [ -n "$$dyn" ]; then \
+		printf "$(CYAN)Removing leftover dynamic clients: %s$(RESET)\n" "$$(echo $$dyn | tr '\n' ' ')"; \
+		echo "$$dyn" | xargs docker rm -f >/dev/null; \
+	fi
 
 logs:
 	@if [ -z "$(SERVICE)" ]; then \
@@ -298,6 +306,33 @@ verify-output:
 	fi; \
 	[ $$mismatch -eq 0 ]
 
+verify-dyn:
+	@mismatch=0; \
+	for query_number in 1 2 3 4 5; do \
+		idx=0; \
+		while [ "$$idx" -lt $(CHAOS_INJECT_CLIENT_COUNT) ]; do \
+			output_file="$(OUTPUT_DIR)/q$${query_number}_client_dyn_$${idx}.csv"; \
+			expected_file="$(INJECT_SIZE_DIR)/q$${query_number}_expected.csv"; \
+			if [ ! -f "$$output_file" ]; then \
+				printf "$(RED)✗ Q%s client dyn_%s: NO OUTPUT (%s)$(RESET)\n" "$$query_number" "$$idx" "$$output_file"; \
+				mismatch=1; \
+			elif diff <(LC_ALL=C sort "$$output_file") <(LC_ALL=C sort "$$expected_file") > /dev/null 2>&1; then \
+				printf "$(LIME)✓ Q%s client dyn_%s: OK$(RESET)\n" "$$query_number" "$$idx"; \
+			else \
+				printf "$(RED)✗ Q%s client dyn_%s: MISMATCH$(RESET)\n" "$$query_number" "$$idx"; \
+				diff <(LC_ALL=C sort "$$output_file") <(LC_ALL=C sort "$$expected_file") | head -20; \
+				mismatch=1; \
+			fi; \
+			idx=$$((idx + 1)); \
+		done; \
+	done; \
+	if [ $$mismatch -eq 0 ]; then \
+		printf "$(LIME)Dynamic-client output test passed$(RESET)\n"; \
+	else \
+		printf "$(RED)Dynamic-client output test failed$(RESET)\n"; \
+	fi; \
+	[ $$mismatch -eq 0 ]
+
 output-test: up wait-clients build-expected verify-output down
 
-chaos-output-test: up build-expected chaos-monkey wait-clients verify-output down
+chaos-output-test: up build-expected chaos-monkey wait-clients verify-output verify-dyn down
