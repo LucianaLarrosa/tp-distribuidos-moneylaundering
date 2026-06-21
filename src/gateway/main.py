@@ -11,6 +11,8 @@ from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
 from common.protocol.internal import internal
+from common.protocol.external import external
+from common.protocol.external.external import MsgType
 from common.socket.safe_socket import SafeTCPSocket
 
 
@@ -48,8 +50,6 @@ def _run_results_consumer(rabbitmq_host, exchange_name, gateway_id, client_queue
         rabbitmq_host, exchange_name, [gateway_id]
     )
 
-    seen = set()  # (client_id, msg_type, message_id)
-
     def on_message(body, ack, _nack):
         msg_type, client_id, _, payload, message_id = internal.deserialize_msg(body)
         handler_queue = client_queues.get(client_id)
@@ -61,13 +61,7 @@ def _run_results_consumer(rabbitmq_host, exchange_name, gateway_id, client_queue
             )
             ack()
             return
-        if message_id:
-            key = (client_id, msg_type, message_id)
-            if key in seen:
-                ack()
-                return
-            seen.add(key)
-        handler_queue.put((msg_type, payload))
+        handler_queue.put((msg_type, payload, message_id))
         ack()
 
     try:
@@ -116,7 +110,13 @@ class Gateway:
         try:
             while True:
                 client_sock, addr = self._server_sock.accept()
-                client_id = str(uuid.uuid4())
+                msg_type, client_id = external.recv_msg(client_sock)
+                if msg_type != MsgType.ANNOUNCE:
+                    logging.error(
+                        "Expected ANNOUNCE, got msg_type=%s, closing", msg_type
+                    )
+                    client_sock.close()
+                    continue
                 results_queue = self._manager.Queue()
                 self._client_queues[client_id] = results_queue
                 logging.info("Client %s connected from %s", client_id, addr)

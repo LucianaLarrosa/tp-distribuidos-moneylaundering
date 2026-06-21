@@ -171,7 +171,7 @@ def _client(i):
             "ACCOUNTS_BATCH_SIZE": ACCOUNTS_BATCH_SIZE,
             "EXPECTED_QUERY_IDS": f"{QUERY_1_ID},{QUERY_2_ID},{QUERY_3_ID},{QUERY_4_ID},{QUERY_5_ID}",
             "OUTPUT_DIR": "/output",
-            "CLIENT_ID": str(i),
+            "CLIENT_NAME": str(i),
         },
     }
 

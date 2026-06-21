@@ -4,6 +4,7 @@ import os
 import signal
 import threading
 import queue
+import uuid
 from dataclasses import asdict
 
 from client.config import Config
@@ -21,6 +22,7 @@ class Client:
 
     def __init__(self, config):
         self._config = config
+        self._client_id = str(uuid.uuid4())
         self._sock = None
         self._proxy_sock = None
         self._receiver_queue = None
@@ -30,11 +32,12 @@ class Client:
         self._shutdown_event = threading.Event()
         self._message_iter = None
         self._pending_msg = None
+        self._seen_results = set()  # (query_id, message_id)
 
     def run(self):
         try:
             gateway_host, gateway_port = self._resolve_gateway()
-        except OSError as e:
+        except OSError:
             if self._closed:
                 return
             raise
@@ -63,6 +66,7 @@ class Client:
     def _run_session(self, sock):
         self._sock = sock
         self._aborted = False
+        external.send_msg(sock, MsgType.ANNOUNCE, client_id=self._client_id)
         self._receiver_queue = queue.Queue()
         self._sender_queue = queue.Queue()
         receiver_thread = threading.Thread(target=self._receive_data, daemon=True)
@@ -100,24 +104,25 @@ class Client:
                     self._pending_msg = next(self._message_iter)
                 except StopIteration:
                     return
-            msg_type, payload = self._pending_msg
-            if payload is None:
-                self._sender_queue.put((msg_type,))
-            else:
-                self._sender_queue.put((msg_type, payload))
+            msg_type, payload, batch_index = self._pending_msg
+            self._sender_queue.put((msg_type, payload, batch_index))
             if not self._wait_ack(pending, writers, totals):
                 return
             self._pending_msg = None
 
     def _messages_to_send(self):
+        tx_count = 0
         for batch in self._read_batches(
             self._config.input_csv_transactions, RawTransaction
         ):
-            yield MsgType.TRANSACTION_BATCH, batch
-        yield MsgType.EOF_TRANSACTIONS, None
+            yield MsgType.TRANSACTION_BATCH, batch, tx_count
+            tx_count += 1
+        yield MsgType.EOF_TRANSACTIONS, None, tx_count
+        acc_count = 0
         for batch in self._read_batches(self._config.input_csv_accounts, RawAccount):
-            yield MsgType.ACCOUNT_BATCH, batch
-        yield MsgType.EOF_ACCOUNTS, None
+            yield MsgType.ACCOUNT_BATCH, batch, acc_count
+            acc_count += 1
+        yield MsgType.EOF_ACCOUNTS, None, acc_count
 
     def _wait_ack(self, pending, writers, totals):
         while not self._closed:
@@ -158,7 +163,7 @@ class Client:
             qid: open(
                 os.path.join(
                     self._config.output_dir,
-                    f"q{qid}_client_{self._config.client_id}.csv",
+                    f"q{qid}_client_{self._config.client_name}.csv",
                 ),
                 "w",
                 newline="",
@@ -170,7 +175,12 @@ class Client:
         return writers, totals, files
 
     def _handle_query_result(self, payload, writers, totals):
-        query_id, records = payload
+        query_id, records, message_id = payload
+        if message_id:
+            key = (query_id, message_id)
+            if key in self._seen_results:
+                return
+            self._seen_results.add(key)
         for record in records:
             writers[query_id].writerow(asdict(record).values())
         totals[query_id] += len(records)
@@ -234,7 +244,22 @@ class Client:
                 item = self._sender_queue.get()
                 if item is None:
                     return
-                external.send_msg(self._sock, *item)
+                msg_type, payload, batch_index = item
+                if payload is None:
+                    external.send_msg(
+                        self._sock,
+                        msg_type,
+                        client_id=self._client_id,
+                        message_id=str(batch_index),
+                    )
+                else:
+                    external.send_msg(
+                        self._sock,
+                        msg_type,
+                        payload,
+                        client_id=self._client_id,
+                        message_id=str(batch_index),
+                    )
         except Exception as e:
             if not self._closed:
                 logging.warning("Send failed, aborting session: %s", e)

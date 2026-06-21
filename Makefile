@@ -167,7 +167,7 @@ chaos-inject-client:
 		-e INPUT_CSV_ACCOUNTS="/data/$$accounts" \
 		-e EXPECTED_QUERY_IDS=1,2,3,4,5 \
 		-e OUTPUT_DIR=/output \
-		-e CLIENT_ID="dyn_$(CHAOS_INJECT_IDX)" \
+		-e CLIENT_NAME="dyn_$(CHAOS_INJECT_IDX)" \
 		"$$img" >/dev/null 2>&1; then \
 		printf "$(LIME)  ＋ Inyected %s (%s)$(RESET)\n" "$$name" "$$trans"; \
 	else \

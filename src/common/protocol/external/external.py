@@ -25,13 +25,14 @@ class MsgType:
     QUERY_END = 6  # (gateway -> client)
     REDIRECT = 7  # (proxy -> client)
     ACK = 8  # (gateway -> client)
+    ANNOUNCE = 9  # (client -> gateway)
 
 
 # ---------- API ----------
 
 
-def send_msg(sock, msg_type, *args):
-    env = pb.Envelope()
+def send_msg(sock, msg_type, *args, client_id="", message_id=""):
+    env = pb.Envelope(client_id=client_id, message_id=message_id)
     SERIALIZERS[msg_type](env, *args)
     data = env.SerializeToString()
     sock.send(serialize_uint32(len(data)) + data)
@@ -100,6 +101,10 @@ def _serialize_ack(env):
     env.ack.SetInParent()
 
 
+def _serialize_announce(env):
+    env.announce.SetInParent()
+
+
 def _serialize_query_result(env, query_id, records):
     _, field_name, fields = QUERY_RESULT_DATA[query_id]
     env.query_result.query_id = query_id
@@ -121,11 +126,21 @@ def _serialize_redirect(env, host, port):
 
 
 def _deserialize_transaction_batch(env):
-    return _deserialize_batch(env.transaction_batch.items, RawTransaction, ["raw"])
+    records = _deserialize_batch(env.transaction_batch.items, RawTransaction, ["raw"])
+    return records, env.client_id, env.message_id
 
 
 def _deserialize_account_batch(env):
-    return _deserialize_batch(env.account_batch.items, RawAccount, ["raw"])
+    records = _deserialize_batch(env.account_batch.items, RawAccount, ["raw"])
+    return records, env.client_id, env.message_id
+
+
+def _deserialize_eof_transactions(env):
+    return env.client_id, env.message_id
+
+
+def _deserialize_eof_accounts(env):
+    return env.client_id, env.message_id
 
 
 def _deserialize_none(env):
@@ -136,7 +151,7 @@ def _deserialize_query_result(env):
     qr = env.query_result
     record_class, field_name, fields = QUERY_RESULT_DATA[qr.query_id]
     records = _deserialize_batch(getattr(qr, field_name).items, record_class, fields)
-    return qr.query_id, records
+    return qr.query_id, records, env.message_id
 
 
 def _deserialize_query_end(env):
@@ -145,6 +160,10 @@ def _deserialize_query_end(env):
 
 def _deserialize_redirect(env):
     return env.redirect.host, env.redirect.port
+
+
+def _deserialize_announce(env):
+    return env.client_id
 
 
 # ---------- tablas para mapear ----------
@@ -158,17 +177,19 @@ SERIALIZERS = {
     MsgType.QUERY_END: _serialize_query_end,
     MsgType.REDIRECT: _serialize_redirect,
     MsgType.ACK: _serialize_ack,
+    MsgType.ANNOUNCE: _serialize_announce,
 }
 
 DESERIALIZERS = {
     MsgType.TRANSACTION_BATCH: _deserialize_transaction_batch,
     MsgType.ACCOUNT_BATCH: _deserialize_account_batch,
-    MsgType.EOF_TRANSACTIONS: _deserialize_none,
-    MsgType.EOF_ACCOUNTS: _deserialize_none,
+    MsgType.EOF_TRANSACTIONS: _deserialize_eof_transactions,
+    MsgType.EOF_ACCOUNTS: _deserialize_eof_accounts,
     MsgType.QUERY_RESULT: _deserialize_query_result,
     MsgType.QUERY_END: _deserialize_query_end,
     MsgType.REDIRECT: _deserialize_redirect,
     MsgType.ACK: _deserialize_none,
+    MsgType.ANNOUNCE: _deserialize_announce,
 }
 
 TYPES = {
@@ -180,4 +201,5 @@ TYPES = {
     "query_end": MsgType.QUERY_END,
     "redirect": MsgType.REDIRECT,
     "ack": MsgType.ACK,
+    "announce": MsgType.ANNOUNCE,
 }

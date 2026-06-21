@@ -6,7 +6,11 @@ import "common/protocol/common_protobuf/common_protobuf.proto";
 
 
 message EofTransactions {}
+
 message EofAccounts {}
+
+message Announce {}
+
 message Ack {}
 
 message QueryResult {
@@ -30,14 +34,18 @@ message Redirect {
 }
 
 message Envelope {
+  string client_id  = 10;
+  string message_id = 11;
+
   oneof payload {
     common_protobuf.RawTransactionBatch transaction_batch = 1;
     common_protobuf.RawAccountBatch     account_batch     = 2;
-    EofTransactions                     eof_transactions  = 3;
-    EofAccounts                         eof_accounts      = 4;
-    QueryResult                         query_result      = 5;
-    QueryEnd                            query_end         = 6;
-    Redirect                            redirect          = 7;
-    Ack                                 ack               = 8;
+    EofTransactions  eof_transactions  = 3;
+    EofAccounts      eof_accounts      = 4;
+    QueryResult      query_result      = 5;
+    QueryEnd         query_end         = 6;
+    Redirect         redirect          = 7;
+    Ack              ack               = 8;
+    Announce         announce          = 9;
   }
 }
