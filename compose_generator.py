@@ -44,7 +44,7 @@ MAX_RETRIES = "3"
 ELECTION_PORT = "9002"
 ELECTION_TIMEOUT_SECONDS = "5"
 LEADER_PROBE_MISS_THRESHOLD = "3"
-DEFAULT_PROTECTED_PREFIXES = "rabbitmq gateway proxy client"
+DEFAULT_PROTECTED_PREFIXES = "rabbitmq proxy client"
 
 # --- Query IDs ---
 

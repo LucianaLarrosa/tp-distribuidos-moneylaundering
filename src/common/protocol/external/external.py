@@ -26,13 +26,16 @@ class MsgType:
     REDIRECT = 7  # (proxy -> client)
     ACK = 8  # (gateway -> client)
     ANNOUNCE = 9  # (client -> gateway)
+    RESULT_ACK = 10  # (client -> gateway)
 
 
 # ---------- API ----------
 
 
-def send_msg(sock, msg_type, *args, client_id="", message_id=""):
-    env = pb.Envelope(client_id=client_id, message_id=message_id)
+def send_msg(sock, msg_type, *args, client_id="", message_id="", delivery_id=0):
+    env = pb.Envelope(
+        client_id=client_id, message_id=message_id, delivery_id=delivery_id
+    )
     SERIALIZERS[msg_type](env, *args)
     data = env.SerializeToString()
     sock.send(serialize_uint32(len(data)) + data)
@@ -101,6 +104,10 @@ def _serialize_ack(env):
     env.ack.SetInParent()
 
 
+def _serialize_result_ack(env):
+    env.result_ack.SetInParent()
+
+
 def _serialize_announce(env):
     env.announce.SetInParent()
 
@@ -152,11 +159,15 @@ def _deserialize_query_result(env):
     qr = env.query_result
     record_class, field_name, fields = QUERY_RESULT_DATA[qr.query_id]
     records = _deserialize_batch(getattr(qr, field_name).items, record_class, fields)
-    return qr.query_id, records, env.message_id
+    return qr.query_id, records, env.message_id, env.delivery_id
 
 
 def _deserialize_query_end(env):
-    return env.query_end.query_id, env.query_end.message_count
+    return env.query_end.query_id, env.query_end.message_count, env.delivery_id
+
+
+def _deserialize_result_ack(env):
+    return env.delivery_id
 
 
 def _deserialize_redirect(env):
@@ -179,6 +190,7 @@ SERIALIZERS = {
     MsgType.REDIRECT: _serialize_redirect,
     MsgType.ACK: _serialize_ack,
     MsgType.ANNOUNCE: _serialize_announce,
+    MsgType.RESULT_ACK: _serialize_result_ack,
 }
 
 DESERIALIZERS = {
@@ -191,6 +203,7 @@ DESERIALIZERS = {
     MsgType.REDIRECT: _deserialize_redirect,
     MsgType.ACK: _deserialize_none,
     MsgType.ANNOUNCE: _deserialize_announce,
+    MsgType.RESULT_ACK: _deserialize_result_ack,
 }
 
 TYPES = {
@@ -203,4 +216,5 @@ TYPES = {
     "redirect": MsgType.REDIRECT,
     "ack": MsgType.ACK,
     "announce": MsgType.ANNOUNCE,
+    "result_ack": MsgType.RESULT_ACK,
 }

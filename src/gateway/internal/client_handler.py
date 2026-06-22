@@ -17,6 +17,9 @@ class ClientHandler:
         self._router = router
         self._results = results
         self._queue = queue.Queue()
+        self._pending_acks = {}
+        self._ack_lock = threading.Lock()
+        self._next_delivery_id = 0
 
     def run(self):
         logging.info("[%s] handler started", self._client_id)
@@ -78,6 +81,8 @@ class ClientHandler:
             )
             self._queue.put(("ack",))
             got_eof_acc = True
+        elif msg_type == MsgType.RESULT_ACK:
+            self._on_result_ack(payload)
         else:
             logging.warning(
                 "[%s] unexpected message type: %s", self._client_id, msg_type
@@ -112,22 +117,48 @@ class ClientHandler:
             msg_type, payload, message_id, ack = item
 
             if msg_type in EXPECTED_QUERY_IDS:
+                delivery_id = self._register_pending_ack(ack)
                 self._send_to_client(
-                    MsgType.QUERY_RESULT, msg_type, payload, message_id=message_id
+                    MsgType.QUERY_RESULT,
+                    msg_type,
+                    payload,
+                    message_id=message_id,
+                    delivery_id=delivery_id,
                 )
             elif msg_type == internal.MsgType.QUERY_END:
+                delivery_id = self._register_pending_ack(ack)
                 query_id, message_count = payload
-                self._send_to_client(MsgType.QUERY_END, query_id, message_count)
+                self._send_to_client(
+                    MsgType.QUERY_END,
+                    query_id,
+                    message_count,
+                    delivery_id=delivery_id,
+                )
             else:
                 logging.warning(
                     "[%s] unexpected internal msg in results queue: %s",
                     self._client_id,
                     msg_type,
                 )
+                self._ack_to_rabbit(ack)
+
+    def _register_pending_ack(self, ack):
+        with self._ack_lock:
+            self._next_delivery_id += 1
+            delivery_id = self._next_delivery_id
+            self._pending_acks[delivery_id] = ack
+        return delivery_id
+
+    def _on_result_ack(self, delivery_id):
+        with self._ack_lock:
+            ack = self._pending_acks.pop(delivery_id, None)
+        if ack is not None:
             self._ack_to_rabbit(ack)
 
     def _ack_to_rabbit(self, ack):
         self._results.connection.add_callback_threadsafe(ack)
 
-    def _send_to_client(self, msg_type, *args, message_id=""):
-        external.send_msg(self._sock, msg_type, *args, message_id=message_id)
+    def _send_to_client(self, msg_type, *args, message_id="", delivery_id=0):
+        external.send_msg(
+            self._sock, msg_type, *args, message_id=message_id, delivery_id=delivery_id
+        )

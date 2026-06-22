@@ -49,7 +49,7 @@ EXPECTED_SIZE_DIR := $(EXPECTED_DIR)/$(SIZE)
 # Expected output for the dataset size injected by the chaos monkey (dynamic clients).
 INJECT_SIZE_DIR    = $(EXPECTED_DIR)/$(CHAOS_INJECT_DATASET_SIZE)
 
-PROTECTED_PREFIXES ?= rabbitmq gateway proxy client
+PROTECTED_PREFIXES ?= rabbitmq proxy client
 
 COMPOSE_ARGS = \
 	--clients                     $(N_CLIENTS) \

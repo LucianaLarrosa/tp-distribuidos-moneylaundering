@@ -19,6 +19,7 @@ class Client:
     _INITIAL_RECONNECT_DELAY = 1.0
     _MAX_RECONNECT_DELAY = 30.0
     _BACKOFF_FACTOR = 2.0
+    _FINAL_ACK_FLUSH_TIMEOUT = 5.0
 
     def __init__(self, config):
         self._config = config
@@ -36,6 +37,9 @@ class Client:
         self._received = {}
         self._expected = {}
         self._finalized = set()
+        self._writers = None
+        self._files = None
+        self._totals = None
 
     def run(self):
         try:
@@ -45,26 +49,31 @@ class Client:
                 return
             raise
         delay = self._INITIAL_RECONNECT_DELAY
-        while not self._closed:
-            try:
-                sock = SafeTCPSocket()
-                sock.connect(gateway_host, gateway_port)
-                delay = self._INITIAL_RECONNECT_DELAY
-                logging.info("Connected to gateway %s:%s", gateway_host, gateway_port)
-                if self._run_session(sock):
-                    logging.info("Shutdown: All expected query results received")
-                    return
-            except OSError as e:
-                logging.warning(
-                    "Could not connect to gateway %s:%s: %s",
-                    gateway_host,
-                    gateway_port,
-                    e,
-                )
-            if not self._closed:
-                logging.info("Reconnecting to gateway in %.1fs", delay)
-                self._shutdown_event.wait(delay)
-                delay = min(delay * self._BACKOFF_FACTOR, self._MAX_RECONNECT_DELAY)
+        try:
+            while not self._closed:
+                try:
+                    sock = SafeTCPSocket()
+                    sock.connect(gateway_host, gateway_port)
+                    delay = self._INITIAL_RECONNECT_DELAY
+                    logging.info(
+                        "Connected to gateway %s:%s", gateway_host, gateway_port
+                    )
+                    if self._run_session(sock):
+                        logging.info("Shutdown: All expected query results received")
+                        return
+                except OSError as e:
+                    logging.warning(
+                        "Could not connect to gateway %s:%s: %s",
+                        gateway_host,
+                        gateway_port,
+                        e,
+                    )
+                if not self._closed:
+                    logging.info("Reconnecting to gateway in %.1fs", delay)
+                    self._shutdown_event.wait(delay)
+                    delay = min(delay * self._BACKOFF_FACTOR, self._MAX_RECONNECT_DELAY)
+        finally:
+            self._close_result_files()
 
     def _run_session(self, sock):
         self._sock = sock
@@ -79,6 +88,8 @@ class Client:
         try:
             return self._orchestrate()
         finally:
+            if not self._aborted:
+                sender_thread.join(timeout=self._FINAL_ACK_FLUSH_TIMEOUT)
             sock.close()
             self._sock = None
             receiver_thread.join()
@@ -86,17 +97,27 @@ class Client:
 
     def _orchestrate(self):
         logging.info("Starting data transmission")
-        query_ids = set(self._config.expected_query_ids)
-        writers, totals, files = self._open_result_files(query_ids)
+        self._ensure_result_files()
         try:
-            self._produce_and_wait_acks(writers, totals)
+            self._produce_and_wait_acks(self._writers, self._totals)
             if not self._aborted:
-                self._consume_remaining(writers, totals)
+                self._consume_remaining(self._writers, self._totals)
         finally:
-            for f in files.values():
-                f.close()
             self._sender_queue.put(None)
         return self._all_done()
+
+    def _ensure_result_files(self):
+        if self._writers is None:
+            self._writers, self._totals, self._files = self._open_result_files(
+                set(self._config.expected_query_ids)
+            )
+
+    def _close_result_files(self):
+        if self._files:
+            for f in self._files.values():
+                f.close()
+        self._files = None
+        self._writers = None
 
     def _all_done(self):
         return self._finalized >= set(self._config.expected_query_ids)
@@ -181,10 +202,11 @@ class Client:
         return writers, totals, files
 
     def _handle_query_result(self, payload, writers, totals):
-        query_id, records, message_id = payload
+        query_id, records, message_id, delivery_id = payload
         if message_id:
             key = (query_id, message_id)
             if key in self._seen_results:
+                self._ack_result(delivery_id)
                 return
             self._seen_results.add(key)
         for record in records:
@@ -192,11 +214,16 @@ class Client:
         totals[query_id] += len(records)
         self._received[query_id] = self._received.get(query_id, 0) + 1
         self._maybe_finalize(query_id, totals)
+        self._ack_result(delivery_id)
 
     def _handle_query_end(self, payload, totals):
-        query_id, message_count = payload
+        query_id, message_count, delivery_id = payload
         self._expected[query_id] = message_count
         self._maybe_finalize(query_id, totals)
+        self._ack_result(delivery_id)
+
+    def _ack_result(self, delivery_id):
+        self._sender_queue.put((MsgType.RESULT_ACK, None, delivery_id))
 
     def _maybe_finalize(self, query_id, totals):
         if query_id in self._finalized:
@@ -260,13 +287,20 @@ class Client:
                 item = self._sender_queue.get()
                 if item is None:
                     return
-                msg_type, payload, batch_index = item
-                if payload is None:
+                msg_type, payload, ref = item
+                if msg_type == MsgType.RESULT_ACK:
                     external.send_msg(
                         self._sock,
                         msg_type,
                         client_id=self._client_id,
-                        message_id=str(batch_index),
+                        delivery_id=ref,
+                    )
+                elif payload is None:
+                    external.send_msg(
+                        self._sock,
+                        msg_type,
+                        client_id=self._client_id,
+                        message_id=str(ref),
                     )
                 else:
                     external.send_msg(
@@ -274,7 +308,7 @@ class Client:
                         msg_type,
                         payload,
                         client_id=self._client_id,
-                        message_id=str(batch_index),
+                        message_id=str(ref),
                     )
         except Exception as e:
             if not self._closed:

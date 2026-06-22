@@ -13,6 +13,8 @@ message Announce {}
 
 message Ack {}
 
+message ResultAck {}
+
 message QueryResult {
   uint32 query_id = 1;
   oneof results {
@@ -35,8 +37,9 @@ message Redirect {
 }
 
 message Envelope {
-  string client_id  = 10;
-  string message_id = 11;
+  string client_id   = 10;
+  string message_id  = 11;
+  uint64 delivery_id = 12;
 
   oneof payload {
     common_protobuf.RawTransactionBatch transaction_batch = 1;
@@ -48,5 +51,6 @@ message Envelope {
     Redirect         redirect          = 7;
     Ack              ack               = 8;
     Announce         announce          = 9;
+    ResultAck        result_ack        = 13;
   }
 }
