@@ -33,6 +33,9 @@ class Client:
         self._message_iter = None
         self._pending_msg = None
         self._seen_results = set()  # (query_id, message_id)
+        self._received = {}
+        self._expected = {}
+        self._finalized = set()
 
     def run(self):
         try:
@@ -83,19 +86,22 @@ class Client:
 
     def _orchestrate(self):
         logging.info("Starting data transmission")
-        pending = set(self._config.expected_query_ids)
-        writers, totals, files = self._open_result_files(pending)
+        query_ids = set(self._config.expected_query_ids)
+        writers, totals, files = self._open_result_files(query_ids)
         try:
-            self._produce_and_wait_acks(pending, writers, totals)
+            self._produce_and_wait_acks(writers, totals)
             if not self._aborted:
-                self._consume_remaining(pending, writers, totals)
+                self._consume_remaining(writers, totals)
         finally:
             for f in files.values():
                 f.close()
             self._sender_queue.put(None)
-        return not pending
+        return self._all_done()
 
-    def _produce_and_wait_acks(self, pending, writers, totals):
+    def _all_done(self):
+        return self._finalized >= set(self._config.expected_query_ids)
+
+    def _produce_and_wait_acks(self, writers, totals):
         if self._message_iter is None:
             self._message_iter = self._messages_to_send()
         while not (self._aborted or self._closed):
@@ -106,7 +112,7 @@ class Client:
                     return
             msg_type, payload, batch_index = self._pending_msg
             self._sender_queue.put((msg_type, payload, batch_index))
-            if not self._wait_ack(pending, writers, totals):
+            if not self._wait_ack(writers, totals):
                 return
             self._pending_msg = None
 
@@ -124,7 +130,7 @@ class Client:
             acc_count += 1
         yield MsgType.EOF_ACCOUNTS, None, acc_count
 
-    def _wait_ack(self, pending, writers, totals):
+    def _wait_ack(self, writers, totals):
         while not self._closed:
             item = self._receiver_queue.get()
             if item is None:
@@ -135,13 +141,13 @@ class Client:
             elif msg_type == MsgType.QUERY_RESULT:
                 self._handle_query_result(payload, writers, totals)
             elif msg_type == MsgType.QUERY_END:
-                self._handle_query_end(payload, pending, totals)
+                self._handle_query_end(payload, totals)
             else:
                 logging.warning("Unexpected msg_type=%s in orchestrator", msg_type)
         return False
 
-    def _consume_remaining(self, pending, writers, totals):
-        while pending and not self._closed:
+    def _consume_remaining(self, writers, totals):
+        while not self._all_done() and not self._closed:
             item = self._receiver_queue.get()
             if item is None:
                 return
@@ -149,7 +155,7 @@ class Client:
             if msg_type == MsgType.QUERY_RESULT:
                 self._handle_query_result(payload, writers, totals)
             elif msg_type == MsgType.QUERY_END:
-                self._handle_query_end(payload, pending, totals)
+                self._handle_query_end(payload, totals)
             elif msg_type == MsgType.ACK:
                 logging.warning("Unexpected ACK after all sends completed")
             else:
@@ -184,11 +190,21 @@ class Client:
         for record in records:
             writers[query_id].writerow(asdict(record).values())
         totals[query_id] += len(records)
+        self._received[query_id] = self._received.get(query_id, 0) + 1
+        self._maybe_finalize(query_id, totals)
 
-    def _handle_query_end(self, payload, pending, totals):
-        query_id = payload
-        pending.discard(query_id)
-        logging.info("Q%s ended (%s records total)", query_id, totals[query_id])
+    def _handle_query_end(self, payload, totals):
+        query_id, message_count = payload
+        self._expected[query_id] = message_count
+        self._maybe_finalize(query_id, totals)
+
+    def _maybe_finalize(self, query_id, totals):
+        if query_id in self._finalized:
+            return
+        expected = self._expected.get(query_id)
+        if expected is not None and self._received.get(query_id, 0) >= expected:
+            self._finalized.add(query_id)
+            logging.info("Q%s ended (%s records total)", query_id, totals[query_id])
 
     def _resolve_gateway(self):
         logging.info("Connecting to proxy")

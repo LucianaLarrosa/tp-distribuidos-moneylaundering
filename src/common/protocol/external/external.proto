@@ -26,6 +26,7 @@ message QueryResult {
 
 message QueryEnd {
   uint32 query_id = 1;
+  uint32 message_count = 2;
 }
 
 message Redirect {

@@ -17,7 +17,6 @@ class ClientHandler:
         self._router = router
         self._results = results
         self._queue = queue.Queue()
-        self._completed = False
 
     def run(self):
         logging.info("[%s] handler started", self._client_id)
@@ -29,13 +28,11 @@ class ClientHandler:
         sender.start()
         try:
             self._receive_loop()
-            sender.join()
-            self._completed = True
         except Exception:
+            logging.info("[%s] client disconnected", self._client_id)
+        finally:
             self._queue.put(_SENDER_STOP)
             sender.join()
-            raise
-        finally:
             try:
                 self._results.stop_consuming_threadsafe()
             except Exception:
@@ -46,7 +43,7 @@ class ClientHandler:
     def _receive_loop(self):
         got_eof_tx = False
         got_eof_acc = False
-        while not (got_eof_tx and got_eof_acc):
+        while True:
             msg_type, payload = external.recv_msg(self._sock)
             got_eof_tx, got_eof_acc = self._dispatch(
                 msg_type, payload, got_eof_tx, got_eof_acc
@@ -90,8 +87,6 @@ class ClientHandler:
     def _result_receiver_loop(self):
         try:
             self._results.start_consuming(self._on_result)
-            if self._completed:
-                self._results.delete_queue()
         except Exception as e:
             logging.warning(
                 "[%s] results consumer stopped: %s", self._client_id, e
@@ -107,10 +102,7 @@ class ClientHandler:
         self._queue.put((msg_type, payload, message_id, ack))
 
     def _sender_loop(self):
-        received_batches = {}
-        pending_ends = {}
-        finished_queries = 0
-        while finished_queries < len(EXPECTED_QUERY_IDS):
+        while True:
             item = self._queue.get()
             if item == _SENDER_STOP:
                 return
@@ -120,47 +112,22 @@ class ClientHandler:
             msg_type, payload, message_id, ack = item
 
             if msg_type in EXPECTED_QUERY_IDS:
-                query_id = msg_type
                 self._send_to_client(
-                    MsgType.QUERY_RESULT, query_id, payload, message_id=message_id
+                    MsgType.QUERY_RESULT, msg_type, payload, message_id=message_id
                 )
-                self._ack_to_rabbit(ack)
-                received_batches[query_id] = received_batches.get(query_id, 0) + 1
-                if received_batches[query_id] >= pending_ends.get(
-                    query_id, float("inf")
-                ):
-                    self._finalize_query(query_id)
-                    pending_ends.pop(query_id)
-                    finished_queries += 1
             elif msg_type == internal.MsgType.QUERY_END:
                 query_id, message_count = payload
-                if received_batches.get(query_id, 0) >= message_count:
-                    self._finalize_query(query_id)
-                    finished_queries += 1
-                else:
-                    pending_ends[query_id] = message_count
-                self._ack_to_rabbit(ack)
+                self._send_to_client(MsgType.QUERY_END, query_id, message_count)
             else:
                 logging.warning(
                     "[%s] unexpected internal msg in results queue: %s",
                     self._client_id,
                     msg_type,
                 )
-                self._ack_to_rabbit(ack)
-
-        while True:
-            try:
-                item = self._queue.get_nowait()
-                if item == ("ack",):
-                    self._send_to_client(MsgType.ACK)
-            except queue.Empty:
-                break
+            self._ack_to_rabbit(ack)
 
     def _ack_to_rabbit(self, ack):
         self._results.connection.add_callback_threadsafe(ack)
-
-    def _finalize_query(self, query_id):
-        self._send_to_client(MsgType.QUERY_END, query_id)
 
     def _send_to_client(self, msg_type, *args, message_id=""):
         external.send_msg(self._sock, msg_type, *args, message_id=message_id)

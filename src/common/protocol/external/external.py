@@ -113,8 +113,9 @@ def _serialize_query_result(env, query_id, records):
     _serialize_batch(batch.items, records, fields)
 
 
-def _serialize_query_end(env, query_id):
+def _serialize_query_end(env, query_id, message_count):
     env.query_end.query_id = query_id
+    env.query_end.message_count = message_count
 
 
 def _serialize_redirect(env, host, port):
@@ -155,7 +156,7 @@ def _deserialize_query_result(env):
 
 
 def _deserialize_query_end(env):
-    return env.query_end.query_id
+    return env.query_end.query_id, env.query_end.message_count
 
 
 def _deserialize_redirect(env):
