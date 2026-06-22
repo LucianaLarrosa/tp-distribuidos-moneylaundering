@@ -44,15 +44,11 @@ class ClientHandler:
             self._sock.close()
 
     def _receive_loop(self):
-        got_eof_tx = False
-        got_eof_acc = False
         while True:
             msg_type, payload = external.recv_msg(self._sock)
-            got_eof_tx, got_eof_acc = self._dispatch(
-                msg_type, payload, got_eof_tx, got_eof_acc
-            )
+            self._dispatch(msg_type, payload)
 
-    def _dispatch(self, msg_type, payload, got_eof_tx, got_eof_acc):
+    def _dispatch(self, msg_type, payload):
         if msg_type == MsgType.TRANSACTION_BATCH:
             records, _, message_id = payload
             self._router.forward_raw_transactions(
@@ -72,7 +68,6 @@ class ClientHandler:
                 self._client_id, int(message_id)
             )
             self._queue.put(("ack",))
-            got_eof_tx = True
         elif msg_type == MsgType.EOF_ACCOUNTS:
             _, message_id = payload
             logging.info("[%s] EOF_ACCOUNTS received", self._client_id)
@@ -80,14 +75,12 @@ class ClientHandler:
                 self._client_id, int(message_id)
             )
             self._queue.put(("ack",))
-            got_eof_acc = True
         elif msg_type == MsgType.RESULT_ACK:
             self._on_result_ack(payload)
         else:
             logging.warning(
                 "[%s] unexpected message type: %s", self._client_id, msg_type
             )
-        return got_eof_tx, got_eof_acc
 
     def _result_receiver_loop(self):
         try:
