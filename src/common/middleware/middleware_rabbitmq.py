@@ -22,6 +22,12 @@ class MessageMiddlewareRabbitMQBase:
         If an internal error occurs that cannot be resolved, it raises MessageMiddlewareMessageError.
         """
 
+        if getattr(self, "queue_name", None) is None:
+            raise MessageMiddlewareMessageError(
+                "start_consuming called on a producer-only middleware "
+                "(no queue_name was provided at construction)"
+            )
+
         def ack_nack_callback_adapter(ch, method, properties, body):
             on_message_callback(
                 body,
@@ -147,12 +153,15 @@ class MessageMiddlewareExchangeDirectRabbitMQ(
 
     def __init__(self, host, exchange_name, routing_keys, queue_name=None):
         """
-        Initializes the connection to the RabbitMQ server, declares the exchange and binds a queue to it.
-        If queue_name is provided, consumers share a named durable queue (broker round-robins messages → work distribution).
-        Otherwise each consumer gets its own exclusive queue (broadcast).
+        Initializes the connection to the RabbitMQ server and declares the exchange.
+        If queue_name is provided, a durable named queue is declared and bound to the
+        routing_keys (consumer; the broker round-robins messages between consumers
+        sharing the name → work distribution). If None, no queue is declared
+        (producer-only); calling start_consuming on such an instance is an error.
         """
         self.exchange_name = exchange_name
         self.routing_keys = routing_keys
+        self.queue_name = queue_name
 
         self.connection = pika.BlockingConnection(
             pika.ConnectionParameters(host=host, heartbeat=self._HEARTBEAT_INTERVAL)
@@ -164,18 +173,14 @@ class MessageMiddlewareExchangeDirectRabbitMQ(
                 exchange=self.exchange_name, exchange_type="direct", durable=True
             )
 
-            if queue_name is None:
-                result = self.channel.queue_declare(queue="", exclusive=True)
-                self.queue_name = result.method.queue
-            else:
+            if queue_name is not None:
                 self.channel.queue_declare(queue=queue_name, durable=True)
-                self.queue_name = queue_name
-            for routing_key in self.routing_keys:
-                self.channel.queue_bind(
-                    exchange=self.exchange_name,
-                    queue=self.queue_name,
-                    routing_key=routing_key,
-                )
+                for routing_key in self.routing_keys:
+                    self.channel.queue_bind(
+                        exchange=self.exchange_name,
+                        queue=queue_name,
+                        routing_key=routing_key,
+                    )
         except Exception:
             self.close()
 
@@ -209,10 +214,12 @@ class MessageMiddlewareExchangeFanoutRabbitMQ(
 ):
 
     def __init__(self, host, exchange_name, queue_name=None):
-        """Initializes the connection to the RabbitMQ server, declares the fanout exchange
-        and binds a queue to it. If queue_name is provided the queue is durable and named
-        (survives a consumer crash); otherwise a temporary exclusive queue is used."""
+        """Initializes the connection to the RabbitMQ server and declares the fanout
+        exchange. If queue_name is provided a durable named queue is declared and bound
+        (consumer). If None, no queue is declared (producer-only); calling
+        start_consuming on such an instance is an error."""
         self.exchange_name = exchange_name
+        self.queue_name = queue_name
 
         self.connection = pika.BlockingConnection(
             pika.ConnectionParameters(host=host, heartbeat=self._HEARTBEAT_INTERVAL)
@@ -224,16 +231,12 @@ class MessageMiddlewareExchangeFanoutRabbitMQ(
                 exchange=self.exchange_name, exchange_type="fanout", durable=True
             )
 
-            if queue_name is None:
-                result = self.channel.queue_declare(queue="", exclusive=True)
-                self.queue_name = result.method.queue
-            else:
+            if queue_name is not None:
                 self.channel.queue_declare(queue=queue_name, durable=True)
-                self.queue_name = queue_name
-            self.channel.queue_bind(
-                exchange=self.exchange_name,
-                queue=self.queue_name,
-            )
+                self.channel.queue_bind(
+                    exchange=self.exchange_name,
+                    queue=queue_name,
+                )
         except Exception:
             self.close()
 
@@ -268,12 +271,15 @@ class MessageMiddlewareExchangeTopicRabbitMQ(
         binding_patterns: list of routing key patterns with wildcard support.
           '*' matches exactly one word, '#' matches zero or more words.
           e.g. ["stock.#", "*.usd.*"]
-        queue_name: if provided, consumers share a named durable queue and the
-          broker round-robins messages between them (work distribution). If
-          None, each consumer gets its own exclusive queue (broadcast).
+        queue_name: if provided, a durable named queue is declared and bound to the
+          binding_patterns (consumer; the broker round-robins messages between
+          consumers sharing the name → work distribution). If None, no queue is
+          declared (producer-only); calling start_consuming on such an instance is
+          an error.
         """
         self.exchange_name = exchange_name
         self.binding_patterns = binding_patterns
+        self.queue_name = queue_name
 
         self.connection = pika.BlockingConnection(
             pika.ConnectionParameters(host=host, heartbeat=self._HEARTBEAT_INTERVAL)
@@ -285,19 +291,14 @@ class MessageMiddlewareExchangeTopicRabbitMQ(
                 exchange=self.exchange_name, exchange_type="topic", durable=True
             )
 
-            if queue_name is None:
-                result = self.channel.queue_declare(queue="", exclusive=True)
-                self.queue_name = result.method.queue
-            else:
+            if queue_name is not None:
                 self.channel.queue_declare(queue=queue_name, durable=True)
-                self.queue_name = queue_name
-
-            for pattern in self.binding_patterns:
-                self.channel.queue_bind(
-                    exchange=self.exchange_name,
-                    queue=self.queue_name,
-                    routing_key=pattern,
-                )
+                for pattern in self.binding_patterns:
+                    self.channel.queue_bind(
+                        exchange=self.exchange_name,
+                        queue=queue_name,
+                        routing_key=pattern,
+                    )
         except Exception:
             self.close()
 
