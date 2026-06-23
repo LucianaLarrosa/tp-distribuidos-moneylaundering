@@ -1,4 +1,4 @@
-# TP Escalabilidad: Money Laundering Analysis
+# TP Sistemas Distribuidos: Money Laundering Analysis
 
 ## Introducción
 
@@ -13,6 +13,7 @@ El objetivo de este trabajo práctico es diseñar e implementar un **sistema dis
 El sistema trabaja sobre el dataset público de IBM de transacciones financieras para detección de lavado de activos anti-money laundering (AML), disponible en Kaggle. El dataset consta de dos archivos principales:
 
 ### Transacciones
+
 Cada fila representa una transacción entre dos cuentas bancarias. Los campos relevantes son:
 
 | Campo | Descripción |
@@ -220,6 +221,56 @@ La cantidad de items por batch se calcula como $\left\lfloor \frac{\texttt{bytes
 | `Path` | 195 | **671** |
 | `Q4Result` | 62 | **2112** |
 
+## Tolerancia a Fallos
+
+Como se observa en el diagrama, el sistema tolera la falla de todos los nodos excepto el *Proxy*, el cual suele implementarse como un servicio externo en arquitecturas de este tipo. Por otro lado, no se contempla la caída de *RabbitMQ*, ya que efectivamente se asume como un servicio externo gestionado fuera del alcance del sistema.
+
+![Diagrama de Nodos Tolerantes a Fallos](diagramas/diagrama-nodos-tolerantes-fallos.png)
+
+Por su parte, los nodos en verde deben ser capaces de reiniciarse automáticamente ante caídas, mientras que el cliente (coloreado en azul) no posee capacidad de auto-recuperación; sin embargo, su posible caída es igualmente contemplada dentro del diseño.
+
+Para abordar la tolerancia a fallos, se consideraron tres aspectos fundamentales. En primer lugar, el reinicio automático de los nodos. No obstante, este mecanismo puede provocar el reenvío o reprocesamiento de mensajes, generando duplicados que impactan directamente en los resultados. Además, en el caso de los nodos *stateful*, es necesario garantizar la recuperación del estado para poder retomar la operación de manera consistente.
+
+Por ello, se prestó especial atención a las siguientes soluciones:
+
+* **Reinicio y disponibilidad:** se implementó un *Watchdog* encargado de detectar la caída de nodos y reiniciarlos automáticamente. Además, este componente se encuentra replicado para garantizar su disponibilidad y evitar que constituya un punto único de falla.
+* **Idempotencia:** se diseñaron identificadores específicos para cada etapa del procesamiento y se incorporaron mecanismos de deduplicación en los nodos correspondientes.
+* **Persistencia:** se utilizó un *Write-Ahead Log (WAL)* para garantizar la recuperación del estado y la persistencia de los datos ante fallos en nodos *stateful*.
+
+Finalmente, un desafío adicional consistió en contemplar la caída tanto del *Gateway* como de los clientes. En estos casos, fue necesario diseñar mecanismos de reconexión y asegurar la eliminación de los datos que dejan de ser relevantes, evitando que información obsoleta permanezca propagándose a lo largo del *pipeline*.
+
+### Reinicio – Watchdog
+
+Con respecto al *Watchdog*, su función principal es detectar la caída de nodos y asegurar su reinicio. Para ello, se implementó un mecanismo de heartbeats basado en mensajes UDP, mediante el cual el *Watchdog* envía periódicamente pings a cada nodo. Si un nodo deja de responder luego de una determinada cantidad de reintentos, se lo considera caído y se procede a su reinicio mediante Docker in Docker.
+
+Se eligió UDP debido a que la pérdida ocasional de mensajes no afecta el funcionamiento del sistema. Además, la utilización de reintentos permite evitar falsos positivos provocados por pérdidas esporádicas de paquetes.
+
+![Diagrama de Watchdog ante caída de nodo](diagramas/watchdog-caida-nodo.png)
+
+Por otro lado, para evitar que el *Watchdog* constituya un único punto de falla, se permite la existencia de múltiples instancias de este componente. Entre ellas se ejecuta el algoritmo de elección Bully, el cual garantiza que siempre exista un líder encargado de monitorear y reiniciar los nodos. La comunicación entre las distintas instancias se realiza mediante TCP, priorizando la confiabilidad y asegurando una correcta coordinación entre ellas.
+
+![Diagrama de Algoritmo de Bully en Watchdog](diagramas/watchdog-caida-lider.png)
+
+### Idempotencia
+
+<!--  -->
+
+### Persistencia – WAL
+
+<!--  -->
+
+### Manejo de caídas del Gateway y el cliente
+
+Finalmente, en cuanto a la caída del *Gateway* y el cliente, se distinguen tres escenarios posibles:
+
+* **Caída del Gateway:** en este caso, el cliente implementa un mecanismo de reintentos con backoff exponencial, dado que se asume que el *Gateway* eventualmente se recupera, permitiendo restablecer la conexión y continuar la operación.
+* **Caída del cliente:** ante este escenario, el *Gateway* detecta la desconexión y procede a iniciar la limpieza de los datos a lo largo del *pipeline*.
+* **Caída simultánea del cliente y el Gateway:** en este caso puede no realizarse la limpieza correspondiente de manera inmediata. Para mitigar esta situación, se implementa en el *Gateway* un *reaper*, encargado de detectar timeouts de interacción con el cliente y ejecutar la limpieza pendiente de forma diferida.
+
+### Testing – Chaos Monkey
+
+<!--  -->
+
 ## División de tareas
 
 | Tarea | Integrante |
@@ -232,3 +283,8 @@ La cantidad de items por batch se calcula como $\left\lfloor \frac{\texttt{bytes
 | Middleware | Bautista |
 | Server | Luciana |
 | Cliente | Luciana |
+| Idempotencia | Luciana y Bautista |
+| Persistencia | Luciana y Bautista |
+| Watchdog | Carolina |
+| Manejo de caídas del Cliente y el Gateway | Luciana, Carolina y Bautista |
+| Chaos Monkey | Carolina |
