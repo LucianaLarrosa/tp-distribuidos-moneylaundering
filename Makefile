@@ -33,24 +33,6 @@ WATCHDOGS                  ?= $(REPLICAS)
 
 COMPOSE_FILE ?= docker-compose.yaml
 
-DATASET_DIR       ?= ./data
-TRANSACTIONS_FILE ?= HI-Small_Trans.csv
-ACCOUNTS_FILE     ?= HI-Small_accounts.csv
-OUTPUT_DIR        ?= ./output
-
-EXPECTED_DIR        ?= ./expected_output
-PANDAS_EXPECTED_DIR ?= ./pandas_expected_output
-
-# Dataset size (Small/Medium/Large) derived from TRANSACTIONS_FILE (e.g. HI-Medium_Trans.csv -> Medium).
-# Expected outputs are cached per size under $(EXPECTED_DIR)/$(SIZE).
-SIZE              := $(patsubst HI-%_Trans.csv,%,$(TRANSACTIONS_FILE))
-EXPECTED_SIZE_DIR := $(EXPECTED_DIR)/$(SIZE)
-
-# Expected output for the dataset size injected by the chaos monkey (dynamic clients).
-INJECT_SIZE_DIR    = $(EXPECTED_DIR)/$(CHAOS_INJECT_DATASET_SIZE)
-
-PROTECTED_PREFIXES ?= rabbitmq proxy client
-
 COMPOSE_ARGS = \
 	--clients                     $(N_CLIENTS) \
 	--gateways                    $(N_GATEWAYS) \
@@ -77,6 +59,17 @@ COMPOSE_ARGS = \
 	--watchdogs                   $(WATCHDOGS) \
 	--output-file                 $(COMPOSE_FILE)
 
+DATASET_DIR       ?= ./data
+TRANSACTIONS_FILE ?= HI-Small_Trans.csv
+ACCOUNTS_FILE     ?= HI-Small_accounts.csv
+OUTPUT_DIR        ?= ./output
+
+EXPECTED_DIR        ?= ./expected_output
+SIZE ?= $(patsubst HI-%_Trans.csv,%,$(TRANSACTIONS_FILE))
+EXPECTED_SIZE_DIR := $(EXPECTED_DIR)/$(SIZE)
+PANDAS_EXPECTED_DIR ?= ./pandas_expected_output
+
+PROTECTED_PREFIXES ?= rabbitmq proxy client
 CHAOS_INTERVAL            ?= 30
 CHAOS_KILLS_PER_ROUND     ?= 3
 CHAOS_WATCHDOG_FLOOR      ?= 1
@@ -84,8 +77,9 @@ CHAOS_INJECT_START_ROUND  ?= 3
 CHAOS_INJECT_CLIENT_COUNT ?= 3
 CHAOS_INJECT_DATASET_SIZE ?= Small
 CHAOS_REF_CLIENT          ?= client_1
+CHAOS_CLIENTS_FILE        ?= .chaos_clients
 
-.PHONY: compose build up down logs remove-output clean clean-all build-expected verify-output output-test chaos-check-client chaos-kill chaos-kill-all chaos-inject-client chaos-monkey-round chaos-monkey chaos-monkey-cli verify-dyn chaos-output-test all chaos-all chaos-cli-all reaper-kill-clients reaper-test
+.PHONY: all chaos-all chaos-cli-all compose proto build up down logs remove-output remove-all clean clean-all chaos-check-client chaos-kill chaos-kill-all chaos-inject-client chaos-monkey-round chaos-monkey chaos-monkey-cli wait-clients build-expected check-client verify-output output-test chaos-output-test
 
 all: compose build output-test
 
@@ -93,8 +87,11 @@ chaos-all: compose build chaos-output-test
 
 chaos-cli-all: up build-expected chaos-monkey-cli wait-clients verify-output down
 
+compose:
+	python3 compose_generator.py $(COMPOSE_ARGS)
+
 proto:
-	docker run --rm -v $(PWD):/w -w /w python:3.11-slim sh -c "\
+	docker run --rm -v $(CURDIR):/w -w /w python:3.11-slim sh -c "\
 		pip install grpcio-tools==1.80.0 -q && \
 		python -m grpc_tools.protoc \
 			-I src \
@@ -105,20 +102,16 @@ proto:
 			src/common/protocol/health/health.proto \
 			src/common/protocol/election/election.proto"
 
-compose:
-	python3 compose_generator.py $(COMPOSE_ARGS)
-
 build: proto
 	docker compose -f $(COMPOSE_FILE) build
 
-up:
+up: remove-output
 	DATASET_DIR=$(DATASET_DIR) OUTPUT_DIR=$(OUTPUT_DIR) TRANSACTIONS_FILE=$(TRANSACTIONS_FILE) ACCOUNTS_FILE=$(ACCOUNTS_FILE) docker compose -f $(COMPOSE_FILE) up -d
 
 down:
 	docker compose -f $(COMPOSE_FILE) down -v
 	@dyn=$$(docker ps -a --format '{{.Names}}' | grep '^client_dyn_' || true); \
 	if [ -n "$$dyn" ]; then \
-		printf "$(CYAN)Removing leftover dynamic clients: %s$(RESET)\n" "$$(echo $$dyn | tr '\n' ' ')"; \
 		echo "$$dyn" | xargs docker rm -f >/dev/null; \
 	fi
 
@@ -128,6 +121,23 @@ logs:
 	else \
 		docker compose -f $(COMPOSE_FILE) logs -f $(SERVICE); \
 	fi
+
+remove-output:
+	rm -f $(CHAOS_CLIENTS_FILE)
+	rm -rf $(OUTPUT_DIR)
+
+remove-all: remove-output
+	rm -rf $(EXPECTED_DIR) $(PANDAS_EXPECTED_DIR)
+	rm -f $(COMPOSE_FILE)
+
+clean:
+	docker compose -f $(COMPOSE_FILE) down -v --rmi local
+	$(MAKE) --no-print-directory remove-all
+
+clean-all:
+	docker compose -f $(COMPOSE_FILE) down -v --rmi local --remove-orphans
+	docker system prune -f
+	$(MAKE) --no-print-directory remove-all
 
 chaos-check-client:
 	@if [ -z "$$(docker ps --format '{{.Names}}' | grep '^client_')" ]; then \
@@ -254,37 +264,6 @@ chaos-monkey-cli: chaos-check-client
 	done; \
 	printf "$(LIME)CLI done. Dynamic clients injected: %s$(RESET)\n" "$$injected"
 
-REAPER_KEEP ?= client_1
-
-reaper-kill-clients: chaos-check-client
-	@victims=$$(docker ps --format '{{.Names}}' | grep '^client_' | grep -vx '$(REAPER_KEEP)'); \
-	if [ -z "$$victims" ]; then \
-		printf "$(RED)Need more than one running client (keeping $(REAPER_KEEP))$(RESET)\n"; \
-		exit 0; \
-	fi; \
-	for v in $$victims; do \
-		printf "$(RED)Killing $$v...$(RESET)\n"; \
-		docker kill "$$v" >/dev/null; \
-	done; \
-	printf "$(LIME)Kept $(REAPER_KEEP) alive$(RESET)\n"
-
-reaper-test: reaper-kill-clients
-	@printf "$(CYAN)Watching reaper + cleanup prints (Ctrl-C to stop)...$(RESET)\n"
-	@docker compose -f $(COMPOSE_FILE) logs -f 2>&1 | grep --line-buffered -iE "reaper|\[cleanup\]"
-
-remove-output:
-	rm -f $(COMPOSE_FILE)
-	rm -rf $(OUTPUT_DIR) $(EXPECTED_DIR) $(PANDAS_EXPECTED_DIR)
-
-clean:
-	docker compose -f $(COMPOSE_FILE) down -v --rmi local
-	$(MAKE) --no-print-directory remove-output
-
-clean-all:
-	docker compose -f $(COMPOSE_FILE) down -v --rmi local --remove-orphans
-	docker system prune -f
-	$(MAKE) --no-print-directory remove-output
-
 wait-clients:
 	@client_names=""; \
 	for i in $$(seq 1 $(N_CLIENTS)); do client_names="$$client_names client_$$i"; done; \
@@ -302,21 +281,34 @@ build-expected:
 		DATASET_DIR=$(DATASET_DIR) EXPECTED_DIR=$(EXPECTED_SIZE_DIR) TRANSACTIONS_FILE=$(TRANSACTIONS_FILE) ACCOUNTS_FILE=$(ACCOUNTS_FILE) python3 build_expected.py; \
 	fi
 
-verify-output:
+check-client:
 	@mismatch=0; \
 	for query_number in 1 2 3 4 5; do \
-		for i in $$(seq 1 $(N_CLIENTS)); do \
-			output_file="$(OUTPUT_DIR)/q$${query_number}_client_$${i}.csv"; \
-			expected_file="$(EXPECTED_SIZE_DIR)/q$${query_number}_expected.csv"; \
-			if diff <(LC_ALL=C sort "$$output_file") <(LC_ALL=C sort "$$expected_file") > /dev/null 2>&1; then \
-				printf "$(LIME)✓ Q%s client %s: OK$(RESET)\n" "$$query_number" "$$i"; \
-			else \
-				printf "$(RED)✗ Q%s client %s: MISMATCH$(RESET)\n" "$$query_number" "$$i"; \
-				diff <(LC_ALL=C sort "$$output_file") <(LC_ALL=C sort "$$expected_file") | head -20; \
-				mismatch=1; \
-			fi; \
-		done; \
+		output_file="$(OUTPUT_DIR)/q$${query_number}_client_$(CLIENT_NAME).csv"; \
+		expected_file="$(CLIENT_EXPECTED_DIR)/q$${query_number}_expected.csv"; \
+		if [ ! -f "$$output_file" ]; then \
+			printf "$(RED)✗ Q%s client $(CLIENT_NAME): NO OUTPUT$(RESET)\n" "$$query_number"; \
+			mismatch=1; \
+		elif diff <(LC_ALL=C sort "$$output_file") <(LC_ALL=C sort "$$expected_file") > /dev/null 2>&1; then \
+			printf "$(LIME)✓ Q%s client $(CLIENT_NAME): OK$(RESET)\n" "$$query_number"; \
+		else \
+			printf "$(RED)✗ Q%s client $(CLIENT_NAME): MISMATCH$(RESET)\n" "$$query_number"; \
+			diff <(LC_ALL=C sort "$$output_file") <(LC_ALL=C sort "$$expected_file") | head -20; \
+			mismatch=1; \
+		fi; \
 	done; \
+	[ $$mismatch -eq 0 ]
+
+verify-output:
+	@mismatch=0; \
+	for i in $$(seq 1 $(N_CLIENTS)); do \
+		$(MAKE) --no-print-directory check-client CLIENT_NAME="$$i" CLIENT_EXPECTED_DIR="$(EXPECTED_SIZE_DIR)" || mismatch=1; \
+	done; \
+	if [ -s "$(CHAOS_CLIENTS_FILE)" ]; then \
+		while IFS=: read -r cname dataset; do \
+			$(MAKE) --no-print-directory check-client CLIENT_NAME="$$cname" CLIENT_EXPECTED_DIR="$(EXPECTED_DIR)/$$dataset" || mismatch=1; \
+		done < "$(CHAOS_CLIENTS_FILE)"; \
+	fi; \
 	if [ $$mismatch -eq 0 ]; then \
 		printf "$(LIME)Output test passed$(RESET)\n"; \
 	else \
@@ -324,33 +316,6 @@ verify-output:
 	fi; \
 	[ $$mismatch -eq 0 ]
 
-verify-dyn:
-	@mismatch=0; \
-	for query_number in 1 2 3 4 5; do \
-		idx=0; \
-		while [ "$$idx" -lt $(CHAOS_INJECT_CLIENT_COUNT) ]; do \
-			output_file="$(OUTPUT_DIR)/q$${query_number}_client_dyn_$${idx}.csv"; \
-			expected_file="$(INJECT_SIZE_DIR)/q$${query_number}_expected.csv"; \
-			if [ ! -f "$$output_file" ]; then \
-				printf "$(RED)✗ Q%s client dyn_%s: NO OUTPUT (%s)$(RESET)\n" "$$query_number" "$$idx" "$$output_file"; \
-				mismatch=1; \
-			elif diff <(LC_ALL=C sort "$$output_file") <(LC_ALL=C sort "$$expected_file") > /dev/null 2>&1; then \
-				printf "$(LIME)✓ Q%s client dyn_%s: OK$(RESET)\n" "$$query_number" "$$idx"; \
-			else \
-				printf "$(RED)✗ Q%s client dyn_%s: MISMATCH$(RESET)\n" "$$query_number" "$$idx"; \
-				diff <(LC_ALL=C sort "$$output_file") <(LC_ALL=C sort "$$expected_file") | head -20; \
-				mismatch=1; \
-			fi; \
-			idx=$$((idx + 1)); \
-		done; \
-	done; \
-	if [ $$mismatch -eq 0 ]; then \
-		printf "$(LIME)Dynamic-client output test passed$(RESET)\n"; \
-	else \
-		printf "$(RED)Dynamic-client output test failed$(RESET)\n"; \
-	fi; \
-	[ $$mismatch -eq 0 ]
-
 output-test: up wait-clients build-expected verify-output down
 
-chaos-output-test: up build-expected chaos-monkey wait-clients verify-output verify-dyn down
+chaos-output-test: up build-expected chaos-monkey wait-clients verify-output down
