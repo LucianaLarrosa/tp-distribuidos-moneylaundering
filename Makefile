@@ -85,7 +85,7 @@ CHAOS_INJECT_CLIENT_COUNT ?= 3
 CHAOS_INJECT_DATASET_SIZE ?= Small
 CHAOS_REF_CLIENT          ?= client_1
 
-.PHONY: compose build up down logs remove-output clean clean-all build-expected verify-output output-test chaos-check-client chaos-kill chaos-kill-all chaos-inject-client chaos-monkey-round chaos-monkey chaos-monkey-cli verify-dyn chaos-output-test all chaos-all chaos-cli-all
+.PHONY: compose build up down logs remove-output clean clean-all build-expected verify-output output-test chaos-check-client chaos-kill chaos-kill-all chaos-inject-client chaos-monkey-round chaos-monkey chaos-monkey-cli verify-dyn chaos-output-test all chaos-all chaos-cli-all reaper-kill-clients reaper-test
 
 all: compose build output-test
 
@@ -253,6 +253,24 @@ chaos-monkey-cli: chaos-check-client
 		esac; \
 	done; \
 	printf "$(LIME)CLI done. Dynamic clients injected: %s$(RESET)\n" "$$injected"
+
+REAPER_KEEP ?= client_1
+
+reaper-kill-clients: chaos-check-client
+	@victims=$$(docker ps --format '{{.Names}}' | grep '^client_' | grep -vx '$(REAPER_KEEP)'); \
+	if [ -z "$$victims" ]; then \
+		printf "$(RED)Need more than one running client (keeping $(REAPER_KEEP))$(RESET)\n"; \
+		exit 0; \
+	fi; \
+	for v in $$victims; do \
+		printf "$(RED)Killing $$v...$(RESET)\n"; \
+		docker kill "$$v" >/dev/null; \
+	done; \
+	printf "$(LIME)Kept $(REAPER_KEEP) alive$(RESET)\n"
+
+reaper-test: reaper-kill-clients
+	@printf "$(CYAN)Watching reaper + cleanup prints (Ctrl-C to stop)...$(RESET)\n"
+	@docker compose -f $(COMPOSE_FILE) logs -f 2>&1 | grep --line-buffered -iE "reaper|\[cleanup\]"
 
 remove-output:
 	rm -f $(COMPOSE_FILE)

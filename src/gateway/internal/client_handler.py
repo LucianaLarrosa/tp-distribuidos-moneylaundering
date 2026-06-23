@@ -11,11 +11,12 @@ _SENDER_STOP = "__sender_stop__"
 
 
 class ClientHandler:
-    def __init__(self, sock, client_id, router, results):
+    def __init__(self, sock, client_id, router, results, registry):
         self._sock = sock
         self._client_id = client_id
         self._router = router
         self._results = results
+        self._registry = registry
         self._queue = queue.Queue()
         self._pending_acks = {}
         self._ack_lock = threading.Lock()
@@ -23,6 +24,7 @@ class ClientHandler:
 
     def run(self):
         logging.info("[%s] handler started", self._client_id)
+        self._registry.connect(self._client_id)
         result_receiver = threading.Thread(
             target=self._result_receiver_loop, daemon=True
         )
@@ -34,6 +36,7 @@ class ClientHandler:
         except Exception:
             logging.info("[%s] client disconnected", self._client_id)
         finally:
+            self._registry.disconnect(self._client_id)
             self._queue.put(_SENDER_STOP)
             sender.join()
             try:
@@ -46,6 +49,7 @@ class ClientHandler:
     def _receive_loop(self):
         while True:
             msg_type, payload = external.recv_msg(self._sock)
+            self._registry.touch(self._client_id)
             self._dispatch(msg_type, payload)
 
     def _dispatch(self, msg_type, payload):

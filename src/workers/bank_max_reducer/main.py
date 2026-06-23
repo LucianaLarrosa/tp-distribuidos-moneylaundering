@@ -4,7 +4,7 @@ from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
 
-from common.ids import eof_id
+from common.ids import eof_id, final_eof_id
 from common.models.bank_max_partial import BankMaxPartial
 from common.protocol.internal import internal
 from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
@@ -72,6 +72,10 @@ class BankMaxReducer(StatefulCoordinatedWorker):
         self._apply_delta(client_id, delta)
         return delta
 
+    def _cleanup_state(self, client_id):
+        super()._cleanup_state(client_id)
+        self._global_max.pop(client_id, None)
+
     def _apply_delta(self, client_id, delta):
         flow_max = self._global_max.setdefault(client_id, {})
         for from_bank, (from_account, amount) in delta.items():
@@ -111,7 +115,7 @@ class BankMaxReducer(StatefulCoordinatedWorker):
                 internal.MsgType.EOF,
                 client_id,
                 eof,
-                message_id=eof_id(client_id),
+                message_id=final_eof_id(client_id, eof),
             ),
             routing_key="0",
         )

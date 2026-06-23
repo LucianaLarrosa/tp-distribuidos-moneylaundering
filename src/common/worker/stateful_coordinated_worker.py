@@ -10,9 +10,7 @@ from common.worker.ring_coordinated_worker import RingCoordinatedWorker
 class StatefulCoordinatedWorker(RingCoordinatedWorker):
     def __init__(self, config):
         super().__init__(config)
-        self._sent_count = (
-            {}
-        )  # client_id -> sent_count | actual total sent count
+        self._sent_count = {}  # client_id -> sent_count | actual total sent count
         self._partial_sent_count = (
             {}
         )  # client_id -> partial_sent_count | previous sent count sent to ring
@@ -38,9 +36,13 @@ class StatefulCoordinatedWorker(RingCoordinatedWorker):
 
     def _increment_sent_count(self, client_id):
         with self._sent_count_lock:
-            self._sent_count[client_id] = (
-                self._sent_count.get(client_id, 0) + 1
-            )
+            self._sent_count[client_id] = self._sent_count.get(client_id, 0) + 1
+
+    def _cleanup_state(self, client_id):
+        super()._cleanup_state(client_id)
+        with self._sent_count_lock:
+            self._sent_count.pop(client_id, None)
+            self._partial_sent_count.pop(client_id, None)
 
     def _control_state_snapshot(self, client_id):
         snapshot = super()._control_state_snapshot(client_id)

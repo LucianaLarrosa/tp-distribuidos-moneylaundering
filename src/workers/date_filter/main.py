@@ -4,7 +4,7 @@ from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
     MessageMiddlewareExchangeTopicRabbitMQ,
 )
-from common.ids import eof_id
+from common.ids import eof_id, final_eof_id
 from common.protocol.internal import internal
 from common.sharding import shard_of
 from common.worker.stateless_worker import StatelessWorker
@@ -57,7 +57,7 @@ class DateFilter(StatelessWorker):
             internal.MsgType.EOF,
             client_id,
             eof,
-            message_id=eof_id(client_id),
+            message_id=final_eof_id(client_id, eof),
         )
         self._output_exchange.send(msg, routing_key=self.config.output_routing_key_eof)
         self._payment_format_exchange.send(msg, routing_key=EOF_SHARD)

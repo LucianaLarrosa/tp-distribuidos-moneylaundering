@@ -1,6 +1,6 @@
 import logging
 
-from common.ids import flush_id, eof_id
+from common.ids import flush_id, eof_id, final_eof_id
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
     MessageMiddlewareQueueRabbitMQ,
@@ -75,7 +75,7 @@ class LowAmountAggregator(StatefulCoordinatedWorker):
                 internal.MsgType.EOF,
                 client_id,
                 eof,
-                message_id=eof_id(client_id),
+                message_id=final_eof_id(client_id, eof),
             )
         )
 
@@ -93,6 +93,10 @@ class LowAmountAggregator(StatefulCoordinatedWorker):
         )
         super()._handle_data_message(_, client_id, payload)
         return {"count": transaction_count}
+
+    def _cleanup_state(self, client_id):
+        super()._cleanup_state(client_id)
+        self._counts.pop(client_id, None)
 
     def _apply_delta(self, client_id, delta):
         self._counts[client_id] = (

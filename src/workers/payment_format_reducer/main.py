@@ -1,6 +1,6 @@
 import logging
 
-from common.ids import flush_id, eof_id
+from common.ids import flush_id, eof_id, final_eof_id
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
     MessageMiddlewareExchangeFanoutRabbitMQ,
@@ -70,6 +70,10 @@ class PaymentFormatReducer(StatefulCoordinatedWorker):
         self._apply_delta(client_id, delta)
         return delta
 
+    def _cleanup_state(self, client_id):
+        super()._cleanup_state(client_id)
+        self._totals.pop(client_id, None)
+
     def _apply_delta(self, client_id, delta):
         flow_totals = self._totals.setdefault(self._flow_key(client_id), {})
         for payment_format, (total_amount, count) in delta.items():
@@ -115,7 +119,7 @@ class PaymentFormatReducer(StatefulCoordinatedWorker):
                 internal.MsgType.EOF,
                 client_id,
                 eof,
-                message_id=eof_id(client_id),
+                message_id=final_eof_id(client_id, eof),
             )
         )
 

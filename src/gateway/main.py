@@ -4,7 +4,9 @@ import signal
 
 from gateway.config import Config
 from gateway.internal.client_handler import ClientHandler
+from gateway.internal.client_registry import ClientRegistry
 from gateway.internal.internal_router import InternalRouter
+from gateway.internal.reaper import Reaper
 from common.health import HealthResponder
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
@@ -14,7 +16,7 @@ from common.protocol.external.external import MsgType
 from common.socket.safe_socket import SafeTCPSocket
 
 
-def _handle_client_process(sock, client_id, config):
+def _handle_client_process(sock, client_id, config, registry):
     try:
         exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             config.rabbitmq_host,
@@ -43,7 +45,7 @@ def _handle_client_process(sock, client_id, config):
         exchange, config.transaction_routing_key, config.account_routing_key
     )
     try:
-        ClientHandler(sock, client_id, router, results).run()
+        ClientHandler(sock, client_id, router, results, registry).run()
     except Exception:
         logging.exception("[%s] handler crashed", client_id)
         raise
@@ -64,9 +66,12 @@ class Gateway:
         self._pool = multiprocessing.Pool(
             processes=config.pool_size, initializer=_worker_init
         )
+        self._manager = multiprocessing.Manager()
+        self._registry = ClientRegistry(self._manager, config.state_dir)
         self._health_responder = HealthResponder(
             config.node_name, config.ping_port, config.ping_pong_host
         )
+        self._reaper = None
         self._closed = False
 
     def run(self):
@@ -76,6 +81,8 @@ class Gateway:
             self._config.pool_size,
         )
         self._health_responder.start()
+        self._registry.load()
+        self._start_reaper()
 
         try:
             while True:
@@ -95,12 +102,17 @@ class Gateway:
                         client_sock,
                         client_id,
                         self._config,
+                        self._registry,
                     ),
                     error_callback=self._on_client_error,
                 )
         except OSError:
             if not self._closed:
                 raise
+
+    def _start_reaper(self):
+        self._reaper = Reaper(self._registry, self._config)
+        self._reaper.start()
 
     def _on_client_error(self, error):
         logging.error("client handler process error: %s", error)
@@ -111,6 +123,8 @@ class Gateway:
         self._closed = True
         logging.info("Shutdown requested")
         self._health_responder.stop()
+        if self._reaper is not None:
+            self._reaper.stop()
         self._server_sock.close()
         self._pool.terminate()
         self._pool.join()

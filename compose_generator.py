@@ -120,6 +120,7 @@ def _gateway(i, transactions_field_mappers, accounts_field_mappers):
             },
         },
         "ports": [f"{5000 + i - 1}:5000"],
+        "volumes": [f"gateway_state_{i}:/state"],
         "environment": {
             "GATEWAY_HOST": "0.0.0.0",
             "GATEWAY_PORT": "5000",
@@ -130,6 +131,9 @@ def _gateway(i, transactions_field_mappers, accounts_field_mappers):
             "ACCOUNT_ROUTING_KEY": ROUTING_KEY_ACCOUNT,
             "QUERY_RESULTS_EXCHANGE": EXCHANGE_QUERY_RESULTS,
             "EXPECTED_QUERY_IDS": f"{QUERY_1_ID},{QUERY_2_ID},{QUERY_3_ID},{QUERY_4_ID},{QUERY_5_ID}",
+            "STATE_DIR": "/state",
+            "REAPER_INTERVAL": "30",
+            "REAPER_TIMEOUT": "300",
         },
     }
 
@@ -904,7 +908,8 @@ def build_compose(
         monitored_nodes.append(service["container_name"])
     for i in range(watchdogs):
         services[f"watchdog_{i}"] = _watchdog(i, watchdogs, monitored_nodes)
-    volumes = {f"anomaly_filter_spill_{i}": None for i in range(anomaly_filters)}
+    volumes = {f"gateway_state_{i}": None for i in range(1, gateways + 1)}
+    volumes.update({f"anomaly_filter_spill_{i}": None for i in range(anomaly_filters)})
     volumes.update({f"bank_mapper_spill_{i}": None for i in range(bank_mappers)})
     volumes.update({f"anomaly_filter_state_{i}": None for i in range(anomaly_filters)})
     volumes.update({f"bank_mapper_state_{i}": None for i in range(bank_mappers)})

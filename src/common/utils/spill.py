@@ -46,6 +46,12 @@ class BatchSpill:
                     emit(self._deserialize(line))
         os.remove(path)
 
+    def discard(self, key):
+        self.close(key)
+        path = self._path(key)
+        if os.path.exists(path):
+            os.remove(path)
+
     def close_all(self):
         for key in list(self._files.keys()):
             self.close(key)

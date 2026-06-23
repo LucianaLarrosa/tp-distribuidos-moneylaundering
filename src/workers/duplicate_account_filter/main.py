@@ -3,7 +3,7 @@ import logging
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
-from common.ids import eof_id
+from common.ids import eof_id, final_eof_id
 from common.models.query_results import Q4Result
 from common.protocol.internal import internal
 from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
@@ -77,7 +77,7 @@ class DuplicateAccountFilter(StatefulCoordinatedWorker):
                 client_id,
                 self.config.query_id,
                 eof.message_count,
-                message_id=eof_id(client_id, self.config.query_id),
+                message_id=final_eof_id(client_id, eof, self.config.query_id),
             ),
             routing_key=client_id,
         )
@@ -90,6 +90,10 @@ class DuplicateAccountFilter(StatefulCoordinatedWorker):
         delta = [[account.bank, account.account] for account in payload]
         self._apply_delta(client_id, delta)
         return delta
+
+    def _cleanup_state(self, client_id):
+        super()._cleanup_state(client_id)
+        self._unique_accounts.pop(client_id, None)
 
     def _apply_delta(self, client_id, delta):
         unique_accounts = self._unique_accounts.setdefault(client_id, {})

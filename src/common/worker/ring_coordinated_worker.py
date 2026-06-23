@@ -4,10 +4,18 @@ from abc import abstractmethod
 from common.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
-from common.worker.worker import Worker, MAIN_CHANNEL, CONTROL_CHANNEL
+from common.worker.worker import Worker, MAIN_CHANNEL
 from common.protocol.internal import internal
-from common.models.eof import EOF, RingEOF
-from common.ids import ring_id, ring_seq_of, RING_PHASE_COUNT, RING_PHASE_FLUSH
+from common.models.eof import EOF, RingEOF, CLEANUP_EXPECTED_COUNT
+from common.ids import (
+    ring_id,
+    ring_seq_of,
+    RING_PHASE_COUNT,
+    RING_PHASE_FLUSH,
+    RING_PHASE_CLEANUP,
+)
+
+CONTROL_CHANNEL = "control"
 
 
 class RingCoordinatedWorker(Worker):
@@ -136,11 +144,14 @@ class RingCoordinatedWorker(Worker):
         if output_exchange is None:
             output_exchange = self._control_output_control_middleware
 
+        cleanup = ring_eof.expected_count == CLEANUP_EXPECTED_COUNT
+        action_phase = RING_PHASE_CLEANUP if cleanup else RING_PHASE_FLUSH
+
         if ring_eof.coordinator_id is None:
             ring_eof = self._update_ring_eof(client_id, ring_eof)
             if ring_eof.coordinator_id == self._node_id:
-                # counting -> became coordinator: start the flush phase
-                out_message_id = ring_id(client_id, RING_PHASE_FLUSH, 0)
+                out_seq = ring_seq_of(in_message_id) + 1 if cleanup else 0
+                out_message_id = ring_id(client_id, action_phase, out_seq)
             else:
                 out_message_id = ring_id(
                     client_id,
@@ -148,17 +159,23 @@ class RingCoordinatedWorker(Worker):
                     ring_seq_of(in_message_id) + 1,
                 )
         else:
-            self._flush_data(client_id)
-            ring_eof.total_sent_count = self._get_total_sent_count(
-                client_id, ring_eof.total_sent_count or 0
-            )
-            if ring_eof.coordinator_id == self._node_id:
-                self._send_final_eof(
-                    client_id, EOF(self._get_final_eof_count(ring_eof))
+            if cleanup:
+                self._cleanup_flow(client_id)
+            else:
+                self._flush_data(client_id)
+                ring_eof.total_sent_count = self._get_total_sent_count(
+                    client_id, ring_eof.total_sent_count or 0
                 )
+            if ring_eof.coordinator_id == self._node_id:
+                final_eof = (
+                    EOF(CLEANUP_EXPECTED_COUNT)
+                    if cleanup
+                    else EOF(self._get_final_eof_count(ring_eof))
+                )
+                self._send_final_eof(client_id, final_eof)
                 return
             out_message_id = ring_id(
-                client_id, RING_PHASE_FLUSH, ring_seq_of(in_message_id) + 1
+                client_id, action_phase, ring_seq_of(in_message_id) + 1
             )
         output_exchange.send(
             internal.serialize_msg(
@@ -178,7 +195,9 @@ class RingCoordinatedWorker(Worker):
                 if message_id in seen:
                     ack()
                     return
-                self._handle_control_eof_message(client_id, ring_eof, message_id)
+                self._handle_control_eof_message(
+                    client_id, ring_eof, message_id
+                )
                 seen.add(message_id)
                 self._state_store.append(
                     {
@@ -195,12 +214,16 @@ class RingCoordinatedWorker(Worker):
             raise
 
     def _control_state_snapshot(self, client_id):
-        return {
-            "partial_processed": self._partial_processed_count.get(client_id, 0)
-        }
+        return {"partial_processed": self._partial_processed_count.get(client_id, 0)}
 
     def _restore_control_state(self, client_id, snapshot):
         self._partial_processed_count[client_id] = snapshot["partial_processed"]
+
+    def _cleanup_state(self, client_id):
+        super()._cleanup_state(client_id)
+        with self._processed_counts_lock:
+            self._processed_counts.pop(client_id, None)
+            self._partial_processed_count.pop(client_id, None)
 
     def _flow_keys(self):
         keys = super()._flow_keys()
@@ -235,6 +258,8 @@ class RingCoordinatedWorker(Worker):
             self._processed_counts_lock,
             0,
         )
+        cleanup = eof.message_count == CLEANUP_EXPECTED_COUNT
+        start_phase = RING_PHASE_CLEANUP if cleanup else RING_PHASE_COUNT
         output_exchange.send(
             internal.serialize_msg(
                 internal.MsgType.RING_EOF,
@@ -244,7 +269,7 @@ class RingCoordinatedWorker(Worker):
                     total_processed_count=total_processed_count,
                     total_sent_count=self._get_total_sent_count(client_id, 0),
                 ),
-                message_id=ring_id(client_id, RING_PHASE_COUNT, 0),
+                message_id=ring_id(client_id, start_phase, 0),
             ),
             routing_key=self._get_ring_routing_key(self._get_next_node_id()),
         )
