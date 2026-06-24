@@ -122,9 +122,9 @@ A continuación se presentan los diagramas de actividad correspondientes a cada 
 
 El siguiente diagrama de secuencia expone la interacción general entre el cliente y los componentes de entrada y procesamiento del sistema distribuido. Se detalla el flujo de conexión inicial, donde el cliente envía una solicitud al **Proxy**, que se encarga de determinar el `Gateway` correspondiente y redirigir al cliente hacia él.
 
-Una vez establecida la conexión con el `Gateway`, los datos son enviados en *batches*: primero las transacciones, confirmadas con un `ack` y delegadas internamente hacia los `WorkersByQuery`, hasta señalizar el fin de su transmisión. Luego, de forma análoga, se envían los batches de cuentas, también delegados a los workers, finalizando con su señal de fin de transmisión correspondiente.
+Una vez establecida la conexión con el `Gateway`, el cliente se anuncia enviando su `client_id`. Luego, procede a enviar los datos en *batches*: primero las transacciones, confirmadas con un `ack` y delegadas internamente hacia los `WorkersByQuery`, hasta señalizar el fin de su transmisión. Luego, de forma análoga, se envían los batches de cuentas, también delegados a los workers, finalizando con su señal de fin de transmisión correspondiente.
 
-Una vez recibidas ambas señales, el sistema completa la etapa de procesamiento y consolidación, retornando los resultados calculados seguidos de la señal de cierre, que se propagan desde los `WorkersByQuery` a través del `Gateway` de vuelta hacia el cliente.
+Una vez recibidas ambas señales, el sistema completa la etapa de procesamiento y consolidación, retornando los resultados calculados seguidos de la señal de cierre, que se propagan desde los `WorkersByQuery` a través del `Gateway` de vuelta hacia el cliente. Tanto los resultados como la señal de cierre son confirmados por el cliente a través de un `result_ack`.
 
 ![Diagrama de Secuencia](diagramas/diagrama_secuencia.png)
 
