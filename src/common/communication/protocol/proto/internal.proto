@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package internal;
 
-import "common/protocol/common_protobuf/common_protobuf.proto";
+import "common/communication/protocol/proto/common_protobuf.proto";
 
 
 message Transaction {

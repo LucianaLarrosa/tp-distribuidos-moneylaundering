@@ -3,14 +3,14 @@ from datetime import datetime
 
 import requests
 
-from common.middleware.middleware_rabbitmq import (
+from common.communication.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
     MessageMiddlewareQueueRabbitMQ,
 )
-from common.ids import eof_id, final_eof_id
+from common.idempotency.ids import eof_id, final_eof_id
 from common.models.transaction_amount import TransactionAmount
-from common.protocol.internal import internal
-from common.sharding import shard_of
+from common.communication.protocol import internal
+from common.worker.sharding import shard_of
 from common.worker.stateless_worker import StatelessWorker
 from config import Config
 

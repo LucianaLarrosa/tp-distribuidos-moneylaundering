@@ -2,7 +2,7 @@ import logging
 import threading
 
 from gateway.internal.internal_router import InternalRouter
-from common.middleware.middleware_rabbitmq import (
+from common.communication.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
 

@@ -7,13 +7,13 @@ from common.models.query_results import (
     Q4Result,
     Q5Result,
 )
-from common.protocol.length_prefix import (
+from common.communication.protocol.length_prefix import (
     UINT32_SIZE,
     deserialize_uint32,
     serialize_uint32,
 )
 
-from . import external_pb2 as pb
+from common.communication.protocol.proto import external_pb2 as pb
 
 
 class MsgType:

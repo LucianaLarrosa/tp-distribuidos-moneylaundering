@@ -2,9 +2,9 @@ import logging
 import threading
 from abc import abstractmethod
 
-from common.protocol.internal import internal
+from common.communication.protocol import internal
 from common.models.eof import CLEANUP_EXPECTED_COUNT
-from common.utils import SideInputTracker
+from common.worker.side_input.side_input_tracker import SideInputTracker
 from common.worker.stateless_worker import StatelessWorker
 
 SIDE_CHANNEL = "side"

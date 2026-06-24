@@ -1,14 +1,14 @@
 import logging
 
-from common.middleware.middleware_rabbitmq import (
+from common.communication.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeTopicRabbitMQ,
     MessageMiddlewareQueueRabbitMQ,
 )
 from common.models.transaction_for_currency_conversion import (
     TransactionForCurrencyConversion,
 )
-from common.ids import eof_id, final_eof_id
-from common.protocol.internal import internal
+from common.idempotency.ids import eof_id, final_eof_id
+from common.communication.protocol import internal
 from common.worker.stateless_worker import StatelessWorker
 from config import Config
 

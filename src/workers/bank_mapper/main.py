@@ -3,15 +3,15 @@ import logging
 import threading
 from dataclasses import asdict
 
-from common.middleware.middleware_rabbitmq import (
+from common.communication.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
-from common.ids import final_eof_id
+from common.idempotency.ids import final_eof_id
 from common.models.bank_max_partial import BankMaxPartial
 from common.models.query_results import Q2Result
-from common.protocol.internal import internal
-from common.utils import BatchSpill
-from common.worker.side_input_stateless_worker import (
+from common.communication.protocol import internal
+from common.worker.side_input.spill import BatchSpill
+from common.worker.side_input.side_input_stateless_worker import (
     SideInputStatelessWorker,
 )
 from config import Config

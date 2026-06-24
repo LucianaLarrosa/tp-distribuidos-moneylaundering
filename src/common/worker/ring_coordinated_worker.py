@@ -1,13 +1,13 @@
 import threading
 from abc import abstractmethod
 
-from common.middleware.middleware_rabbitmq import (
+from common.communication.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
 from common.worker.worker import Worker, MAIN_CHANNEL
-from common.protocol.internal import internal
+from common.communication.protocol import internal
 from common.models.eof import EOF, RingEOF, CLEANUP_EXPECTED_COUNT
-from common.ids import (
+from common.idempotency.ids import (
     ring_id,
     ring_seq_of,
     RING_PHASE_COUNT,

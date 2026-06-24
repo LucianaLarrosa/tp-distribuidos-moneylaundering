@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from . import internal_pb2 as pb
+from common.communication.protocol.proto import internal_pb2 as pb
 
 from common.models.raw_transaction import RawTransaction
 from common.models.raw_account import RawAccount

@@ -8,12 +8,12 @@ from gateway.internal.client_registry import ClientRegistry
 from gateway.internal.internal_router import InternalRouter
 from gateway.internal.reaper import Reaper
 from common.health import HealthResponder
-from common.middleware.middleware_rabbitmq import (
+from common.communication.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
-from common.protocol.external import external
-from common.protocol.external.external import MsgType
-from common.socket.safe_socket import SafeTCPSocket
+from common.communication.protocol import external
+from common.communication.protocol.external import MsgType
+from common.communication.socket.safe_socket import SafeTCPSocket
 
 
 def _handle_client_process(sock, client_id, config, registry):

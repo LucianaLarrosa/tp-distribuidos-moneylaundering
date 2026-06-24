@@ -3,8 +3,8 @@ import queue
 import threading
 import time
 
-from common.protocol.election import election
-from common.socket import IncompleteReadError, SafeTCPSocket
+from common.communication.protocol import election
+from common.communication.socket import IncompleteReadError, SafeTCPSocket
 
 
 class PeerHandler:

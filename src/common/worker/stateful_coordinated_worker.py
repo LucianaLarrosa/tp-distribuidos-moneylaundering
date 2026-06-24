@@ -2,8 +2,8 @@ import math
 import threading
 from collections import defaultdict
 
-from common.ids import flush_id
-from common.sharding import hash_of
+from common.idempotency.ids import flush_id
+from common.worker.sharding import hash_of
 from common.worker.ring_coordinated_worker import RingCoordinatedWorker
 
 

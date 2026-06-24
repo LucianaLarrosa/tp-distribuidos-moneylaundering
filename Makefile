@@ -96,11 +96,11 @@ proto:
 		python -m grpc_tools.protoc \
 			-I src \
 			--python_out=src \
-			src/common/protocol/common_protobuf/common_protobuf.proto \
-			src/common/protocol/internal/internal.proto \
-			src/common/protocol/external/external.proto \
-			src/common/protocol/health/health.proto \
-			src/common/protocol/election/election.proto"
+			src/common/communication/protocol/proto/common_protobuf.proto \
+			src/common/communication/protocol/proto/internal.proto \
+			src/common/communication/protocol/proto/external.proto \
+			src/common/communication/protocol/proto/health.proto \
+			src/common/communication/protocol/proto/election.proto"
 
 build: proto
 	docker compose -f $(COMPOSE_FILE) build

@@ -3,8 +3,8 @@ import signal
 from abc import ABC, abstractmethod
 
 from common.health import HealthResponder
-from common.protocol.internal import internal
-from common.worker.state_log import StateLog
+from common.communication.protocol import internal
+from common.idempotency.state_log import StateLog
 
 MAIN_CHANNEL = "main"
 

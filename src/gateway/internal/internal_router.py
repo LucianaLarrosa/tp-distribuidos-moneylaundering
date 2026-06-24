@@ -1,5 +1,5 @@
-from common.ids import root_id, eof_id, final_eof_id
-from common.protocol.internal import internal
+from common.idempotency.ids import root_id, eof_id, final_eof_id
+from common.communication.protocol import internal
 from common.models.eof import EOF, CLEANUP_EXPECTED_COUNT
 
 

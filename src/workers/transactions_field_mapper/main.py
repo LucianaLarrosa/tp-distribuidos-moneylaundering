@@ -1,14 +1,14 @@
 import logging
 from datetime import datetime
 
-from common.ids import eof_id, final_eof_id
+from common.idempotency.ids import eof_id, final_eof_id
 from common.models.transaction import Transaction
-from common.protocol.internal import internal
-from common.middleware.middleware_rabbitmq import (
+from common.communication.protocol import internal
+from common.communication.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
     MessageMiddlewareExchangeTopicRabbitMQ,
 )
-from common.sharding import shard_of
+from common.worker.sharding import shard_of
 from common.worker.stateless_worker import StatelessWorker
 from config import Config
 

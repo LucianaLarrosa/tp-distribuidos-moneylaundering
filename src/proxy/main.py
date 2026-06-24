@@ -3,9 +3,9 @@ import signal
 import threading
 
 from proxy.config import Config
-from common.socket.safe_socket import SafeTCPSocket
-from common.protocol.external import external
-from common.protocol.external.external import MsgType
+from common.communication.socket.safe_socket import SafeTCPSocket
+from common.communication.protocol import external
+from common.communication.protocol.external import MsgType
 
 
 class Proxy:

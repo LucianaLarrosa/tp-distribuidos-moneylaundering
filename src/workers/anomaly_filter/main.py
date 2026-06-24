@@ -4,16 +4,16 @@ import threading
 from dataclasses import asdict
 from datetime import datetime
 
-from common.middleware.middleware_rabbitmq import (
+from common.communication.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
     MessageMiddlewareExchangeFanoutRabbitMQ,
 )
-from common.ids import final_eof_id
+from common.idempotency.ids import final_eof_id
 from common.models.query_results import Q3Result
 from common.models.transaction import Transaction
-from common.protocol.internal import internal
-from common.utils import BatchSpill
-from common.worker.side_input_stateless_worker import (
+from common.communication.protocol import internal
+from common.worker.side_input.spill import BatchSpill
+from common.worker.side_input.side_input_stateless_worker import (
     SideInputStatelessWorker,
 )
 from config import Config

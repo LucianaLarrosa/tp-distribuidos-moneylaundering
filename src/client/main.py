@@ -8,11 +8,11 @@ import uuid
 from dataclasses import asdict
 
 from client.config import Config
-from common.socket.safe_socket import SafeTCPSocket, IncompleteReadError
+from common.communication.socket.safe_socket import SafeTCPSocket, IncompleteReadError
 from common.models.raw_transaction import RawTransaction
 from common.models.raw_account import RawAccount
-from common.protocol.external import external
-from common.protocol.external.external import MsgType
+from common.communication.protocol import external
+from common.communication.protocol.external import MsgType
 
 
 class Client:

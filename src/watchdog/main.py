@@ -5,12 +5,12 @@ import threading
 import time
 
 from common.health import HealthResponder
-from common.protocol.election import election
-from common.protocol.election.election import MsgType
-from common.socket import SafeTCPSocket
+from common.communication.protocol import election
+from common.communication.protocol.election import MsgType
+from common.communication.socket import SafeTCPSocket
 from config import Config
-from health_monitor import HealthMonitor
-from peer_handler import PeerHandler
+from internal.health_monitor import HealthMonitor
+from internal.peer_handler import PeerHandler
 
 
 class Watchdog:

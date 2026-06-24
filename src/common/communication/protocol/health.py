@@ -1,4 +1,4 @@
-from . import health_pb2 as pb
+from common.communication.protocol.proto import health_pb2 as pb
 
 
 def serialize_ping():

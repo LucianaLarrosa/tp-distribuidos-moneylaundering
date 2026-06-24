@@ -1,12 +1,12 @@
 import logging
 
-from common.ids import flush_id, eof_id, final_eof_id
-from common.middleware.middleware_rabbitmq import (
+from common.idempotency.ids import flush_id, eof_id, final_eof_id
+from common.communication.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
     MessageMiddlewareQueueRabbitMQ,
 )
 from common.models.query_results import Q5Result
-from common.protocol.internal import internal
+from common.communication.protocol import internal
 from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
 from config import Config
 

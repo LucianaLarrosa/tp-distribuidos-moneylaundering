@@ -1,8 +1,8 @@
 import logging
 import threading
 
-from common.protocol.health import health
-from common.socket import SafeUDPSocket
+from common.communication.protocol import health
+from common.communication.socket import SafeUDPSocket
 
 
 class HealthResponder:

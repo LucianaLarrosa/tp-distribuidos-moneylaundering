@@ -1,4 +1,4 @@
-from common.socket.safe_socket import (
+from common.communication.socket.safe_socket import (
     IncompleteReadError,
     SafeUDPSocket,
     SafeTCPSocket,

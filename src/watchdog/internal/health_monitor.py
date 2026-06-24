@@ -3,8 +3,8 @@ import subprocess
 import threading
 import time
 
-from common.protocol.health import health
-from common.socket import SafeUDPSocket, SocketTimeoutError
+from common.communication.protocol import health
+from common.communication.socket import SafeUDPSocket, SocketTimeoutError
 
 
 class HealthMonitor:

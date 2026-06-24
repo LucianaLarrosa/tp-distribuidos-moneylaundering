@@ -2,9 +2,9 @@ import logging
 import threading
 import queue
 
-from common.protocol.external import external
-from common.protocol.internal import internal
-from common.protocol.external.external import MsgType
+from common.communication.protocol import external
+from common.communication.protocol import internal
+from common.communication.protocol.external import MsgType
 
 EXPECTED_QUERY_IDS = (1, 2, 3, 4, 5)
 _SENDER_STOP = "__sender_stop__"
