@@ -79,7 +79,7 @@ CHAOS_INJECT_DATASET_SIZE ?= Small
 CHAOS_REF_CLIENT          ?= client_1
 CHAOS_CLIENTS_FILE        ?= .chaos_clients
 
-.PHONY: all chaos-all chaos-cli-all compose proto build up down logs remove-output remove-all clean clean-all chaos-check-client chaos-kill chaos-kill-all chaos-inject-client chaos-monkey-round chaos-monkey chaos-monkey-cli wait-clients build-expected check-client verify-output output-test chaos-output-test
+.PHONY: all chaos-all chaos-cli-all compose proto build up down logs remove-output remove-all clean clean-all chaos-check-client chaos-kill chaos-kill-all chaos-inject-client chaos-monkey-round chaos-monkey chaos-monkey-cli volume-view volume-cli wait-clients build-expected check-client verify-output output-test chaos-output-test
 
 all: compose build output-test
 
@@ -236,7 +236,7 @@ chaos-monkey: chaos-check-client
 	done; \
 	printf "$(LIME)Chaos Monkey finished: %s round(s); %s client(s) injected$(RESET)\n" "$$round" "$$injected"
 
-chaos-monkey-cli: chaos-check-client
+chaos-monkey-cli:
 	@injected=0; \
 	while true; do \
 		protected_regex="^($$(echo $(PROTECTED_PREFIXES) | tr ' ' '|'))"; \
@@ -263,6 +263,49 @@ chaos-monkey-cli: chaos-check-client
 		esac; \
 	done; \
 	printf "$(LIME)CLI done. Dynamic clients injected: %s$(RESET)\n" "$$injected"
+
+VOLUME_TAIL  ?= 20
+VOLUME_WIDTH ?= 200
+
+volume-view:
+	@if [ -z "$(NODE)" ]; then \
+		printf "$(RED)Pasá NODE=<nombre> (ej: NODE=bank_max_aggregator_0)$(RESET)\n"; exit 1; \
+	fi; \
+	mounts=$$(docker inspect "$(NODE)" -f '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}::{{.Destination}} {{end}}{{end}}' 2>/dev/null); \
+	if [ -z "$$mounts" ]; then \
+		printf "$(RED)$(NODE): sin volúmenes nombrados (o no existe el contenedor)$(RESET)\n"; exit 0; \
+	fi; \
+	for m in $$mounts; do \
+		name=$${m%%::*}; dest=$${m##*::}; \
+		printf "$(CYAN)══ %s  →  volume %s$(RESET)\n" "$$dest" "$$name"; \
+		docker run --rm -v "$$name":/v alpine sh -c '\
+			ls -la /v; \
+			find /v -type f | while read -r f; do \
+				printf "\n$(LIME)--- %s (%s líneas, %s bytes) — últimas $(VOLUME_TAIL) ---$(RESET)\n" "$$f" "$$(wc -l < "$$f")" "$$(wc -c < "$$f")"; \
+				if [ "$(VOLUME_WIDTH)" -gt 0 ]; then tail -n $(VOLUME_TAIL) "$$f" | cut -c1-$(VOLUME_WIDTH); \
+				else tail -n $(VOLUME_TAIL) "$$f"; fi; \
+			done' 2>/dev/null; \
+	done
+
+volume-cli:
+	@while true; do \
+		printf "\n$(CYAN)Volume Viewer$(RESET)\n"; \
+		nodes=$$(docker ps -a --format '{{.Names}}' | while read -r n; do \
+			v=$$(docker inspect "$$n" -f '{{range .Mounts}}{{if eq .Type "volume"}}x{{end}}{{end}}' 2>/dev/null); \
+			[ -n "$$v" ] && echo "$$n"; \
+		done); \
+		if [ -z "$$nodes" ]; then printf "$(RED)No hay nodos con volúmenes$(RESET)\n"; break; fi; \
+		i=0; \
+		for n in $$nodes; do i=$$((i+1)); printf "  %s) %s\n" "$$i" "$$n"; done; \
+		printf "  q) Quit\nNodo (número o nombre): "; \
+		read -r sel </dev/tty; \
+		case "$$sel" in q|Q) break ;; esac; \
+		if echo "$$sel" | grep -qE '^[0-9]+$$'; then \
+			node=$$(echo "$$nodes" | sed -n "$${sel}p"); \
+		else node="$$sel"; fi; \
+		if [ -z "$$node" ]; then printf "$(RED)Selección inválida$(RESET)\n"; continue; fi; \
+		$(MAKE) --no-print-directory volume-view NODE="$$node"; \
+	done
 
 wait-clients:
 	@client_names=""; \
