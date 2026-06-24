@@ -7,11 +7,11 @@ from common.communication.middleware.middleware_rabbitmq import (
 )
 from common.models.count import Count
 from common.communication.protocol import internal
-from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
+from common.worker.stateful_worker import StatefulWorker
 from config import Config
 
 
-class LowAmountAggregator(StatefulCoordinatedWorker):
+class LowAmountAggregator(StatefulWorker):
     def __init__(self, config: Config):
         super().__init__(config)
         self._counts = {}  # (client_id) -> count

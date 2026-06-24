@@ -7,11 +7,11 @@ from common.communication.middleware.middleware_rabbitmq import (
 )
 from common.models.payment_format_average import PaymentFormatAverage
 from common.communication.protocol import internal
-from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
+from common.worker.stateful_worker import StatefulWorker
 from config import Config
 
 
-class PaymentFormatReducer(StatefulCoordinatedWorker):
+class PaymentFormatReducer(StatefulWorker):
     def __init__(self, config):
         super().__init__(config)
         self._totals = {}

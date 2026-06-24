@@ -6,11 +6,11 @@ from common.communication.middleware.middleware_rabbitmq import (
 from common.idempotency.ids import eof_id, final_eof_id
 from common.models.query_results import Q4Result
 from common.communication.protocol import internal
-from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
+from common.worker.stateful_worker import StatefulWorker
 from config import Config
 
 
-class DuplicateAccountFilter(StatefulCoordinatedWorker):
+class DuplicateAccountFilter(StatefulWorker):
     def __init__(self, config):
         super().__init__(config)
         self._unique_accounts = (

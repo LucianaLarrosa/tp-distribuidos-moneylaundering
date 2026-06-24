@@ -7,12 +7,12 @@ from common.idempotency.ids import eof_id, final_eof_id
 from common.models.account_edge import AccountEdge
 from common.communication.protocol import internal
 from common.worker.sharding import shard_of
-from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
+from common.worker.stateful_worker import StatefulWorker
 from common.worker.safe_output_capable import SafeOutputCapable
 from config import Config
 
 
-class BidirectionalSharder(SafeOutputCapable, StatefulCoordinatedWorker):
+class BidirectionalSharder(SafeOutputCapable, StatefulWorker):
     NUM_FIELDS_FOR_SHARDING = 2
 
     def __init__(self, config):

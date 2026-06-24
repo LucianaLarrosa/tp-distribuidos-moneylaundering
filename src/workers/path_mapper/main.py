@@ -6,11 +6,11 @@ from common.communication.middleware.middleware_rabbitmq import (
 from common.idempotency.ids import eof_id, final_eof_id
 from common.models.path import Path
 from common.communication.protocol import internal
-from common.worker.stateful_coordinated_worker import StatefulCoordinatedWorker
+from common.worker.stateful_worker import StatefulWorker
 from config import Config
 
 
-class PathMapper(StatefulCoordinatedWorker):
+class PathMapper(StatefulWorker):
     def __init__(self, config):
         super().__init__(config)
         self._account_edges = (
