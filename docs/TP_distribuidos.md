@@ -253,11 +253,53 @@ Por otro lado, para evitar que el *Watchdog* constituya un único punto de falla
 
 ### Idempotencia
 
-<!--  -->
+El sistema garantiza entrega *at-least-once*: cuando un worker cae antes de ackear un mensaje, RabbitMQ lo reentrega al revivir. Sin un mecanismo de deduplicación, esto provocaría que los resultados se procesen más de una vez y el output final tenga duplicados o valores incorrectos.
+
+#### Mecanismo base
+
+Cada worker mantiene un conjunto `seen` de IDs de mensajes ya procesados. Antes de procesar cualquier mensaje se verifica si su ID ya está en `seen`; si está, se descarta y se ackea sin volver a procesarlo. Si no está, se sigue el siguiente orden estricto:
+
+```
+dedup-check → procesar → seen.add → WAL → ack
+```
+
+El punto crítico es que nunca se ackea antes de persistir: si el proceso muere entre el fsync y el ack, RabbitMQ reentrega el mensaje y el ID ya está en `seen`, por lo que se descarta correctamente.
+
+#### IDs deterministas
+
+Para que la deduplicación funcione tras una caída, los IDs de los mensajes re-emitidos deben ser **exactamente los mismos** que los originales. Si se generaran aleatoriamente, al re-emitir tras una caída el downstream recibiría IDs nuevos que no reconocería como duplicados. Por eso todos los IDs se deben calcular de forma determinística.
+
+A su vez, se emplea una entrega determinística a partir del ID del mensaje, evitando la posibilidad de que un mismo mensaje llegue a distintas réplicas, y se cuente un dato de forma duplicada. Esto podría ocurrir ya que cada réplica tiene un `seen` propio. 
+
+#### Tipos de IDs
+
+El esquema varía según el tipo de nodo que emite:
+
+- **Root** (`client_id:batch_index`): lo agrega el gateway al recibir cada batch del cliente. Es el origen de la cadena de IDs.
+
+- **Pass-through**: mappers, filters y sharders pasan el ID de entrada sin modificarlo.
+
+- **Flush** (`client_id:origen:n_batch`): lo genera un aggregator o reducer al flushear su estado acumulado. En este punto ya no hay un único mensaje padre del cual derivar el ID (el nodo mergeó muchos inputs), así que se arma uno nuevo a partir del `node_id` del nodo, y un discriminador `n_batch` secuencial. 
+
+- **Ring** (`client_id:fase:seq`): identifica los tokens de control que circulan por el anillo de coordinación de fin de flujo, con `fase` (`count`, `flush`, `cleanup`). Cada nodo incrementa el `seq` del token, de modo que una reentrega del mismo token tiene el mismo ID y se descarta. Cuando cambia de fase se reinicia el `seq`. 
+
+- **EOF / QUERY_END** (`client_id:eof` o `client_id:eof:query_id`): se emiten al finalizar un flujo. No lleva el `node_id` del coordinador: si tras un crash coordina un nodo distinto, el downstream debe reconocer el EOF como el mismo mensaje y descartarlo, lo que sería imposible si el ID dependiera de quién coordinó.
+
+- **EOF Cleanup** (`client_id:eof:cleanup`): se emite cuando el Reaper detecta que un cliente se desconectó y venció el timeout. Se agrega `cleanup` para distenguirlo del EOF corriente, y no se produzcan deduplicaciones incorrectas. 
+
+#### Deduplicación en el cliente
+
+El cliente deduplica los resultados en memoria usando como clave `(query_id, message_id)`. El `query_id` es necesario porque los IDs pueden colisionar entre queries.
 
 ### Persistencia – WAL
 
-<!--  -->
+Dado que el estado de los nodos *stateful* vive en memoria, una caída haría que se pierda toda la información. Al reiniciarse, el nodo recibiría los mensajes no ackeados por RabbitMQ pero no tendría el estado previo para procesarlos correctamente. Para resolverlo, se persistió el estado usando un *Write-Ahead Log (WAL)*: en lugar de guardar una copia completa del estado ante cada mensaje, se appendea únicamente el *delta* que ese mensaje aporta. El estado completo se reconstruye al arrancar reproduciendo los deltas sobre el estado inicial.
+
+Cada réplica mantiene un único archivo de log en un volumen Docker persistente. Antes de ackear cada mensaje, el worker escribe en el **WAL** el identificador del mensaje y su delta, garantizando que si el proceso muere antes del ack, al revivir el mensaje sea reentregado pero ya figure en el log y sea descartado por el mecanismo de deduplicación.
+
+Para que el **WAL** no crezca indefinidamente se **compacta** periódicamente: se reemplaza por un snapshot del estado actual, de modo que el replay al reiniciar es siempre acotado. La compactación ocurre siempre al iniciar y cada cierta cantidad de operaciones durante la ejecución normal.
+
+Al arrancar, el worker reproduce el log: restaura el estado y reconstruye el conjunto de mensajes ya vistos. Luego RabbitMQ reentrega los mensajes sin ackear, que el mecanismo de deduplicación descarta si ya fueron procesados. De este modo, el nodo retoma exactamente donde estaba sin duplicar ni perder resultados.
 
 ### Manejo de caídas del Gateway y el cliente
 
