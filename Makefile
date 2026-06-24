@@ -79,13 +79,13 @@ CHAOS_INJECT_DATASET_SIZE ?= Small
 CHAOS_REF_CLIENT          ?= client_1
 CHAOS_CLIENTS_FILE        ?= .chaos_clients
 
-.PHONY: all chaos-all chaos-cli-all compose proto build up down logs remove-output remove-all clean clean-all chaos-check-client chaos-kill chaos-kill-all chaos-inject-client chaos-monkey-round chaos-monkey chaos-monkey-cli volume-view volume-cli wait-clients wait-dyn-clients build-expected check-client verify-output output-test chaos-output-test
+.PHONY: all chaos-all chaos-cli-all compose proto build up down logs remove-output remove-all clean clean-all chaos-kill chaos-kill-all chaos-inject-client chaos-monkey-round chaos-monkey chaos-monkey-cli volume-view volume-cli wait-clients wait-dyn-clients build-expected check-client verify-output output-test chaos-output-test chaos-cli-output-test
 
 all: compose build output-test
 
 chaos-all: compose build chaos-output-test
 
-chaos-cli-all: up build-expected chaos-monkey-cli wait-clients wait-dyn-clients verify-output down
+chaos-cli-all: compose build chaos-cli-output-test
 
 compose:
 	python3 compose_generator.py $(COMPOSE_ARGS)
@@ -138,12 +138,6 @@ clean-all:
 	docker compose -f $(COMPOSE_FILE) down -v --rmi local --remove-orphans
 	docker system prune -f
 	$(MAKE) --no-print-directory remove-all
-
-chaos-check-client:
-	@if [ -z "$$(docker ps --format '{{.Names}}' | grep '^client_')" ]; then \
-		printf "$(RED)No clients running. Run 'make up' first.$(RESET)\n"; \
-		exit 1; \
-	fi
 
 chaos-kill:
 	@protected_regex="^($$(echo $(PROTECTED_PREFIXES) | tr ' ' '|'))"; \
@@ -221,7 +215,7 @@ chaos-monkey-round:
 		$(MAKE) --no-print-directory chaos-kill || true; \
 	done
 
-chaos-monkey: chaos-check-client
+chaos-monkey:
 	@printf "$(LIME)Chaos Monkey: %s kill(s)/round every %ss, keeping %s watchdog(s) alive; injecting %s client(s) in batches of %s starting from round %s$(RESET)\n" \
     "$(CHAOS_KILLS_PER_ROUND)" "$(CHAOS_INTERVAL)" "$(CHAOS_WATCHDOG_FLOOR)" \
     "$(CHAOS_INJECT_CLIENT_COUNT)" "$(CHAOS_INJECT_DATASET_SIZE)" "$(CHAOS_INJECT_START_ROUND)"; \
@@ -239,7 +233,7 @@ chaos-monkey: chaos-check-client
 
 chaos-monkey-cli:
 	@injected=0; \
-	while true; do \
+	while [ -n "$$(docker ps --format '{{.Names}}' | grep '^client_')" ]; do \
 		protected_regex="^($$(echo $(PROTECTED_PREFIXES) | tr ' ' '|'))"; \
 		running=$$(docker ps --format '{{.Names}}' | grep -vE "$$protected_regex" | tr '\n' ' '); \
 		printf "\n$(CYAN)Chaos Monkey CLI$(RESET)\n"; \
@@ -374,3 +368,5 @@ verify-output:
 output-test: up wait-clients build-expected verify-output down
 
 chaos-output-test: up build-expected chaos-monkey wait-clients wait-dyn-clients verify-output down
+
+chaos-cli-output-test: up build-expected chaos-monkey-cli wait-clients wait-dyn-clients verify-output down
