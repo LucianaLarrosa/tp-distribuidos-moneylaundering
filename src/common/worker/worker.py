@@ -14,8 +14,9 @@ class Worker(StateLog, ABC):
         super().__init__()
         self.config = config
         self._closed = False
+        self._stopping = False
         self._current_message_id = ""
-        signal.signal(signal.SIGTERM, lambda *_: self.shutdown())
+        signal.signal(signal.SIGTERM, lambda *_: self._request_stop())
         self._health_responder = HealthResponder(
             config.node_name, config.ping_port, config.ping_pong_host
         )
@@ -99,6 +100,13 @@ class Worker(StateLog, ABC):
             out_middleware.send(msg, routing_key=routing_key)
         else:
             out_middleware.send(msg)
+
+    def _request_stop(self):
+        if self._stopping:
+            return
+        self._stopping = True
+        logging.info("SIGTERM received, stopping consumer...")
+        self._input_middleware.stop_consuming_threadsafe()
 
     def start(self):
         logging.info("Starting worker...")

@@ -23,9 +23,12 @@ class Watchdog:
         AWAITING_ANSWER = "AWAITING_ANSWER"
         AWAITING_COORDINATOR = "AWAITING_COORDINATOR"
 
+    _SHUTDOWN_POLL_SECONDS = 1.0
+
     def __init__(self, config):
         self._config = config
         self._closed = False
+        self._shutdown_done = False
 
         self._role = Watchdog.Role.FOLLOWER
         self._leader_id = None
@@ -60,7 +63,7 @@ class Watchdog:
             config.node_name, config.ping_port, config.ping_pong_host
         )
 
-        signal.signal(signal.SIGTERM, lambda *_: self.shutdown())
+        signal.signal(signal.SIGTERM, lambda *_: self._request_stop())
 
     # --- Peer Management ---
 
@@ -171,18 +174,25 @@ class Watchdog:
 
     # --- Event loop ---
 
-    def _seconds_until_deadline(self):
+    def _poll_timeout(self):
         if self._phase == Watchdog.Phase.IDLE:
-            return None
-        return max(0.0, self._deadline - time.monotonic())
+            return self._SHUTDOWN_POLL_SECONDS
+        return min(
+            self._SHUTDOWN_POLL_SECONDS,
+            max(0.0, self._deadline - time.monotonic()),
+        )
 
     def _event_loop(self):
         self._start_election()
         while not self._closed:
             try:
-                event = self._events.get(timeout=self._seconds_until_deadline())
+                event = self._events.get(timeout=self._poll_timeout())
             except queue.Empty:
-                self._handle_election_timeout()
+                if (
+                    self._phase != Watchdog.Phase.IDLE
+                    and time.monotonic() >= self._deadline
+                ):
+                    self._handle_election_timeout()
                 continue
             if event is None:
                 break
@@ -203,12 +213,15 @@ class Watchdog:
         self._connect_to_higher_peers()
         self._event_loop()
 
+    def _request_stop(self):
+        self._closed = True
+
     def shutdown(self):
-        if self._closed:
+        if self._shutdown_done:
             return
+        self._shutdown_done = True
         self._closed = True
         logging.info("Shutting down watchdog %d...", self._config.watchdog_id)
-        self._events.put(None)
         self._health_responder.stop()
         self._health_monitor.close()
         self._server_socket.close()
