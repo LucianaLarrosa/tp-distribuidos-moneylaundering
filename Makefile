@@ -79,13 +79,13 @@ CHAOS_INJECT_DATASET_SIZE ?= Small
 CHAOS_REF_CLIENT          ?= client_1
 CHAOS_CLIENTS_FILE        ?= .chaos_clients
 
-.PHONY: all chaos-all chaos-cli-all compose proto build up down logs remove-output remove-all clean clean-all chaos-check-client chaos-kill chaos-kill-all chaos-inject-client chaos-monkey-round chaos-monkey chaos-monkey-cli volume-view volume-cli wait-clients build-expected check-client verify-output output-test chaos-output-test
+.PHONY: all chaos-all chaos-cli-all compose proto build up down logs remove-output remove-all clean clean-all chaos-check-client chaos-kill chaos-kill-all chaos-inject-client chaos-monkey-round chaos-monkey chaos-monkey-cli volume-view volume-cli wait-clients wait-dyn-clients build-expected check-client verify-output output-test chaos-output-test
 
 all: compose build output-test
 
 chaos-all: compose build chaos-output-test
 
-chaos-cli-all: up build-expected chaos-monkey-cli wait-clients verify-output down
+chaos-cli-all: up build-expected chaos-monkey-cli wait-clients wait-dyn-clients verify-output down
 
 compose:
 	python3 compose_generator.py $(COMPOSE_ARGS)
@@ -210,6 +210,7 @@ chaos-inject-client:
 		-e CLIENT_NAME="dyn_$(CHAOS_INJECT_IDX)" \
 		"$$img" >/dev/null 2>&1; then \
 		printf "$(LIME)  ＋ Inyected %s (%s)$(RESET)\n" "$$name" "$$trans"; \
+		echo "dyn_$(CHAOS_INJECT_IDX):$(CHAOS_INJECT_DATASET_SIZE)" >> "$(CHAOS_CLIENTS_FILE)"; \
 	else \
 		printf "$(RED)  ✗ Failed to inject %s$(RESET)\n" "$$name"; \
 	fi
@@ -312,6 +313,17 @@ wait-clients:
 	for i in $$(seq 1 $(N_CLIENTS)); do client_names="$$client_names client_$$i"; done; \
 	docker container wait $$client_names
 
+wait-dyn-clients:
+	@if [ -s "$(CHAOS_CLIENTS_FILE)" ]; then \
+		dyn_names=""; \
+		while IFS=: read -r cname dataset; do \
+			dyn_names="$$dyn_names client_$$cname"; \
+		done < "$(CHAOS_CLIENTS_FILE)"; \
+		if [ -n "$$dyn_names" ]; then \
+			docker container wait $$dyn_names; \
+		fi; \
+	fi
+
 build-expected:
 	@if [ -f "$(EXPECTED_SIZE_DIR)/q1_expected.csv" ] \
 		&& [ -f "$(EXPECTED_SIZE_DIR)/q2_expected.csv" ] \
@@ -361,4 +373,4 @@ verify-output:
 
 output-test: up wait-clients build-expected verify-output down
 
-chaos-output-test: up build-expected chaos-monkey wait-clients verify-output down
+chaos-output-test: up build-expected chaos-monkey wait-clients wait-dyn-clients verify-output down

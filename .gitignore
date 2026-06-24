@@ -10,6 +10,7 @@ output/
 expected_output/
 pandas_expected_output/
 docker-compose.yaml
+.chaos_clients
 
 # Protobuf
 *_pb2.py
