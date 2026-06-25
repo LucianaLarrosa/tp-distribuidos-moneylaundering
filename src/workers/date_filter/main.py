@@ -3,6 +3,7 @@ import logging
 from common.communication.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
     MessageMiddlewareExchangeTopicRabbitMQ,
+    MessageMiddlewareQueueRabbitMQ,
 )
 from common.idempotency.ids import eof_id, final_eof_id
 from common.communication.protocol import internal
@@ -23,14 +24,13 @@ class DateFilter(StatelessWorker):
             binding_patterns=config.input_routing_keys,
             queue_name=config.input_queue_name,
         )
-        self._output_exchange = MessageMiddlewareExchangeTopicRabbitMQ(
+        self._output_queue = MessageMiddlewareQueueRabbitMQ(
             host=config.rabbitmq_host,
-            exchange_name=config.output_exchange,
-            binding_patterns=[],
+            queue_name=config.output_queue,
         )
-        self._payment_format_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
+        self._payment_format_aggregator_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
             host=config.rabbitmq_host,
-            exchange_name=config.payment_format_exchange,
+            exchange_name=config.payment_format_aggregator_exchange,
             routing_keys=[],
         )
         self._bidirectional_sharder_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
@@ -50,7 +50,7 @@ class DateFilter(StatelessWorker):
 
     @property
     def _output_middleware(self):
-        return self._output_exchange
+        return self._output_queue
 
     def _send_final_eof(self, client_id, eof):
         msg = internal.serialize_msg(
@@ -59,14 +59,14 @@ class DateFilter(StatelessWorker):
             eof,
             message_id=final_eof_id(client_id, eof),
         )
-        self._output_exchange.send(msg, routing_key=self.config.output_routing_key_eof)
-        self._payment_format_exchange.send(msg, routing_key=EOF_SHARD)
+        self._output_queue.send(msg)
+        self._payment_format_aggregator_exchange.send(msg, routing_key=EOF_SHARD)
         self._bidirectional_sharder_exchange.send(msg, routing_key=EOF_SHARD)
         self._anomaly_filter_exchange.send(msg, routing_key=EOF_SHARD)
 
     def shutdown(self):
         super().shutdown()
-        self._payment_format_exchange.close()
+        self._payment_format_aggregator_exchange.close()
         self._bidirectional_sharder_exchange.close()
         self._anomaly_filter_exchange.close()
 
@@ -119,11 +119,10 @@ class DateFilter(StatelessWorker):
             for routing_key in self._classify_transaction(transaction):
                 transactions_by_routing_key[routing_key].append(transaction)
         self._send(
-            self._output_exchange,
+            self._output_queue,
             internal.MsgType.TRANSACTION_BATCH,
             client_id,
             transactions_by_routing_key[all_period_1_key],
-            routing_key=all_period_1_key,
         )
         self._send(
             self._bidirectional_sharder_exchange,
@@ -142,11 +141,13 @@ class DateFilter(StatelessWorker):
             routing_key=self._shard_routing_key(self.config.anomaly_filter_node_count),
         )
         self._send(
-            self._payment_format_exchange,
+            self._payment_format_aggregator_exchange,
             internal.MsgType.TRANSACTION_BATCH,
             client_id,
             transactions_by_routing_key[usd_period_1_key],
-            routing_key=self._shard_routing_key(self.config.payment_format_node_count),
+            routing_key=self._shard_routing_key(
+                self.config.payment_format_aggregator_node_count
+            ),
         )
 
 

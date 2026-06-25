@@ -1,7 +1,6 @@
 import logging
 
 from common.communication.middleware.middleware_rabbitmq import (
-    MessageMiddlewareExchangeTopicRabbitMQ,
     MessageMiddlewareQueueRabbitMQ,
 )
 from common.models.transaction_for_currency_conversion import (
@@ -17,11 +16,9 @@ class PaymentFormatFilter(StatelessWorker):
     def __init__(self, config):
         super().__init__(config)
 
-        self._input_exchange = MessageMiddlewareExchangeTopicRabbitMQ(
+        self._input_queue = MessageMiddlewareQueueRabbitMQ(
             host=config.rabbitmq_host,
-            exchange_name=config.input_exchange,
-            binding_patterns=config.input_routing_keys,
-            queue_name=config.input_queue_name,
+            queue_name=config.input_queue,
         )
         self._output_queue = MessageMiddlewareQueueRabbitMQ(
             host=config.rabbitmq_host,
@@ -30,7 +27,7 @@ class PaymentFormatFilter(StatelessWorker):
 
     @property
     def _input_middleware(self):
-        return self._input_exchange
+        return self._input_queue
 
     @property
     def _output_middleware(self):

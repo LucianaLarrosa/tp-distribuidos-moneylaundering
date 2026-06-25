@@ -14,8 +14,8 @@ LOW_AMOUNT_REDUCERS = 1
 EXCHANGE_RAW_DATA = "raw_data"
 EXCHANGE_FILTERED_TRANSACTIONS = "filtered_transactions"
 EXCHANGE_BANK_MAX_INPUT = "bank_max_input"
-EXCHANGE_PAYMENT_FORMAT_INPUT = "payment_format_input"
-EXCHANGE_DATE_FILTER_OUTPUT = "date_filter_output"
+EXCHANGE_PAYMENT_FORMAT_AGGREGATOR_INPUT = "payment_format_aggregator_input"
+QUEUE_PAYMENT_FORMAT_FILTER_INPUT = "payment_format_filter_input"
 EXCHANGE_BANK_CATALOG = "bank_catalog"
 EXCHANGE_BANK_MAX_OUTPUT = "bank_max_output"
 EXCHANGE_BANK_MAX_SHARDED = "bank_max_sharded"
@@ -252,7 +252,7 @@ def _date_filter(
             "INPUT_EXCHANGE": EXCHANGE_FILTERED_TRANSACTIONS,
             "INPUT_ROUTING_KEY": f"{ROUTING_KEYS_ALL},{ROUTING_KEYS_EOF}",
             "INPUT_QUEUE_NAME": "date_filter_input",
-            "OUTPUT_EXCHANGE": EXCHANGE_DATE_FILTER_OUTPUT,
+            "OUTPUT_QUEUE": QUEUE_PAYMENT_FORMAT_FILTER_INPUT,
             "DATE_FORMAT": TRANSACTION_DATE_FORMAT,
             "DATE_FROM_1": DATE_FROM_1,
             "DATE_TO_1": DATE_TO_1,
@@ -263,9 +263,8 @@ def _date_filter(
             "OUTPUT_ROUTING_KEY_ALL": ROUTING_KEYS_ALL,
             "OUTPUT_ROUTING_KEY_PERIOD_1": ROUTING_KEY_PERIOD_1,
             "OUTPUT_ROUTING_KEY_PERIOD_2": ROUTING_KEY_PERIOD_2,
-            "OUTPUT_ROUTING_KEY_EOF": ROUTING_KEYS_EOF,
-            "PAYMENT_FORMAT_EXCHANGE": EXCHANGE_PAYMENT_FORMAT_INPUT,
-            "PAYMENT_FORMAT_NODE_COUNT": str(payment_format_aggregators),
+            "PAYMENT_FORMAT_AGGREGATOR_EXCHANGE": EXCHANGE_PAYMENT_FORMAT_AGGREGATOR_INPUT,
+            "PAYMENT_FORMAT_AGGREGATOR_NODE_COUNT": str(payment_format_aggregators),
             "BIDIRECTIONAL_SHARDER_EXCHANGE": EXCHANGE_BIDIRECTIONAL_SHARDER_INPUT,
             "BIDIRECTIONAL_SHARDER_NODE_COUNT": str(bidirectional_sharders),
             "ANOMALY_FILTER_EXCHANGE": EXCHANGE_ANOMALY_FILTER_INPUT,
@@ -290,9 +289,7 @@ def _payment_format_filter(i, currency_mappers):
         },
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "INPUT_EXCHANGE": EXCHANGE_DATE_FILTER_OUTPUT,
-            "INPUT_ROUTING_KEY": f"{ROUTING_KEYS_ALL}.{ROUTING_KEY_PERIOD_1},{ROUTING_KEYS_EOF}",
-            "INPUT_QUEUE_NAME": "payment_format_filter_input",
+            "INPUT_QUEUE": QUEUE_PAYMENT_FORMAT_FILTER_INPUT,
             "OUTPUT_QUEUE": QUEUE_CURRENCY_MAPPER_INPUT,
             "VALID_PAYMENT_FORMATS": "Wire,ACH",
             "USD_CURRENCY": USD_CURRENCY,
@@ -537,8 +534,8 @@ def _payment_format_aggregator(i, payment_format_aggregators, payment_format_red
         "volumes": [f"payment_format_aggregator_state_{i}:/state"],
         "environment": {
             "RABBITMQ_HOST": "rabbitmq",
-            "INPUT_EXCHANGE": EXCHANGE_PAYMENT_FORMAT_INPUT,
-            "INPUT_QUEUE": f"payment_format_input_{i}",
+            "INPUT_EXCHANGE": EXCHANGE_PAYMENT_FORMAT_AGGREGATOR_INPUT,
+            "INPUT_QUEUE": f"payment_format_aggregator_input_{i}",
             "OUTPUT_EXCHANGE": EXCHANGE_PAYMENT_FORMAT_SHARDS,
             "CONTROL_EXCHANGE": "payment_format_aggregator_control",
             "NODE_PREFIX": NODE_PREFIX,

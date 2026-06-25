@@ -14,7 +14,7 @@ class Config(WorkerConfig):
             for routing_key in os.environ["INPUT_ROUTING_KEY"].split(",")
         ]
         self.input_queue_name = os.environ.get("INPUT_QUEUE_NAME")
-        self.output_exchange = os.environ["OUTPUT_EXCHANGE"]
+        self.output_queue = os.environ["OUTPUT_QUEUE"]
         self.date_format = os.environ["DATE_FORMAT"]
         self.date_from_1 = datetime.strptime(
             os.environ["DATE_FROM_1"], self.date_format
@@ -29,9 +29,12 @@ class Config(WorkerConfig):
         self.output_routing_key_all = os.environ["OUTPUT_ROUTING_KEY_ALL"]
         self.output_routing_key_period_1 = os.environ["OUTPUT_ROUTING_KEY_PERIOD_1"]
         self.output_routing_key_period_2 = os.environ["OUTPUT_ROUTING_KEY_PERIOD_2"]
-        self.output_routing_key_eof = os.environ["OUTPUT_ROUTING_KEY_EOF"]
-        self.payment_format_exchange = os.environ["PAYMENT_FORMAT_EXCHANGE"]
-        self.payment_format_node_count = int(os.environ["PAYMENT_FORMAT_NODE_COUNT"])
+        self.payment_format_aggregator_exchange = os.environ[
+            "PAYMENT_FORMAT_AGGREGATOR_EXCHANGE"
+        ]
+        self.payment_format_aggregator_node_count = int(
+            os.environ["PAYMENT_FORMAT_AGGREGATOR_NODE_COUNT"]
+        )
         self.bidirectional_sharder_exchange = os.environ[
             "BIDIRECTIONAL_SHARDER_EXCHANGE"
         ]
