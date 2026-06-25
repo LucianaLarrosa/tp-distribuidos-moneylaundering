@@ -86,7 +86,7 @@ Contar el total de transacciones del período **[2022-09-01, 2022-09-05]** con f
 
 ### Vista de Casos de Uso
 
-El diagrama muestra el único actor del sistema, el **Cliente**, y su interacción principal: solicitar el análisis de transacciones. Esa acción incluye las cinco queries del sistema.
+El diagrama muestra el único actor del sistema, el **cliente**, y su interacción principal: solicitar el análisis de transacciones. Esa acción incluye las cinco queries del sistema.
 
 ![Diagrama de casos de uso](diagramas/diagrama_uso.png)
 
@@ -94,11 +94,11 @@ El diagrama muestra el único actor del sistema, el **Cliente**, y su interacci�
 
 #### DAG
 
-A continuación se presenta el DAG del sistema, que representa el flujo general de procesamiento de los datos. Desde `Data source` las transacciones y cuentas pasan primero por los workers `Transactions field mapper` y `Accounts field mapper` respectivamente, para normalizar los campos relevantes antes de distribuirlos al resto del sistema. 
+A continuación se presenta el DAG del sistema, que representa el flujo general de procesamiento de los datos. Desde *Data Source* las transacciones y cuentas pasan primero por los workers `TransactionsFieldMapper` y `AccountsFieldMapper` respectivamente, para normalizar los campos relevantes antes de distribuirlos al resto del sistema. 
 
 A partir de ahí, las transacciones se distribuyen por dos ramas principales: la rama `usd`, que filtra por moneda de origen, y la rama `all`, que recibe todas las transacciones independientemente de su moneda. Las cuentas, en cambio, se envían directamente al `Bank Mapper`, que las utiliza para obtener el nombre del banco en **Q2**.
 
-Los datos van pasando por distintos nodos de procesamiento, filtrado, agregación, mapeo, entre otros; cuyos colores en el diagrama indican el tipo de operación que realizan. Cabe destacar que algunos nodos son compartidos entre múltiples queries, como el `Date Filter`, utilizado por **Q3**, **Q4** y **Q5**. En el caso particular de **Q5**, ya no se separan las transacciones en ramas según moneda: todas pasan por el `Currency Mapper`, que se encarga de convertir los montos a USD antes de continuar con el procesamiento. Finalmente, los resultados de cada consulta son enviados al `Gateway` correspondiente.
+Los datos van pasando por distintos nodos de procesamiento, filtrado, agregación, mapeo, entre otros; cuyos colores en el diagrama indican el tipo de operación que realizan. Cabe destacar que algunos nodos son compartidos entre múltiples queries, como el `Date Filter`, utilizado por **Q3**, **Q4** y **Q5**. Finalmente, los resultados de cada consulta son ruteados al cliente correspondiente.
 
 ![DAG](diagramas/dag.png)
 
@@ -120,7 +120,7 @@ A continuación se presentan los diagramas de actividad correspondientes a cada 
 
 ### Diagrama de Secuencia
 
-El siguiente diagrama de secuencia expone la interacción general entre el cliente y los componentes de entrada y procesamiento del sistema distribuido. Se detalla el flujo de conexión inicial, donde el cliente envía una solicitud al **Proxy**, que se encarga de determinar el `Gateway` correspondiente y redirigir al cliente hacia él.
+El siguiente diagrama de secuencia expone la interacción general entre el cliente y los componentes de entrada y procesamiento del sistema distribuido. Se detalla el flujo de conexión inicial, donde el cliente envía una solicitud al `Proxy`, que se encarga de determinar el `Gateway` correspondiente y redirigir al cliente hacia él.
 
 Una vez establecida la conexión con el `Gateway`, el cliente se anuncia enviando su `client_id`. Luego, procede a enviar los datos en *batches*: primero las transacciones, confirmadas con un `ack` y delegadas internamente hacia los `WorkersByQuery`, hasta señalizar el fin de su transmisión. Luego, de forma análoga, se envían los batches de cuentas, también delegados a los workers, finalizando con su señal de fin de transmisión correspondiente.
 
@@ -134,9 +134,9 @@ Una vez recibidas ambas señales, el sistema completa la etapa de procesamiento 
 
 El diagrama de paquetes muestra la organización modular de los componentes del sistema. 
 
-El paquete **worker** representa de manera unificada a todos los nodos de procesamiento del pipeline (filtros, sharders, mappers, aggregators y reducers). Aunque cada uno tiene su lógica propia, comparten una misma estructura base (entrada desde el broker, procesamiento, salida al broker) por lo que se modelan como un único paquete para mantener el diagrama legible.
+En particular, el paquete **worker** representa de manera unificada a todos los nodos de procesamiento del pipeline (filtros, sharders, mappers, aggregators y reducers). Aunque cada uno tiene su lógica propia, todos comparten una misma estructura base (entrada desde el broker, procesamiento, salida al broker), por lo que se modelan como un único paquete para mantener el diagrama legible.
 
-Esa estructura compartida vive en el paquete **base worker**, que agrupa las abstracciones comunes (manejo de EOFs, coordinación en anillo, ciclo de vida, etc.) sobre las que se construye cada worker concreto.
+Esa estructura compartida vive en el paquete **common**, que agrupa las abstracciones reutilizables: la comunicación, los modelos de datos, la idempotencia, la persistencia, las abstracciones para el monitoreo de la salud del sistema y las clases base de los workers.
 
 ![Diagrama de paquetes](diagramas/diagrama_paquetes.png)
 
@@ -144,82 +144,58 @@ Esa estructura compartida vive en el paquete **base worker**, que agrupa las abs
 
 #### Diagrama de Robustez
 
-El diagrama que se encuentra a continuación muestra los componentes principales del sistema y sus interacciones. El **Cliente** se conecta primero al **Proxy**, que se encarga de indicarle a qué **Gateway** debe conectarse, ya que existen múltiples instancias disponibles. El **Proxy** cuenta con un único nodo que aplica *Round-Robin* para distribuir equitativamente los clientes entre los gateways.
+El diagrama que se encuentra a continuación muestra los componentes principales del sistema y sus interacciones. El `Client` se conecta primero al `Proxy`, que se encarga de indicarle a qué `Gateway` debe conectarse, ya que existen múltiples instancias disponibles. El `Proxy` cuenta con un único nodo que aplica *Round-Robin* para distribuir equitativamente los clientes entre los gateways.
 
-Una vez que el **Cliente** obtiene el **Gateway** asignado, se conecta directamente a él y envía primero las **transacciones** en batches y luego las **cuentas**, también en batches. El **Gateway** distribuye estos datos a través de un exchange hacia los workers `Transactions Field Mapper` y `Accounts Field Mapper`, encargados de normalizar los datos antes de enviarlos al resto del sistema.
+Una vez que el `Client` obtiene el `Gateway` asignado, se conecta directamente a él y envía primero las transacciones en batches y luego las cuentas, también en batches. El `Gateway` distribuye estos datos a través de un exchange hacia los workers `TransactionsFieldMapper` y `AccountsFieldMapper`, encargados de normalizar los datos antes de enviarlos al resto del sistema.
 
 Los nodos del sistema (filtros, aggregators, mappers, entre otros) se comunican entre sí a través de **exchanges y queues**, donde los exchanges permiten enrutar cada mensaje al nodo correspondiente según corresponda. Todos los nodos *stateful*, tanto los que reciben una única entrada como los de tipo *side input*, persisten su información en disco para poder reconstruir su estado y retomar el procesamiento ante una caída. Dentro de ellos, el `AnomalyFilter` y el `BankMapper` constituyen un caso particular: además de su estado, deben retener en disco las transacciones que llegan antes de contar con su segunda entrada. El `AnomalyFilter` las conserva mientras se calcula el promedio del período base necesario para la Query 3, y el `BankMapper` mientras espera la llegada de todas las cuentas para poder comenzar el mapeo de los nombres.
 
-El último worker de cada query publica los resultados en una **cola por cliente**, que es consumida por el **Gateway** asignado a ese cliente. Los resultados se emiten de forma continua, a medida que se van generando, sin esperar a tener el resultado consolidado, y el **Gateway** los reenvía al **Cliente**.
+Finalmente, el último worker de cada query publica los resultados en una **cola por cliente**, que es consumida por el `Gateway` asignado a ese cliente. Los resultados se emiten de forma continua, a medida que se van generando, sin esperar a tener el resultado consolidado, y el `Gateway` los reenvía al `Client`.
 
 ![Diagrama de robustez](diagramas/diagrama_robustez.png)
 
 #### Diagrama de Despliegue
 
-El diagrama de despliegue muestra cómo los distintos procesos del sistema se distribuyen en nodos de ejecución. Las lineas represetan la comunicación entre nodos.
+El diagrama de despliegue muestra cómo los distintos procesos del sistema se distribuyen en nodos de ejecución. Las líneas representan la comunicación entre nodos.
 
 El sistema se organiza alrededor del **Broker Node** (RabbitMQ), que actúa como hub central de mensajería: todos los nodos de procesamiento se comunican entre sí exclusivamente a través de él. Las únicas conexiones por fuera del broker son las TCP entre el **Proxy Node** y el **Client PC**, y entre este último y los **Gateway Nodes**.
 
-Los nodos de procesamiento se agrupan por rol funcional (**Filter Node**, **Sharder Node**, **Mapper Node**, **Aggregator Node**, **Reducer Node**). Cada uno de estos agrupamientos contiene múltiples implementaciones concretas con lógicas distintas (por ejemplo, el Filter Node engloba tanto el filtro por monto como el de fecha y el detector de anomalías). Se eligió agruparlos así para mantener el diagrama mas simple y legible, evitando mostrar cada nodo individualmente.
+Los nodos de procesamiento se agrupan por rol funcional (**Filter Node**, **Sharder Node**, **Mapper Node**, **Aggregator Node**, **Reducer Node**). Cada uno de estos agrupamientos contiene múltiples implementaciones concretas con lógicas distintas (por ejemplo, el Filter Node engloba tanto el filtro por monto como el de fecha y el detector de anomalías). Se eligió agruparlos así para mantener el diagrama más simple y legible, evitando mostrar cada nodo individualmente.
 
 ![Diagrama de despliegue](diagramas/diagrama_despliegue.png)
+
+Los **Watchdog Nodes** se despliegan en sus propios nodos de ejecución, independientes del resto del sistema. Entre las instancias, la comunicación se realiza mediante **TCP** para la coordinación del algoritmo Bully. Con los nodos que monitorean, se utiliza **UDP** para el intercambio de mensajes de heartbeat (ping/pong).
+
+![Diagrama de despliegue – Watchdog](diagramas/diagrama_despliegue_watchdog.png)
 
 ### Workers y manejo del end of file
 
 Ante un EOF, un worker puede clasificarse en una de tres categorías principales según su comportamiento:
 
 - `StatelessWorker` es trivial, al recibir un EOF simplemente lo reenvía al siguiente stage sin modificarlo. No necesita coordinarse con nadie porque su semántica de procesamiento es 1-a-1.
-- `RingCoordinatedWorker` es el núcleo del sistema distribuido. Cuando llega un EOF, el nodo no lo reenvía directamente sino que lanza un mensaje `RING_EOF` que circula por un anillo lógico de nodos. Cada nodo acumula su `processed_count` al total del `RING_EOF` antes de reenviarlo, el primero en descubrir que el acumulado alcanza el `expected_count` del EOF original se auto-designa coordinador. A partir de ahí, el `RING_EOF` da una vuelta más para que todos los nodos ejecuten `_flush_data()` (vaciar buffers, emitir resultados pendientes). Cuando el mensaje vuelve al coordinador, éste emite el EOF final al siguiente stage. Las subclases concretas difieren únicamente en cómo calculan el `expected_count` del EOF final:
-    - `StatefulCoordinatedWorker`: Cada nodo produce exactamente un resultado por cliente, por lo que el EOF final siempre tiene `count = ring_size`. No necesita trackear cuántos mensajes envió.
-    - `SentCoordinatedWorker`: La cantidad de mensajes que cada nodo envía al siguiente stage varía según si realiza batching o sharding, ya que ambos alteran la cantidad de mensajes en circulación. El EOF final debe reflejar el total real enviado, así que cada nodo acumula su `sent_count` adjuntándolo al `RING_EOF`.
-    ![Comportamiento del RingCoordinatedWorker](diagramas/diagrama_ring_eof.png)
+- `StatefulWorker` es el núcleo del sistema distribuido. Cuando llega un EOF, el nodo no lo reenvía directamente sino que lanza un mensaje `RING_EOF` que circula por un anillo lógico de nodos. Cada nodo acumula su `processed_count` al total del `RING_EOF` antes de reenviarlo; el primero en descubrir que el acumulado alcanza el `expected_count` del EOF original se auto-designa coordinador. A partir de ahí, el `RING_EOF` da una vuelta más para que todos los nodos ejecuten `_flush_data()` (vaciar buffers, emitir resultados pendientes). Cuando el mensaje vuelve al coordinador, éste emite el EOF final al siguiente stage. Como la cantidad de mensajes emitidos varía según el contenido (batching o sharding), cada nodo acumula su `sent_count` en el `RING_EOF` y el coordinador usa la suma total como `count` del EOF final.
 
-Como caso especial dentro de los workers coordinados en anillo existe `SideInputStatelessCoordinatedWorker`, que incorpora una segunda fuente de datos que debe estar completamente cargada antes de poder procesar el stream principal.
+    ![Comportamiento del StatefulWorker](diagramas/diagrama_ring_eof.png)
+
+Como caso especial existe `SideInputStatelessWorker`, que extiende `StatelessWorker` e incorpora una segunda fuente de datos (side input) que debe estar completamente cargada antes de poder procesar el stream principal.
 
 En el siguiente gráfico se ilustran los tipos de workers presentes en el pipeline:
 
 ![Workers según el manejo del EOF](diagramas/diagrama_workers_eof.png)
 
-El color de cada nodo indica su categoría: rojo para `StatelessWorker`, amarillo para `StatefulCoordinatedWorker`, azul para `SentCoordinatedWorker` y verde para `SideInputStatelessCoordinatedWorker`.
+El color de cada nodo indica su categoría: rojo para `StatelessWorker`, azul para `StatefulWorker` y verde para `SideInputStatelessWorker`.
 
 ### Workers y el manejo de múltiples entradas
 
-Dentro de las queries 2 y 3, tenemos dos workers que van a recibir información de dos workers al mismo tiempo. De parte de la query 2, el BankMapper va a recibir información para mapear el nombre del banco a partir del id y también va a recibir los máximos por cuenta de cada banco. Por parte de la query 3, el AnomalyFilter va a recibir por un lado el promedio de transacciones de cada medio de pago y también las transacciones a filtrar.
+Dentro de las queries 2 y 3, tenemos dos workers que van a recibir información de dos fuentes al mismo tiempo. De parte de la query 2, el `BankMapper` va a recibir información para mapear el nombre del banco a partir del ID y también los máximos por cuenta de cada banco. Por parte de la query 3, el `AnomalyFilter` va a recibir por un lado el promedio de transacciones de cada medio de pago y también las transacciones a filtrar.
 
-Ambos workers están implementados sobre `SideInputStatelessCoordinatedWorker` (los nodos verdes del diagrama anterior), la variante de `RingCoordinatedWorker` mencionada arriba que suma el manejo de una segunda entrada al protocolo de anillo.
+Ambos workers están implementados sobre `SideInputStatelessWorker` (los nodos verdes del diagrama anterior), la variante de `StatelessWorker` mencionada arriba que agrega el manejo de una segunda entrada.
 
-Las soluciones provistas para manejar la conexión sirven para una entrada, no para dos, por lo que se le agregó un comportamiento extra a los workers previamente mencionados. Se implementó el `SideInputTracker`, el cual va a hacer un seguimiento de la segunda entrada, en nuestros casos, los promedios y la información de los bancos. Esta información se va a recibir mediante otros exchanges y cada réplica va a recibir su propio EOF, a diferencia del ring, donde uno lo recibe y se comunican entre sí.
+Se implementó el `SideInputTracker`, el cual hace un seguimiento del side input: en nuestros casos, los promedios por formato de pago y la información de los bancos. Esta información se recibe por exchanges dedicados y cada réplica recibe su propio EOF de side input de forma independiente.
 
-Es importante aclarar que el worker necesita de esta segunda entrada para poder procesar lo que recibe, por lo que si recibe entradas para procesar y no está la información completa, se guardarán en disco para ser procesadas posteriormente. Si la información ya está, se procesarán normalmente.
+Es importante aclarar que el worker necesita de esta segunda entrada para poder procesar el stream principal, por lo que si recibe mensajes antes de que el side input esté completo, se guardan en disco para ser procesados posteriormente. Si el side input ya está listo, se procesan normalmente.
 
-El spill (`BatchSpill`) almacena los batches por cliente, batch por batch, de modo de no perder el conteo que el ring necesita. Al hacer `_flush_data` se drena el archivo y se emiten los resultados pendientes por el exchange.
-
-Como el worker necesita la segunda entrada para procesar, el comienzo de la coordinación del ring también se posterga: tanto el `EOF` del flujo principal como cualquier `RING_EOF` que llegue antes del cierre del side input quedan diferidos hasta que `SideInputTracker` marca el flujo como `ready`.
-
-### Batches y Batch Size
-
-A lo largo de todo el pipeline, la información se transporta mediante batches. Estos pueden variar en tamaño a lo largo del mismo, en especial al encontrarse con workers que agregan información, ya que no pueden despacharla de una vez. Es por esto que se analiza el tamaño de cada batch en función de la información que contiene, respetando el tamaño máximo de frame de RabbitMQ, **128 kB**.
-
-Para el cálculo se consideraron únicamente los mensajes del protocolo interno, ya que al viajar serializados en JSON tienen mayor overhead que otros formatos. Los máximos de chars por campo fueron obtenidos con `df[col].astype(str).str.len().max()`, representando el peor caso real del dataset.
-
-La metadata fija de cada mensaje ocupa **129 B**, dejando **130943 B** disponibles para el payload:
-
-```
-{"type":<int>,"client_id":"<uuid4>","gateway_id":"<uuid4>","payload":[...]}
-```
-
-La cantidad de items por batch se calcula como $\left\lfloor \frac{\texttt{bytes disponibles}}{\texttt{bytes por item}} \right\rfloor$, ajustando por los corchetes del array y la coma del último item.
-
-| Dataclass | B/item | Items en 128 kB |
-|---|---|---|
-| `RawTransaction` | 138 | **948** |
-| `Transaction` | 221 | **592** |
-| `RawAccount` | 106 | **1234** |
-| `BankMaxPartial` | 87 | **1505** |
-| `PaymentFormatPartial` | 103 | **1271** |
-| `AccountEdge` | 162 | **808** |
-| `Path` | 195 | **671** |
-| `Q4Result` | 62 | **2112** |
+El spill (`BatchSpill`) almacena los batches por cliente de forma ordenada. Cuando `SideInputTracker` marca el flujo como `ready` se dispara `_on_side_input_ready`, que drena el spill y emite los resultados pendientes por el exchange.
 
 ## Tolerancia a Fallos
 
@@ -285,7 +261,7 @@ El esquema varía según el tipo de nodo que emite:
 
 - **EOF / QUERY_END** (`client_id:eof` o `client_id:eof:query_id`): se emiten al finalizar un flujo. No lleva el `node_id` del coordinador: si tras un crash coordina un nodo distinto, el downstream debe reconocer el EOF como el mismo mensaje y descartarlo, lo que sería imposible si el ID dependiera de quién coordinó.
 
-- **EOF Cleanup** (`client_id:eof:cleanup`): se emite cuando el Reaper detecta que un cliente se desconectó y venció el timeout. Se agrega `cleanup` para distenguirlo del EOF corriente, y no se produzcan deduplicaciones incorrectas. 
+- **EOF Cleanup** (`client_id:eof:cleanup`): se emite cuando el Reaper detecta que un cliente se desconectó y venció el timeout. Se agrega `cleanup` para distinguirlo del EOF corriente, y no se produzcan deduplicaciones incorrectas. 
 
 #### Deduplicación en el cliente
 
