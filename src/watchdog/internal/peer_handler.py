@@ -1,7 +1,6 @@
 import logging
 import queue
 import threading
-import time
 
 from common.communication.protocol import election
 from common.communication.socket import IncompleteReadError, SafeTCPSocket
@@ -22,6 +21,7 @@ class PeerHandler:
         self._send_queue = queue.Queue()
         self._socket = None
         self._closed = False
+        self._stop_event = threading.Event()
 
     def _sender_loop(self, sock):
         while True:
@@ -70,7 +70,7 @@ class PeerHandler:
                 logging.warning("Could not connect to peer %d: %s", self._peer_id, e)
             if not self._closed:
                 logging.info("Reconnecting to peer %d in %.1fs", self._peer_id, delay)
-                time.sleep(delay)
+                self._stop_event.wait(delay)
                 delay = min(delay * self._BACKOFF_FACTOR, self._MAX_RECONNECT_DELAY)
 
     def send(self, data):
@@ -94,5 +94,6 @@ class PeerHandler:
 
     def close(self):
         self._closed = True
+        self._stop_event.set()
         if self._socket is not None:
             self._socket.close()

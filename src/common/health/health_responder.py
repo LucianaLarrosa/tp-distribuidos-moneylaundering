@@ -2,12 +2,10 @@ import logging
 import threading
 
 from common.communication.protocol import health
-from common.communication.socket import SafeUDPSocket, SocketTimeoutError
+from common.communication.socket import SafeUDPSocket
 
 
 class HealthResponder:
-    _STOP_POLL_SECONDS = 1.0
-
     def __init__(self, node_name, ping_port, host):
         self._pong_payload = health.serialize_pong(node_name)
         self._socket = SafeUDPSocket()
@@ -21,11 +19,7 @@ class HealthResponder:
         """
         while not self._stop_event.is_set():
             try:
-                data, source_address = self._socket.recv(
-                    timeout=self._STOP_POLL_SECONDS
-                )
-            except SocketTimeoutError:
-                continue
+                data, source_address = self._socket.recv()
             except OSError:
                 break
             try:

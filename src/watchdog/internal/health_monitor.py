@@ -26,7 +26,8 @@ class HealthMonitor:
         self._check_interval = check_interval
         self._max_retries = max_retries
         self._miss_count = {}
-        self._stopped = True
+        self._stop_event = threading.Event()
+        self._stop_event.set()
         self._thread = None
 
     def _send_pings(self):
@@ -51,6 +52,8 @@ class HealthMonitor:
             except SocketTimeoutError:
                 break
             except OSError:
+                if self._stop_event.is_set():
+                    break
                 continue
             try:
                 node_name = health.deserialize_pong(data)
@@ -88,22 +91,22 @@ class HealthMonitor:
                     self._miss_count[node] = 0
 
     def _run(self):
-        while not self._stopped:
+        while not self._stop_event.is_set():
             self._send_pings()
             responded = self._collect_pongs()
             self._process_results(responded)
-            time.sleep(self._check_interval)
+            self._stop_event.wait(self._check_interval)
 
     def start(self):
         if self._thread and self._thread.is_alive():
             return
-        self._stopped = False
+        self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
     def stop(self):
-        self._stopped = True
+        self._stop_event.set()
 
     def close(self):
-        self._stopped = True
+        self._stop_event.set()
         self._udp_socket.close()
