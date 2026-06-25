@@ -293,13 +293,17 @@ Para verificar el correcto funcionamiento de la solución, se implementó un *Ch
 
 Mediante este mecanismo de inyección de fallas se midió el tiempo total de procesamiento de extremo a extremo, desde el inicio de la transmisión del cliente hasta la recepción de los resultados de las cinco queries, para cada tamaño de dataset, tanto con como sin la inyección de fallos por parte del *Chaos Monkey*.
 
-| Dataset | Sin *Chaos Monkey* | Con *Chaos Monkey* |
-|---|---|---|
-| Small | 35 s | 35 s |
-| Medium | 215 s | 216 s |
-| Large | 1035 s | 1059 s |
+Los tiempos se expresan en formato `min:seg`.
+
+| Dataset | Sin *Chaos Monkey* | Con *Chaos Monkey* | Con *Chaos Monkey* (matando gateway) |
+|---|---|---|---|
+| Small | 0:35 | 0:35 | 1:04 |
+| Medium | 3:35 | 3:36 | 4:03 |
+| Large | 17:15 | 17:39 | 17:52 |
 
 Para la medición con *Chaos Monkey, se expuso al sistema a la caída continua de workers: cada **30 segundos** se mataban **3 nodos aleatorios**, excluyendo del conjunto de víctimas a los clientes, los gateways y garantizando que al menos un `Watchdog` permaneciera activo. Los gateways se incluyeron entre los nodos protegidos para que la prueba fuera justa, ya que su caída introduce una demora significativamente mayor que la de los demás workers. Finalmente, se verificó la correctitud de los resultados obtenidos.
+
+La última columna corresponde a un escenario adicional en el que el gateway también se expuso a la caída (quitándolo del conjunto de nodos protegidos). Como se anticipaba, su recuperación encarece el tiempo total: el impacto es proporcionalmente mayor en datasets chicos (Small pasa de 0:35 a 1:04) y se diluye a medida que crece el volumen de datos (Large solo sube de 17:39 a 17:52), donde el costo de la caída del gateway queda amortizado por el tiempo de procesamiento dominante.
 
 ## División de tareas
 
