@@ -13,7 +13,8 @@ class HealthResponder:
         self._socket = SafeUDPSocket()
         self._socket.bind(host, ping_port)
         self._stop_event = threading.Event()
-        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._stop_event.set()
+        self._thread = None
 
     def _run(self):
         """
@@ -37,10 +38,18 @@ class HealthResponder:
                 logging.warning("Failed to send pong: %s", e)
 
     def start(self):
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
     def stop(self):
         self._stop_event.set()
-        self._socket.close()
-        if self._thread.is_alive():
+        if self._thread and self._thread.is_alive():
             self._thread.join()
+        self._thread = None
+
+    def close(self):
+        self.stop()
+        self._socket.close()

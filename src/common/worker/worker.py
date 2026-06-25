@@ -113,7 +113,7 @@ class Worker(StateLog, ABC):
             return
         self._closed = True
         logging.info("Shutting down worker...")
-        self._health_responder.stop()
+        self._health_responder.close()
         self._input_middleware.stop_consuming()
         self._input_middleware.close()
         self._output_middleware.close()

@@ -122,7 +122,7 @@ class Gateway:
             return
         self._closed = True
         logging.info("Shutdown requested")
-        self._health_responder.stop()
+        self._health_responder.close()
         if self._reaper is not None:
             self._reaper.stop()
         self._server_sock.close()

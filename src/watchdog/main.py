@@ -113,8 +113,10 @@ class Watchdog:
         if new_role == Watchdog.Role.LEADER:
             self._broadcast_coordinator()
             self._health_monitor.start()
+            self._health_responder.stop()
         else:
             self._health_monitor.stop()
+            self._health_responder.start()
 
     def _enter_phase(self, phase):
         self._phase = phase
@@ -209,7 +211,7 @@ class Watchdog:
         self._closed = True
         logging.info("Shutting down watchdog %d...", self._config.watchdog_id)
         self._events.put(None)
-        self._health_responder.stop()
+        self._health_responder.close()
         self._health_monitor.close()
         self._server_socket.close()
         for handler in self._peer_handlers.values():
