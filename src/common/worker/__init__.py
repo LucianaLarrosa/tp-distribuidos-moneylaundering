@@ -7,4 +7,3 @@ from common.worker.stateful_worker import StatefulWorker
 from common.worker.side_input_stateless_worker import (
     SideInputStatelessWorker,
 )
-from common.worker.utils.safe_output_capable import SafeOutputCapable

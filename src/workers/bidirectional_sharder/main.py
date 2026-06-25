@@ -8,11 +8,10 @@ from common.models.account_edge import AccountEdge
 from common.communication.protocol import internal
 from common.worker.utils.sharding import shard_of
 from common.worker.stateful_worker import StatefulWorker
-from common.worker.utils.safe_output_capable import SafeOutputCapable
 from config import Config
 
 
-class BidirectionalSharder(SafeOutputCapable, StatefulWorker):
+class BidirectionalSharder(StatefulWorker):
     NUM_FIELDS_FOR_SHARDING = 2
 
     def __init__(self, config):
@@ -42,11 +41,6 @@ class BidirectionalSharder(SafeOutputCapable, StatefulWorker):
     @property
     def _output_middleware(self):
         return self._output_exchange
-
-
-
-
-
 
     @property
     def _control_output_middleware(self):
@@ -124,6 +118,9 @@ class BidirectionalSharder(SafeOutputCapable, StatefulWorker):
                 self._sent_count.get(client_id, 0) + delta["sent"]
             )
 
+    def shutdown(self):
+        super().shutdown()
+        self._control_output_middleware.close()
 
 def main():
     logging.basicConfig(
