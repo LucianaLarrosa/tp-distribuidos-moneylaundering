@@ -82,8 +82,6 @@ CHAOS_CLIENTS_FILE        ?= .chaos_clients
 VOLUME_TAIL  ?= 20
 VOLUME_WIDTH ?= 200
 
-STOP_TIMEOUT ?= 60
-
 .PHONY: all chaos-all chaos-cli-all compose proto build up down logs remove-output remove-all clean clean-all chaos-kill chaos-kill-all chaos-inject-client chaos-monkey-round chaos-monkey chaos-monkey-cli volume-view volume-cli wait-clients wait-dyn-clients build-expected check-client verify-output output-test chaos-output-test chaos-cli-output-test
 
 all: compose build output-test
@@ -114,7 +112,11 @@ up: remove-output
 	DATASET_DIR=$(DATASET_DIR) OUTPUT_DIR=$(OUTPUT_DIR) TRANSACTIONS_FILE=$(TRANSACTIONS_FILE) ACCOUNTS_FILE=$(ACCOUNTS_FILE) docker compose -f $(COMPOSE_FILE) up -d
 
 down:
-	docker compose -f $(COMPOSE_FILE) down -v -t $(STOP_TIMEOUT)
+	@watchdogs=$$(docker compose -f $(COMPOSE_FILE) config --services | grep -E '^watchdog_[0-9]+$$' || true); \
+	if [ -n "$$watchdogs" ]; then \
+		docker compose -f $(COMPOSE_FILE) stop $$watchdogs; \
+	fi
+	docker compose -f $(COMPOSE_FILE) down -v
 	@dyn=$$(docker ps -a --format '{{.Names}}' | grep '^client_dyn_' || true); \
 	if [ -n "$$dyn" ]; then \
 		echo "$$dyn" | xargs docker rm -f >/dev/null; \
