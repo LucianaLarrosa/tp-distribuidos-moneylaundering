@@ -77,3 +77,5 @@ El sistema se configura mediante variables de Makefile. Los valores por defecto 
 | `make chaos-cli-output-test` | Levanta el sistema, permite controlar el chaos manualmente con Chaos Monkey CLI, espera a que todos los clientes terminen y verifica la correctitud |
 | `make chaos-all` | Ejecuta el flujo completo con Chaos Monkey |
 | `make chaos-cli-all` | Ejecuta el flujo completo con Chaos Monkey CLI |
+| `make volume-view NODE=<nombre>` | Muestra el volumen persistido de un worker específico |
+| `make volume-cli` | Explorador interactivo de volúmenes de workers |

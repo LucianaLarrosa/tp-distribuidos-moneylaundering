@@ -79,6 +79,9 @@ CHAOS_INJECT_DATASET_SIZE ?= Small
 CHAOS_REF_CLIENT          ?= client_1
 CHAOS_CLIENTS_FILE        ?= .chaos_clients
 
+VOLUME_TAIL  ?= 20
+VOLUME_WIDTH ?= 200
+
 .PHONY: all chaos-all chaos-cli-all compose proto build up down logs remove-output remove-all clean clean-all chaos-kill chaos-kill-all chaos-inject-client chaos-monkey-round chaos-monkey chaos-monkey-cli volume-view volume-cli wait-clients wait-dyn-clients build-expected check-client verify-output output-test chaos-output-test chaos-cli-output-test
 
 all: compose build output-test
@@ -258,9 +261,6 @@ chaos-monkey-cli:
 		esac; \
 	done; \
 	printf "$(LIME)CLI done. Dynamic clients injected: %s$(RESET)\n" "$$injected"
-
-VOLUME_TAIL  ?= 20
-VOLUME_WIDTH ?= 200
 
 volume-view:
 	@if [ -z "$(NODE)" ]; then \
