@@ -6,9 +6,9 @@ from common.communication.middleware.middleware_rabbitmq import (
 from common.idempotency.ids import eof_id, final_eof_id
 from common.models.account_edge import AccountEdge
 from common.communication.protocol import internal
-from common.worker.sharding import shard_of
+from common.worker.utils.sharding import shard_of
 from common.worker.stateful_worker import StatefulWorker
-from common.worker.safe_output_capable import SafeOutputCapable
+from common.worker.utils.safe_output_capable import SafeOutputCapable
 from config import Config
 
 
@@ -43,25 +43,10 @@ class BidirectionalSharder(SafeOutputCapable, StatefulWorker):
     def _output_middleware(self):
         return self._output_exchange
 
-    @property
-    def _rabbitmq_host(self):
-        return self.config.rabbitmq_host
 
-    @property
-    def _control_exchange_name(self):
-        return self.config.control_exchange
 
-    @property
-    def _node_prefix(self):
-        return self.config.node_prefix
 
-    @property
-    def _node_id(self):
-        return self.config.node_id
 
-    @property
-    def _ring_size(self):
-        return self.config.ring_size
 
     @property
     def _control_output_middleware(self):

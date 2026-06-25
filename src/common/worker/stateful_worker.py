@@ -16,7 +16,7 @@ from common.idempotency.ids import (
     RING_PHASE_CLEANUP,
 )
 from common.models.eof import EOF, RingEOF, CLEANUP_EXPECTED_COUNT
-from common.worker.sharding import hash_of
+from common.worker.utils.sharding import hash_of
 from common.worker.worker import Worker, MAIN_CHANNEL
 
 CONTROL_CHANNEL = "control"
@@ -40,46 +40,21 @@ class StatefulWorker(Worker):
         self._control_thread = None
 
         self._input_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
-            host=self._rabbitmq_host,
-            exchange_name=self._control_exchange_name,
-            routing_keys=[self._get_ring_routing_key(self._node_id)],
-            queue_name=f"{self._control_exchange_name}.{self._node_id}",
+            host=config.rabbitmq_host,
+            exchange_name=config.control_exchange,
+            routing_keys=[self._get_ring_routing_key(config.node_id)],
+            queue_name=f"{config.control_exchange}.{config.node_id}",
         )
         self._output_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
-            host=self._rabbitmq_host,
-            exchange_name=self._control_exchange_name,
+            host=config.rabbitmq_host,
+            exchange_name=config.control_exchange,
             routing_keys=[],
         )
         self._control_output_control_exchange = MessageMiddlewareExchangeDirectRabbitMQ(
-            host=self._rabbitmq_host,
-            exchange_name=self._control_exchange_name,
+            host=config.rabbitmq_host,
+            exchange_name=config.control_exchange,
             routing_keys=[],
         )
-
-    @property
-    @abstractmethod
-    def _rabbitmq_host(self):
-        pass
-
-    @property
-    @abstractmethod
-    def _control_exchange_name(self):
-        pass
-
-    @property
-    @abstractmethod
-    def _node_prefix(self):
-        pass
-
-    @property
-    @abstractmethod
-    def _node_id(self):
-        pass
-
-    @property
-    @abstractmethod
-    def _ring_size(self):
-        pass
 
     @abstractmethod
     def _flush_data(self, client_id):
@@ -98,7 +73,7 @@ class StatefulWorker(Worker):
         return self._control_output_control_exchange
 
     def _get_ring_routing_key(self, node_id):
-        return f"{self._node_prefix}{node_id}"
+        return f"{self.config.node_prefix}{node_id}"
 
     def _get_total_count(self, key, count_dict, partial_dict, lock, current_total):
         with lock:
@@ -147,7 +122,7 @@ class StatefulWorker(Worker):
             ring_eof.total_processed_count,
         )
         coordinator_id = (
-            self._node_id if total_processed_count >= ring_eof.expected_count else None
+            self.config.node_id if total_processed_count >= ring_eof.expected_count else None
         )
         return RingEOF(
             expected_count=ring_eof.expected_count,
@@ -172,7 +147,7 @@ class StatefulWorker(Worker):
 
         if ring_eof.coordinator_id is None:
             ring_eof = self._update_ring_eof(client_id, ring_eof)
-            if ring_eof.coordinator_id == self._node_id:
+            if ring_eof.coordinator_id == self.config.node_id:
                 out_seq = ring_seq_of(in_message_id) + 1 if cleanup else 0
                 out_message_id = ring_id(client_id, action_phase, out_seq)
             else:
@@ -189,7 +164,7 @@ class StatefulWorker(Worker):
                 ring_eof.total_sent_count = self._get_total_sent_count(
                     client_id, ring_eof.total_sent_count or 0
                 )
-            if ring_eof.coordinator_id == self._node_id:
+            if ring_eof.coordinator_id == self.config.node_id:
                 final_eof = (
                     EOF(CLEANUP_EXPECTED_COUNT)
                     if cleanup
@@ -277,7 +252,7 @@ class StatefulWorker(Worker):
         self._partial_sent_count[key] = record["partial_sent"]
 
     def _get_next_node_id(self):
-        return (self._node_id + 1) % self._ring_size
+        return (self.config.node_id + 1) % self.config.ring_size
 
     def _handle_eof_message(self, client_id, eof, output_exchange=None):
         """
@@ -352,7 +327,7 @@ class StatefulWorker(Worker):
                     client_id,
                     batch,
                     routing_key=routing_key_for(shard),
-                    message_id=flush_id(self._node_id, client_id, bucket),
+                    message_id=flush_id(self.config.node_id, client_id, bucket),
                 )
                 self._increment_sent_count(client_id)
 

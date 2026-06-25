@@ -6,7 +6,6 @@ from common.worker.worker_config import WorkerConfig
 class Config(WorkerConfig):
     def __init__(self):
         super().__init__()
-        self.rabbitmq_host = os.environ.get("RABBITMQ_HOST", "rabbitmq")
         self.raw_data_exchange = os.environ.get("RAW_DATA_EXCHANGE", "raw_data")
         self.input_routing_key = os.environ.get("INPUT_ROUTING_KEY", "account")
         self.input_queue_name = os.environ.get("INPUT_QUEUE_NAME")

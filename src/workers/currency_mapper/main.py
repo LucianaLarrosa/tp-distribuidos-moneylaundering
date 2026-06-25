@@ -10,7 +10,7 @@ from common.communication.middleware.middleware_rabbitmq import (
 from common.idempotency.ids import eof_id, final_eof_id
 from common.models.transaction_amount import TransactionAmount
 from common.communication.protocol import internal
-from common.worker.sharding import shard_of
+from common.worker.utils.sharding import shard_of
 from common.worker.stateless_worker import StatelessWorker
 from config import Config
 

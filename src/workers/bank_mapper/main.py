@@ -10,8 +10,8 @@ from common.idempotency.ids import final_eof_id
 from common.models.bank_max_partial import BankMaxPartial
 from common.models.query_results import Q2Result
 from common.communication.protocol import internal
-from common.worker.side_input.spill import BatchSpill
-from common.worker.side_input.side_input_stateless_worker import (
+from common.worker.utils.spill import BatchSpill
+from common.worker.side_input_stateless_worker import (
     SideInputStatelessWorker,
 )
 from config import Config

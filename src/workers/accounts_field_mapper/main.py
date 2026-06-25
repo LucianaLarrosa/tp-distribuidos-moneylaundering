@@ -6,7 +6,7 @@ from common.communication.protocol import internal
 from common.communication.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
 )
-from common.worker.sharding import shard_of
+from common.worker.utils.sharding import shard_of
 from common.worker.stateless_worker import StatelessWorker
 from config import Config
 

@@ -6,7 +6,6 @@ from common.worker.worker_config import WorkerConfig
 class Config(WorkerConfig):
     def __init__(self):
         super().__init__()
-        self.rabbitmq_host = os.environ["RABBITMQ_HOST"]
         self.input_queue = os.environ["INPUT_QUEUE"]
         self.output_exchange = os.environ["OUTPUT_EXCHANGE"]
         self.output_node_count = int(os.environ["OUTPUT_NODE_COUNT"])

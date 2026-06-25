@@ -35,25 +35,10 @@ class PaymentFormatAggregator(StatefulWorker):
     def _output_middleware(self):
         return self._output_exchange
 
-    @property
-    def _rabbitmq_host(self):
-        return self.config.rabbitmq_host
 
-    @property
-    def _control_exchange_name(self):
-        return self.config.control_exchange
 
-    @property
-    def _node_prefix(self):
-        return self.config.node_prefix
 
-    @property
-    def _node_id(self):
-        return self.config.node_id
 
-    @property
-    def _ring_size(self):
-        return self.config.ring_size
 
     def _shard_routing_key(self, shard_id):
         return str(shard_id)

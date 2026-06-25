@@ -8,7 +8,7 @@ from common.communication.middleware.middleware_rabbitmq import (
     MessageMiddlewareExchangeDirectRabbitMQ,
     MessageMiddlewareExchangeTopicRabbitMQ,
 )
-from common.worker.sharding import shard_of
+from common.worker.utils.sharding import shard_of
 from common.worker.stateless_worker import StatelessWorker
 from config import Config
 
