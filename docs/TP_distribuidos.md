@@ -285,17 +285,21 @@ Finalmente, en cuanto a la caída del *Gateway* y el cliente, se distinguen tres
 * **Caída del cliente:** ante este escenario, el *Gateway* detecta la desconexión y procede a iniciar la limpieza de los datos a lo largo del *pipeline*.
 * **Caída simultánea del cliente y el Gateway:** en este caso puede no realizarse la limpieza correspondiente de manera inmediata. Para mitigar esta situación, se implementa en el *Gateway* un *reaper*, encargado de detectar timeouts de interacción con el cliente y ejecutar la limpieza pendiente de forma diferida.
 
+### Testing – Chaos Monkey
+
+Para verificar el correcto funcionamiento de la solución, se implementó un *Chaos Monkey* encargado de provocar fallas de manera controlada. Este mecanismo elimina aleatoriamente una cierta cantidad de nodos (aquellos coloreados en verde) a intervalos regulares. Adicionalmente, permite forzar la caída de todos los nodos o de un nodo específico, lo cual resulta útil para validar escenarios particulares. Asimismo, permite la incorporación dinámica de clientes, posibilitando evaluar el comportamiento del sistema ante variaciones en la carga y en la cantidad de clientes activos.
+
 ## Mediciones de tiempos
 
-Se midió el tiempo total de procesamiento de extremo a extremo (desde el inicio de la transmisión del cliente hasta la recepción de los resultados de las cinco queries) para cada tamaño de dataset, con y sin la inyección de fallos del Chaos Monkey.
+Mediante este mecanismo de inyección de fallas se midió el tiempo total de procesamiento de extremo a extremo, desde el inicio de la transmisión del cliente hasta la recepción de los resultados de las cinco queries, para cada tamaño de dataset, tanto con como sin la inyección de fallos por parte del *Chaos Monkey*.
 
-| Dataset | Sin chaos | Con chaos |
+| Dataset | Sin *Chaos Monkey* | Con *Chaos Monkey* |
 |---|---|---|
 | Small | 35 s | 35 s |
 | Medium | 215 s | 216 s |
 | Large | 1035 s | 1059 s |
 
-En la medición con chaos, se expuso al sistema a la caída continua de workers: cada 30 segundos se mataban 3 nodos aleatorios, excluyendo del conjunto de víctimas a al menos un watchdog, a los clientes y a los gateways. Los gateways se incluyeron entre los protegidos para que la prueba fuera justa, ya que la caída de un gateway genera una demora notablemente mayor que la del resto de los workers.
+Para la medición con *Chaos Monkey, se expuso al sistema a la caída continua de workers: cada **30 segundos** se mataban **3 nodos aleatorios**, excluyendo del conjunto de víctimas a los clientes, los gateways y garantizando que al menos un `Watchdog` permaneciera activo. Los gateways se incluyeron entre los nodos protegidos para que la prueba fuera justa, ya que su caída introduce una demora significativamente mayor que la de los demás workers. Finalmente, se verificó la correctitud de los resultados obtenidos.
 
 ## División de tareas
 
