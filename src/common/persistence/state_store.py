@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 
 
@@ -14,7 +15,23 @@ class StateStore:
         if not os.path.exists(self._path):
             return
         with open(self._path, "rb") as f:
-            for raw in f:
+            data = f.read()
+        if not data:
+            return
+        if not data.endswith(b"\n"):
+            keep = data.rfind(b"\n") + 1
+            logging.warning(
+                "[state] discarding torn trailing record (%d bytes) in %s",
+                len(data) - keep,
+                self._path,
+            )
+            with open(self._path, "r+b") as f:
+                f.truncate(keep)
+                f.flush()
+                os.fsync(f.fileno())
+            data = data[:keep]
+        for raw in data.splitlines():
+            if raw:
                 yield json.loads(raw.decode("utf-8"))
 
     def append(self, record):
