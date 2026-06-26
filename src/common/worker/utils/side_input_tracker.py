@@ -36,6 +36,14 @@ class SideInputTracker:
             self._expected.pop(key, None)
             self._ready.pop(key, None)
 
+    def restore(self, key, received, expected):
+        with self._lock:
+            self._received[key] = received
+            self._ready.pop(key, None)
+            if expected is not None:
+                self._expected[key] = expected
+            self._check_ready(key)
+
     def _check_ready(self, key):
         event = self._ready.get(key)
         if event is None:

@@ -93,6 +93,11 @@ class BankMapper(SideInputStatelessWorker):
     def _side_delta(self, payload):
         return [[str(int(bank.bank_id)), bank.name] for bank in payload]
 
+    def _side_state_as_delta(self, client_id):
+        key = self._flow_key(client_id)
+        with self._bank_names_lock:
+            return [[bank_id, name] for bank_id, name in self._bank_names.get(key, {}).items()]
+
     def _apply_side_delta(self, client_id, delta):
         key = self._flow_key(client_id)
         with self._bank_names_lock:
