@@ -122,7 +122,9 @@ class StatefulWorker(Worker):
             ring_eof.total_processed_count,
         )
         coordinator_id = (
-            self.config.node_id if total_processed_count >= ring_eof.expected_count else None
+            self.config.node_id
+            if total_processed_count >= ring_eof.expected_count
+            else None
         )
         return RingEOF(
             expected_count=ring_eof.expected_count,
@@ -193,9 +195,7 @@ class StatefulWorker(Worker):
                 if message_id in seen:
                     ack()
                     return
-                self._handle_control_eof_message(
-                    client_id, ring_eof, message_id
-                )
+                self._handle_control_eof_message(client_id, ring_eof, message_id)
                 seen.add(message_id)
                 self._state_store.append(
                     {
@@ -212,7 +212,9 @@ class StatefulWorker(Worker):
             raise
 
     def _control_state_snapshot(self, client_id):
-        snapshot = {"partial_processed": self._partial_processed_count.get(client_id, 0)}
+        snapshot = {
+            "partial_processed": self._partial_processed_count.get(client_id, 0)
+        }
         snapshot["sent_count"] = self._sent_count.get(client_id, 0)
         snapshot["partial_sent"] = self._partial_sent_count.get(client_id, 0)
         return snapshot
@@ -233,7 +235,13 @@ class StatefulWorker(Worker):
 
     def _flow_keys(self):
         keys = super()._flow_keys()
-        return keys | set(self._partial_processed_count) | set(self._processed_counts) | set(self._sent_count) | set(self._partial_sent_count)
+        return (
+            keys
+            | set(self._partial_processed_count)
+            | set(self._processed_counts)
+            | set(self._sent_count)
+            | set(self._partial_sent_count)
+        )
 
     def _snapshot_flow(self, client_id):
         record = super()._snapshot_flow(client_id)
@@ -283,6 +291,16 @@ class StatefulWorker(Worker):
             ),
             routing_key=self._get_ring_routing_key(self._get_next_node_id()),
         )
+
+        if self._state_store is not None:
+            self._state_store.append(
+                {
+                    "ch": CONTROL_CHANNEL,
+                    "c": client_id,
+                    "ring": self._control_state_snapshot(client_id),
+                }
+            )
+            self._note_append()
 
     def _handle_data_message(self, msg_type, client_id, payload):
         self._increment_processed_count(client_id)
