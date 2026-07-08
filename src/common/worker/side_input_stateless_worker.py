@@ -38,6 +38,30 @@ class SideInputStatelessWorker(StatelessWorker):
     def _on_side_input_ready(self, client_id):
         pass
 
+    def _side_state_as_delta(self, client_id):
+        return None
+
+    def _snapshot_flow(self, client_id):
+        record = super()._snapshot_flow(client_id)
+        received, expected, _ = self._side_input.stats(client_id)
+        record["side_received"] = received
+        record["side_expected"] = expected
+        record["side_state"] = self._side_state_as_delta(client_id)
+        return record
+
+    def _restore_snapshot(self, record):
+        super()._restore_snapshot(record)
+        client_id = record["c"]
+        side_state = record.get("side_state")
+        if side_state is not None:
+            self._apply_side_delta(client_id, side_state)
+        if "side_expected" in record or "side_received" in record:
+            self._side_input.restore(
+                client_id,
+                record.get("side_received", 0),
+                record.get("side_expected"),
+            )
+
     def _cleanup_state(self, client_id):
         super()._cleanup_state(client_id)
         self._side_input.drop(client_id)

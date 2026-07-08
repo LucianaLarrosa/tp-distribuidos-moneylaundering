@@ -13,9 +13,22 @@ class StateStore:
     def load(self):
         if not os.path.exists(self._path):
             return
+        good_bytes = 0
+        torn = False
         with open(self._path, "rb") as f:
             for raw in f:
-                yield json.loads(raw.decode("utf-8"))
+                if not raw.endswith(b"\n"):
+                    torn = True
+                    break
+                good_bytes += len(raw)
+                line = raw[:-1]
+                if line:
+                    yield json.loads(line.decode("utf-8"))
+        if torn:
+            with open(self._path, "r+b") as f:
+                f.truncate(good_bytes)
+                f.flush()
+                os.fsync(f.fileno())
 
     def append(self, record):
         if self._file is None:

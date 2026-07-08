@@ -160,6 +160,11 @@ class AnomalyFilter(SideInputStatelessWorker):
             for entry in payload
         ]
 
+    def _side_state_as_delta(self, client_id):
+        key = self._flow_key(client_id)
+        with self._get_flow_lock(key):
+            return [[pf, avg] for pf, avg in self._avgs.get(key, {}).items()]
+
     def _apply_side_delta(self, client_id, delta):
         key = self._flow_key(client_id)
         with self._get_flow_lock(key):
